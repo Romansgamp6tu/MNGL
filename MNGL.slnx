@@ -3,5 +3,5 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="MNGL/MNGL.vcxproj" />
+  <Project Path="MNGL/MNGL.vcxproj" Id="0e156573-e0a8-4fce-ac45-d0fb02c394b6" />
 </Solution>

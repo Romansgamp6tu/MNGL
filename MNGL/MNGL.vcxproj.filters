@@ -13,10 +13,54 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Файлы заголовков\utility">
+      <UniqueIdentifier>{5e79bb03-4e73-403e-9e09-8e7417636ffc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Файлы заголовков\math">
+      <UniqueIdentifier>{fde3118e-93fc-46e0-a7ce-5f80b51c70af}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Файлы заголовков\surface">
+      <UniqueIdentifier>{23c0121b-3a98-4107-8dbf-56e015f2a455}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Файлы заголовков\window">
+      <UniqueIdentifier>{3da17595-a0a7-4aa9-a4b3-daec32180491}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="MNGL.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="utilities.hpp">
+      <Filter>Файлы заголовков\utility</Filter>
+    </ClInclude>
+    <ClInclude Include="logger.h">
+      <Filter>Файлы заголовков\utility</Filter>
+    </ClInclude>
+    <ClInclude Include="color.hpp">
+      <Filter>Файлы заголовков\math</Filter>
+    </ClInclude>
+    <ClInclude Include="line.hpp">
+      <Filter>Файлы заголовков\math</Filter>
+    </ClInclude>
+    <ClInclude Include="rectangle.hpp">
+      <Filter>Файлы заголовков\math</Filter>
+    </ClInclude>
+    <ClInclude Include="proxy.hpp">
+      <Filter>Файлы заголовков\utility</Filter>
+    </ClInclude>
+    <ClInclude Include="window.hpp">
+      <Filter>Файлы заголовков\window</Filter>
+    </ClInclude>
+    <ClInclude Include="window_platform_sync.hpp">
+      <Filter>Файлы заголовков\window</Filter>
+    </ClInclude>
+    <ClInclude Include="window_core.hpp">
+      <Filter>Файлы заголовков\window</Filter>
+    </ClInclude>
+    <ClInclude Include="window_manager.hpp">
+      <Filter>Файлы заголовков\window</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
