@@ -170,3 +170,6 @@ public:
 
 #define TRY(expr, msg) do{ if(!(expr)) throw sdl_error(msg); } while(0)
 #define TRY_SDL(expr) TRY(expr, "SDL error: ")
+
+#include<glm/gtc/type_ptr.hpp>
+#include<glm/gtx/string_cast.hpp>

@@ -19,11 +19,11 @@
     <Filter Include="Файлы заголовков\math">
       <UniqueIdentifier>{fde3118e-93fc-46e0-a7ce-5f80b51c70af}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Файлы заголовков\surface">
-      <UniqueIdentifier>{23c0121b-3a98-4107-8dbf-56e015f2a455}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Файлы заголовков\window">
       <UniqueIdentifier>{3da17595-a0a7-4aa9-a4b3-daec32180491}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Файлы заголовков\color">
+      <UniqueIdentifier>{58c3bbb8-e4bf-4506-b3d8-b1b41fdfd8e0}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -37,9 +37,6 @@
     </ClInclude>
     <ClInclude Include="logger.h">
       <Filter>Файлы заголовков\utility</Filter>
-    </ClInclude>
-    <ClInclude Include="color.hpp">
-      <Filter>Файлы заголовков\math</Filter>
     </ClInclude>
     <ClInclude Include="line.hpp">
       <Filter>Файлы заголовков\math</Filter>
@@ -60,6 +57,21 @@
       <Filter>Файлы заголовков\window</Filter>
     </ClInclude>
     <ClInclude Include="window_manager.hpp">
+      <Filter>Файлы заголовков\window</Filter>
+    </ClInclude>
+    <ClInclude Include="display_mode.hpp">
+      <Filter>Файлы заголовков\window</Filter>
+    </ClInclude>
+    <ClInclude Include="color.hpp">
+      <Filter>Файлы заголовков\color</Filter>
+    </ClInclude>
+    <ClInclude Include="pixel_format.hpp">
+      <Filter>Файлы заголовков\color</Filter>
+    </ClInclude>
+    <ClInclude Include="display.hpp">
+      <Filter>Файлы заголовков\window</Filter>
+    </ClInclude>
+    <ClInclude Include="display_orientation.hpp">
       <Filter>Файлы заголовков\window</Filter>
     </ClInclude>
   </ItemGroup>
