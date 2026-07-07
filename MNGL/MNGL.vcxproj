@@ -167,19 +167,19 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="color.hpp" />
-    <ClInclude Include="display.hpp" />
-    <ClInclude Include="display_mode.hpp" />
-    <ClInclude Include="display_orientation.hpp" />
+    <ClInclude Include="event.hpp" />
+    <ClInclude Include="event_structs.hpp" />
+    <ClInclude Include="input.hpp" />
+    <ClInclude Include="event_enums.hpp" />
+    <ClInclude Include="iupdate.h" />
     <ClInclude Include="line.hpp" />
     <ClInclude Include="logger.h" />
     <ClInclude Include="pixel_format.hpp" />
     <ClInclude Include="proxy.hpp" />
     <ClInclude Include="rectangle.hpp" />
+    <ClInclude Include="surface.hpp" />
     <ClInclude Include="utilities.hpp" />
     <ClInclude Include="window.hpp" />
-    <ClInclude Include="window_core.hpp" />
-    <ClInclude Include="window_manager.hpp" />
-    <ClInclude Include="window_platform_sync.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

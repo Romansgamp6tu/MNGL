@@ -165,6 +165,7 @@ public:
 
 #include "logger.h"
 #include "proxy.hpp"
+#include "iupdate.h"
 
 // макросы для чеканья ошибок SDL3
 
