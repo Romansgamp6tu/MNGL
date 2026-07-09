@@ -21,27 +21,19 @@ namespace mngl
 
 		static void tick(double dt)
 		{
-			std::vector<size_t> to_delete;
-			size_t _idx = 0;
-			for (auto* i : updatables)
+			for (size_t i = 0; i < updatables.size(); ++i)
 			{
-				i->update(dt);
-				if (!i)
+				if (updatables[i])
 				{
-					logger.warning("an updatable was removed during update loop, this may cause undefined behavior");
-					logger.debug_warning("automatically removing object ", i, " from updatables list");
-					to_delete.push_back(_idx);
-				}
-				_idx++;
-			}
-			if (!to_delete.empty())
-			{
-				size_t diff = 0;
-				for (size_t i = 0; i < to_delete.size(); i++)
-				{
-					updatables.erase(updatables.begin() + to_delete[i] - diff++);
+					updatables[i]->update(dt);
 				}
 			}
+
+			// В конце кадра в один проход вычищаем все nullptr, которые образовались
+			updatables.erase(
+				std::remove(updatables.begin(), updatables.end(), nullptr),
+				updatables.end()
+			);
 		}
 	private:
 		static inline std::vector<Iupdatable*> updatables;

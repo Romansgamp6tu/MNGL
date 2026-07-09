@@ -168,9 +168,7 @@
   <ItemGroup>
     <ClInclude Include="color.hpp" />
     <ClInclude Include="event.hpp" />
-    <ClInclude Include="event_structs.hpp" />
     <ClInclude Include="input.hpp" />
-    <ClInclude Include="event_enums.hpp" />
     <ClInclude Include="iupdate.h" />
     <ClInclude Include="line.hpp" />
     <ClInclude Include="logger.h" />

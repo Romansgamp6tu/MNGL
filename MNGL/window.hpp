@@ -3,7 +3,7 @@
 #include "pixel_format.hpp"
 #include "rectangle.hpp"
 #include "surface.hpp"
-#include "event_enums.hpp"
+#include "event.hpp"
 
 #include <unordered_map>
 #include <vector>
@@ -12,22 +12,6 @@
 #include <string>
 #include <string_view>
 #include <memory>
-
-#ifdef SDL_PLATFORM_WINDOWS
-using native_handle = HWND;
-#elifdef SDL_PLATFORM_LINUX
-using native_handle = Window;
-#elifdef SDL_PLATFORM_MACOS
-using native_handle = NSWindow*;
-#elifdef SDL_PLATFORM_IOS
-using native_handle = UIWindow*;
-#elifdef SDL_PLATFORM_ANDROID
-using native_handle = ANativeWindow*;
-#elifdef SDL_PLATFORM_EMSCRIPTEN
-using native_handle = HTMLCanvasElement*;
-#else
-#error "Unsupported platform!"
-#endif 
 
 namespace mngl
 {
@@ -216,7 +200,7 @@ namespace mngl
 		display() = default;
 		display(SDL_DisplayID id) : disp(id) {}
 		SDL_DisplayID disp = 0;
-		static std::mutex mut;
+		static inline std::mutex mut;
 
 		friend class display_mode;
 	};
@@ -400,11 +384,14 @@ namespace mngl
 
 		window(window&& other) noexcept
 		{
-			window_manager::remove_window(other.win);
 			win = other.win;
 			other.win = nullptr;
-			window_manager::add_window(win, this);
-			logger.debug("moved window ", win);
+			if (win)
+			{
+				window_manager::remove_window(other.win);
+				window_manager::add_window(win, this);
+				logger.debug("moved window ", win);
+			}
 		}
 
 		window& operator=(window&& other) noexcept
@@ -532,12 +519,19 @@ namespace mngl
 			logger.debug("changed window ", win, " maximum size to {", new_max_size.x, ",", new_max_size.y, "}");
 		}
 
-		// границы положения окна
-		mngl::rectangle borders()
+		struct window_borders
 		{
-			glm::imat2x2 tmp;
-			if (!SDL_GetWindowBordersSize(win, &tmp[0].x, &tmp[0].y, &tmp[1].x, &tmp[1].y)) throw sdl_error("failed to get window borders size: ");
-			mngl::rectangle res(tmp[0], tmp[1] - tmp[0]);
+			int top = 0;
+			int left = 0;
+			int bottom = 0;
+			int right = 0;
+		};
+
+		window_borders borders() const
+		{
+			window_borders res;
+			if (!SDL_GetWindowBordersSize(win, &res.top, &res.left, &res.bottom, &res.right))
+				throw sdl_error("failed to get window borders size: ");
 			return res;
 		}
 
@@ -610,7 +604,7 @@ namespace mngl
 			return mngl::display::for_window(*this);
 		}
 
-		mngl::rectangle safe_area()
+		mngl::rectangle safe_area() const
 		{
 			mngl::rectangle res;
 			if (!SDL_GetWindowSafeArea(win, mngl::rectangleProxy(res))) throw sdl_error("failed to get safe area for window: ");
@@ -707,13 +701,32 @@ namespace mngl
 
 			if (icon.animated())
 			{
-				icon.on_frame_changed = [this](SDL_Surface* new_frame)
-					{
-						if (!SDL_SetWindowIcon(win, new_frame)) throw sdl_error("failed to set icon frame!");
-					};
+				SDL_Window* raw_win = this->win;
+				icon.on_frame_changed = [raw_win](SDL_Surface* new_frame)
+				{
+					if (!SDL_SetWindowIcon(raw_win, new_frame)) throw sdl_error("failed to set icon frame!");
+				};
 			}
 
 			logger.debug("changed window ", win, " icon");
+		}
+
+		void borderless(bool enable)
+		{
+			// В SDL3 передаем !enable, так как функция ожидает параметр "bordered" (наличие рамки)
+			if (!SDL_SetWindowBordered(win, !enable))
+				throw sdl_error("failed to set window borderless state: ");
+			logger.debug((enable ? "enabled" : "disabled"), " borderless mode for window ", win);
+		}
+
+		bool borderless() const
+		{
+			return (SDL_GetWindowFlags(win) & SDL_WINDOW_BORDERLESS) != 0;
+		}
+
+		bool transparent() const
+		{
+			return (SDL_GetWindowFlags(win) & SDL_WINDOW_TRANSPARENT) != 0;
 		}
 
 	private:

@@ -68,13 +68,7 @@
     <ClInclude Include="window.hpp">
       <Filter>Файлы заголовков\window</Filter>
     </ClInclude>
-    <ClInclude Include="event_enums.hpp">
-      <Filter>Файлы заголовков\event</Filter>
-    </ClInclude>
     <ClInclude Include="input.hpp">
-      <Filter>Файлы заголовков\event</Filter>
-    </ClInclude>
-    <ClInclude Include="event_structs.hpp">
       <Filter>Файлы заголовков\event</Filter>
     </ClInclude>
     <ClInclude Include="event.hpp">
