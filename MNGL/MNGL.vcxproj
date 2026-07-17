@@ -167,6 +167,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="color.hpp" />
+    <ClInclude Include="command_buffer.hpp" />
+    <ClInclude Include="device.hpp" />
     <ClInclude Include="event.hpp" />
     <ClInclude Include="input.hpp" />
     <ClInclude Include="iupdate.h" />
@@ -175,7 +177,10 @@
     <ClInclude Include="pixel_format.hpp" />
     <ClInclude Include="proxy.hpp" />
     <ClInclude Include="rectangle.hpp" />
+    <ClInclude Include="render_pass.hpp" />
+    <ClInclude Include="shader.hpp" />
     <ClInclude Include="surface.hpp" />
+    <ClInclude Include="texture.hpp" />
     <ClInclude Include="utilities.hpp" />
     <ClInclude Include="window.hpp" />
   </ItemGroup>

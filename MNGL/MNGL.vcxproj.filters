@@ -31,6 +31,9 @@
     <Filter Include="Файлы заголовков\utility\color">
       <UniqueIdentifier>{58c3bbb8-e4bf-4506-b3d8-b1b41fdfd8e0}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Файлы заголовков\gpu">
+      <UniqueIdentifier>{90890103-94f9-4d51-a1c2-ea3a66abd748}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="MNGL.cpp">
@@ -73,6 +76,21 @@
     </ClInclude>
     <ClInclude Include="event.hpp">
       <Filter>Файлы заголовков\event</Filter>
+    </ClInclude>
+    <ClInclude Include="device.hpp">
+      <Filter>Файлы заголовков\gpu</Filter>
+    </ClInclude>
+    <ClInclude Include="command_buffer.hpp">
+      <Filter>Файлы заголовков\gpu</Filter>
+    </ClInclude>
+    <ClInclude Include="render_pass.hpp">
+      <Filter>Файлы заголовков\gpu</Filter>
+    </ClInclude>
+    <ClInclude Include="texture.hpp">
+      <Filter>Файлы заголовков\gpu</Filter>
+    </ClInclude>
+    <ClInclude Include="shader.hpp">
+      <Filter>Файлы заголовков\gpu</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

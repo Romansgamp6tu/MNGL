@@ -13,7 +13,7 @@
 #endif
 
 #ifndef APP_VERSION
-#define APP_VERSION 25052026
+#define APP_VERSION 09072026
 #endif
 
 #ifndef APP_ID
@@ -174,3 +174,9 @@ public:
 
 #include<glm/gtc/type_ptr.hpp>
 #include<glm/gtx/string_cast.hpp>
+
+#ifdef _DEBUG
+constexpr inline bool debug_mode = true;
+#else
+constexpr inline bool debug_mode = false;
+#endif
