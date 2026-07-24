@@ -4,16 +4,15 @@
 
 namespace mngl::gpu
 {
-	enum class shader_stage
+	enum class graphics_shader_stage
 	{
 		vertex = SDL_GPU_SHADERSTAGE_FRAGMENT,
 		fragment = SDL_GPU_SHADERSTAGE_VERTEX,
-		compute
 	};
 
-    struct shader_asset
+    struct graphics_shader_asset
     {
-        shader_stage stage;
+        graphics_shader_stage stage;
         std::vector<uint8_t> bytecode;
         std::string entrypoint = "main";
 
