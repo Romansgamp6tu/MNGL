@@ -3,6 +3,8 @@
 #include "utilities.hpp"
 #include <string>
 #include <vector>
+#include <functional>
+#include <concepts>
 #include <glm/glm.hpp>
 
 namespace mngl
@@ -207,254 +209,255 @@ namespace mngl
     };
 
 #define KEYS_SCANCODE_X_MACROS_DATA \
-X(a, SDL_SCANCODE_A)\
+    X(a, SDL_SCANCODE_A)\
     X(b, SDL_SCANCODE_B)\
-        X(c, SDL_SCANCODE_C)\
-        X(d, SDL_SCANCODE_D)\
-        X(e, SDL_SCANCODE_E)\
-        X(f, SDL_SCANCODE_F)\
-        X(g, SDL_SCANCODE_G)\
-        X(h, SDL_SCANCODE_H)\
-        X(i, SDL_SCANCODE_I)\
-        X(j, SDL_SCANCODE_J)\
-        X(k, SDL_SCANCODE_K)\
-        X(l, SDL_SCANCODE_L)\
-        X(m, SDL_SCANCODE_M)\
-        X(n, SDL_SCANCODE_N)\
-        X(o, SDL_SCANCODE_O)\
-        X(p, SDL_SCANCODE_P)\
-        X(q, SDL_SCANCODE_Q)\
-        X(r, SDL_SCANCODE_R)\
-        X(s, SDL_SCANCODE_S)\
-        X(t, SDL_SCANCODE_T)\
-        X(u, SDL_SCANCODE_U)\
-        X(v, SDL_SCANCODE_V)\
-        X(w, SDL_SCANCODE_W)\
-        X(x, SDL_SCANCODE_X)\
-        X(y, SDL_SCANCODE_Y)\
-        X(z, SDL_SCANCODE_Z)\
-        X(num1, SDL_SCANCODE_1)\
-        X(num2, SDL_SCANCODE_2)\
-        X(num3, SDL_SCANCODE_3)\
-        X(num4, SDL_SCANCODE_4)\
-        X(num5, SDL_SCANCODE_5)\
-        X(num6, SDL_SCANCODE_6)\
-        X(num7, SDL_SCANCODE_7)\
-        X(num8, SDL_SCANCODE_8)\
-        X(num9, SDL_SCANCODE_9)\
-        X(num0, SDL_SCANCODE_0)\
-        X(return_key, SDL_SCANCODE_RETURN)\
-        X(escape, SDL_SCANCODE_ESCAPE)\
-        X(backspace, SDL_SCANCODE_BACKSPACE)\
-        X(tab, SDL_SCANCODE_TAB)\
-        X(space, SDL_SCANCODE_SPACE)\
-        X(minus, SDL_SCANCODE_MINUS)\
-        X(equals, SDL_SCANCODE_EQUALS)\
-        X(leftbracket, SDL_SCANCODE_LEFTBRACKET)\
-        X(rightbracket, SDL_SCANCODE_RIGHTBRACKET)\
-        X(backslash, SDL_SCANCODE_BACKSLASH)\
-        X(nonushash, SDL_SCANCODE_NONUSHASH)\
-        X(semicolon, SDL_SCANCODE_SEMICOLON)\
-        X(apostrophe, SDL_SCANCODE_APOSTROPHE)\
-        X(grave, SDL_SCANCODE_GRAVE)\
-        X(comma, SDL_SCANCODE_COMMA)\
-        X(period, SDL_SCANCODE_PERIOD)\
-        X(slash, SDL_SCANCODE_SLASH)\
-        X(capslock, SDL_SCANCODE_CAPSLOCK)\
-        X(f1, SDL_SCANCODE_F1)\
-        X(f2, SDL_SCANCODE_F2)\
-        X(f3, SDL_SCANCODE_F3)\
-        X(f4, SDL_SCANCODE_F4)\
-        X(f5, SDL_SCANCODE_F5)\
-        X(f6, SDL_SCANCODE_F6)\
-        X(f7, SDL_SCANCODE_F7)\
-        X(f8, SDL_SCANCODE_F8)\
-        X(f9, SDL_SCANCODE_F9)\
-        X(f10, SDL_SCANCODE_F10)\
-        X(f11, SDL_SCANCODE_F11)\
-        X(f12, SDL_SCANCODE_F12)\
-        X(printscreen, SDL_SCANCODE_PRINTSCREEN)\
-        X(scrolllock, SDL_SCANCODE_SCROLLLOCK)\
-        X(pause, SDL_SCANCODE_PAUSE)\
-        X(insert, SDL_SCANCODE_INSERT)\
-        X(home, SDL_SCANCODE_HOME)\
-        X(pageup, SDL_SCANCODE_PAGEUP)\
-        X(delete_key, SDL_SCANCODE_DELETE)\
-        X(end, SDL_SCANCODE_END)\
-        X(pagedown, SDL_SCANCODE_PAGEDOWN)\
-        X(right, SDL_SCANCODE_RIGHT)\
-        X(left, SDL_SCANCODE_LEFT)\
-        X(down, SDL_SCANCODE_DOWN)\
-        X(up, SDL_SCANCODE_UP)\
-        X(numlockclear, SDL_SCANCODE_NUMLOCKCLEAR)\
-        X(kp_divide, SDL_SCANCODE_KP_DIVIDE)\
-        X(kp_multiply, SDL_SCANCODE_KP_MULTIPLY)\
-        X(kp_minus, SDL_SCANCODE_KP_MINUS)\
-        X(kp_plus, SDL_SCANCODE_KP_PLUS)\
-        X(kp_enter, SDL_SCANCODE_KP_ENTER)\
-        X(kp_1, SDL_SCANCODE_KP_1)\
-        X(kp_2, SDL_SCANCODE_KP_2)\
-        X(kp_3, SDL_SCANCODE_KP_3)\
-        X(kp_4, SDL_SCANCODE_KP_4)\
-        X(kp_5, SDL_SCANCODE_KP_5)\
-        X(kp_6, SDL_SCANCODE_KP_6)\
-        X(kp_7, SDL_SCANCODE_KP_7)\
-        X(kp_8, SDL_SCANCODE_KP_8)\
-        X(kp_9, SDL_SCANCODE_KP_9)\
-        X(kp_0, SDL_SCANCODE_KP_0)\
-        X(kp_period, SDL_SCANCODE_KP_PERIOD)\
-        X(nonusbackslash, SDL_SCANCODE_NONUSBACKSLASH)\
-        X(application, SDL_SCANCODE_APPLICATION)\
-        X(power, SDL_SCANCODE_POWER)\
-        X(kp_equals, SDL_SCANCODE_KP_EQUALS)\
-        X(f13, SDL_SCANCODE_F13)\
-        X(f14, SDL_SCANCODE_F14)\
-        X(f15, SDL_SCANCODE_F15)\
-        X(f16, SDL_SCANCODE_F16)\
-        X(f17, SDL_SCANCODE_F17)\
-        X(f18, SDL_SCANCODE_F18)\
-        X(f19, SDL_SCANCODE_F19)\
-        X(f20, SDL_SCANCODE_F20)\
-        X(f21, SDL_SCANCODE_F21)\
-        X(f22, SDL_SCANCODE_F22)\
-        X(f23, SDL_SCANCODE_F23)\
-        X(f24, SDL_SCANCODE_F24)\
-        X(execute, SDL_SCANCODE_EXECUTE)\
-        X(help, SDL_SCANCODE_HELP)\
-        X(menu, SDL_SCANCODE_MENU)\
-        X(select, SDL_SCANCODE_SELECT)\
-        X(stop, SDL_SCANCODE_STOP)\
-        X(again, SDL_SCANCODE_AGAIN)\
-        X(undo, SDL_SCANCODE_UNDO)\
-        X(cut, SDL_SCANCODE_CUT)\
-        X(copy, SDL_SCANCODE_COPY)\
-        X(paste, SDL_SCANCODE_PASTE)\
-        X(find, SDL_SCANCODE_FIND)\
-        X(mute, SDL_SCANCODE_MUTE)\
-        X(volumeup, SDL_SCANCODE_VOLUMEUP)\
-        X(volumedown, SDL_SCANCODE_VOLUMEDOWN)\
-        X(kp_comma, SDL_SCANCODE_KP_COMMA)\
-        X(kp_equalsas400, SDL_SCANCODE_KP_EQUALSAS400)\
-        X(international1, SDL_SCANCODE_INTERNATIONAL1)\
-        X(international2, SDL_SCANCODE_INTERNATIONAL2)\
-        X(international3, SDL_SCANCODE_INTERNATIONAL3)\
-        X(international4, SDL_SCANCODE_INTERNATIONAL4)\
-        X(international5, SDL_SCANCODE_INTERNATIONAL5)\
-        X(international6, SDL_SCANCODE_INTERNATIONAL6)\
-        X(international7, SDL_SCANCODE_INTERNATIONAL7)\
-        X(international8, SDL_SCANCODE_INTERNATIONAL8)\
-        X(international9, SDL_SCANCODE_INTERNATIONAL9)\
-        X(lang1, SDL_SCANCODE_LANG1)\
-        X(lang2, SDL_SCANCODE_LANG2)\
-        X(lang3, SDL_SCANCODE_LANG3)\
-        X(lang4, SDL_SCANCODE_LANG4)\
-        X(lang5, SDL_SCANCODE_LANG5)\
-        X(lang6, SDL_SCANCODE_LANG6)\
-        X(lang7, SDL_SCANCODE_LANG7)\
-        X(lang8, SDL_SCANCODE_LANG8)\
-        X(lang9, SDL_SCANCODE_LANG9)\
-        X(alterase, SDL_SCANCODE_ALTERASE)\
-        X(sysreq, SDL_SCANCODE_SYSREQ)\
-        X(cancel, SDL_SCANCODE_CANCEL)\
-        X(clear, SDL_SCANCODE_CLEAR)\
-        X(prior, SDL_SCANCODE_PRIOR)\
-        X(return2, SDL_SCANCODE_RETURN2)\
-        X(separator, SDL_SCANCODE_SEPARATOR)\
-        X(out, SDL_SCANCODE_OUT)\
-        X(oper, SDL_SCANCODE_OPER)\
-        X(clearagain, SDL_SCANCODE_CLEARAGAIN)\
-        X(crsel, SDL_SCANCODE_CRSEL)\
-        X(exsel, SDL_SCANCODE_EXSEL)\
-        X(kp_00, SDL_SCANCODE_KP_00)\
-        X(kp_000, SDL_SCANCODE_KP_000)\
-        X(thousandsseparator, SDL_SCANCODE_THOUSANDSSEPARATOR)\
-        X(decimalseparator, SDL_SCANCODE_DECIMALSEPARATOR)\
-        X(currencyunit, SDL_SCANCODE_CURRENCYUNIT)\
-        X(currencysubunit, SDL_SCANCODE_CURRENCYSUBUNIT)\
-        X(kp_leftparen, SDL_SCANCODE_KP_LEFTPAREN)\
-        X(kp_rightparen, SDL_SCANCODE_KP_RIGHTPAREN)\
-        X(kp_leftbrace, SDL_SCANCODE_KP_LEFTBRACE)\
-        X(kp_rightbrace, SDL_SCANCODE_KP_RIGHTBRACE)\
-        X(kp_tab, SDL_SCANCODE_KP_TAB)\
-        X(kp_backspace, SDL_SCANCODE_KP_BACKSPACE)\
-        X(kp_a, SDL_SCANCODE_KP_A)\
-        X(kp_b, SDL_SCANCODE_KP_B)\
-        X(kp_c, SDL_SCANCODE_KP_C)\
-        X(kp_d, SDL_SCANCODE_KP_D)\
-        X(kp_e, SDL_SCANCODE_KP_E)\
-        X(kp_f, SDL_SCANCODE_KP_F)\
-        X(kp_xor, SDL_SCANCODE_KP_XOR)\
-        X(kp_power, SDL_SCANCODE_KP_POWER)\
-        X(kp_percent, SDL_SCANCODE_KP_PERCENT)\
-        X(kp_less, SDL_SCANCODE_KP_LESS)\
-        X(kp_greater, SDL_SCANCODE_KP_GREATER)\
-        X(kp_ampersand, SDL_SCANCODE_KP_AMPERSAND)\
-        X(kp_dblampersand, SDL_SCANCODE_KP_DBLAMPERSAND)\
-        X(kp_verticalbar, SDL_SCANCODE_KP_VERTICALBAR)\
-        X(kp_dblverticalbar, SDL_SCANCODE_KP_DBLVERTICALBAR)\
-        X(kp_colon, SDL_SCANCODE_KP_COLON)\
-        X(kp_hash, SDL_SCANCODE_KP_HASH)\
-        X(kp_space, SDL_SCANCODE_KP_SPACE)\
-        X(kp_at, SDL_SCANCODE_KP_AT)\
-        X(kp_exclam, SDL_SCANCODE_KP_EXCLAM)\
-        X(kp_memstore, SDL_SCANCODE_KP_MEMSTORE)\
-        X(kp_memrecall, SDL_SCANCODE_KP_MEMRECALL)\
-        X(kp_memclear, SDL_SCANCODE_KP_MEMCLEAR)\
-        X(kp_memadd, SDL_SCANCODE_KP_MEMADD)\
-        X(kp_memsubtract, SDL_SCANCODE_KP_MEMSUBTRACT)\
-        X(kp_memmultiply, SDL_SCANCODE_KP_MEMMULTIPLY)\
-        X(kp_memdivide, SDL_SCANCODE_KP_MEMDIVIDE)\
-        X(kp_plusminus, SDL_SCANCODE_KP_PLUSMINUS)\
-        X(kp_clear, SDL_SCANCODE_KP_CLEAR)\
-        X(kp_clearentry, SDL_SCANCODE_KP_CLEARENTRY)\
-        X(kp_binary, SDL_SCANCODE_KP_BINARY)\
-        X(kp_octal, SDL_SCANCODE_KP_OCTAL)\
-        X(kp_decimal, SDL_SCANCODE_KP_DECIMAL)\
-        X(kp_hexadecimal, SDL_SCANCODE_KP_HEXADECIMAL)\
-        X(lctrl, SDL_SCANCODE_LCTRL)\
-        X(lshift, SDL_SCANCODE_LSHIFT)\
-        X(lalt, SDL_SCANCODE_LALT)\
-        X(lgui, SDL_SCANCODE_LGUI)\
-        X(rctrl, SDL_SCANCODE_RCTRL)\
-        X(rshift, SDL_SCANCODE_RSHIFT)\
-        X(ralt, SDL_SCANCODE_RALT)\
-        X(rgui, SDL_SCANCODE_RGUI)\
-        X(mode, SDL_SCANCODE_MODE)\
-        X(sleep, SDL_SCANCODE_SLEEP)\
-        X(wake, SDL_SCANCODE_WAKE)\
-        X(channel_increment, SDL_SCANCODE_CHANNEL_INCREMENT)\
-        X(channel_decrement, SDL_SCANCODE_CHANNEL_DECREMENT)\
-        X(media_play, SDL_SCANCODE_MEDIA_PLAY)\
-        X(media_pause, SDL_SCANCODE_MEDIA_PAUSE)\
-        X(media_record, SDL_SCANCODE_MEDIA_RECORD)\
-        X(media_fast_forward, SDL_SCANCODE_MEDIA_FAST_FORWARD)\
-        X(media_rewind, SDL_SCANCODE_MEDIA_REWIND)\
-        X(media_next_track, SDL_SCANCODE_MEDIA_NEXT_TRACK)\
-        X(media_previous_track, SDL_SCANCODE_MEDIA_PREVIOUS_TRACK)\
-        X(media_stop, SDL_SCANCODE_MEDIA_STOP)\
-        X(media_eject, SDL_SCANCODE_MEDIA_EJECT)\
-        X(media_play_pause, SDL_SCANCODE_MEDIA_PLAY_PAUSE)\
-        X(media_select, SDL_SCANCODE_MEDIA_SELECT)\
-        X(ac_new, SDL_SCANCODE_AC_NEW)\
-        X(ac_open, SDL_SCANCODE_AC_OPEN)\
-        X(ac_close, SDL_SCANCODE_AC_CLOSE)\
-        X(ac_exit, SDL_SCANCODE_AC_EXIT)\
-        X(ac_save, SDL_SCANCODE_AC_SAVE)\
-        X(ac_print, SDL_SCANCODE_AC_PRINT)\
-        X(ac_properties, SDL_SCANCODE_AC_PROPERTIES)\
-        X(ac_search, SDL_SCANCODE_AC_SEARCH)\
-        X(ac_home, SDL_SCANCODE_AC_HOME)\
-        X(ac_back, SDL_SCANCODE_AC_BACK)\
-        X(ac_forward, SDL_SCANCODE_AC_FORWARD)\
-        X(ac_stop, SDL_SCANCODE_AC_STOP)\
-        X(ac_refresh, SDL_SCANCODE_AC_REFRESH)\
-        X(ac_bookmarks, SDL_SCANCODE_AC_BOOKMARKS)\
-        X(softleft, SDL_SCANCODE_SOFTLEFT)\
-        X(softright, SDL_SCANCODE_SOFTRIGHT)\
-        X(call, SDL_SCANCODE_CALL)\
-        X(endcall, SDL_SCANCODE_ENDCALL)\
-        X(reserved, SDL_SCANCODE_RESERVED)\
-        X(count, SDL_SCANCODE_COUNT)
+    X(c, SDL_SCANCODE_C)\
+    X(d, SDL_SCANCODE_D)\
+    X(e, SDL_SCANCODE_E)\
+    X(f, SDL_SCANCODE_F)\
+    X(g, SDL_SCANCODE_G)\
+    X(h, SDL_SCANCODE_H)\
+    X(i, SDL_SCANCODE_I)\
+    X(j, SDL_SCANCODE_J)\
+    X(k, SDL_SCANCODE_K)\
+    X(l, SDL_SCANCODE_L)\
+    X(m, SDL_SCANCODE_M)\
+    X(n, SDL_SCANCODE_N)\
+    X(o, SDL_SCANCODE_O)\
+    X(p, SDL_SCANCODE_P)\
+    X(q, SDL_SCANCODE_Q)\
+    X(r, SDL_SCANCODE_R)\
+    X(s, SDL_SCANCODE_S)\
+    X(t, SDL_SCANCODE_T)\
+    X(u, SDL_SCANCODE_U)\
+    X(v, SDL_SCANCODE_V)\
+    X(w, SDL_SCANCODE_W)\
+    X(x, SDL_SCANCODE_X)\
+    X(y, SDL_SCANCODE_Y)\
+    X(z, SDL_SCANCODE_Z)\
+    X(num1, SDL_SCANCODE_1)\
+    X(num2, SDL_SCANCODE_2)\
+    X(num3, SDL_SCANCODE_3)\
+    X(num4, SDL_SCANCODE_4)\
+    X(num5, SDL_SCANCODE_5)\
+    X(num6, SDL_SCANCODE_6)\
+    X(num7, SDL_SCANCODE_7)\
+    X(num8, SDL_SCANCODE_8)\
+    X(num9, SDL_SCANCODE_9)\
+    X(num0, SDL_SCANCODE_0)\
+    X(return_key, SDL_SCANCODE_RETURN)\
+    X(escape, SDL_SCANCODE_ESCAPE)\
+    X(backspace, SDL_SCANCODE_BACKSPACE)\
+    X(tab, SDL_SCANCODE_TAB)\
+    X(space, SDL_SCANCODE_SPACE)\
+    X(minus, SDL_SCANCODE_MINUS)\
+    X(equals, SDL_SCANCODE_EQUALS)\
+    X(leftbracket, SDL_SCANCODE_LEFTBRACKET)\
+    X(rightbracket, SDL_SCANCODE_RIGHTBRACKET)\
+    X(backslash, SDL_SCANCODE_BACKSLASH)\
+    X(nonushash, SDL_SCANCODE_NONUSHASH)\
+    X(semicolon, SDL_SCANCODE_SEMICOLON)\
+    X(apostrophe, SDL_SCANCODE_APOSTROPHE)\
+    X(grave, SDL_SCANCODE_GRAVE)\
+    X(comma, SDL_SCANCODE_COMMA)\
+    X(period, SDL_SCANCODE_PERIOD)\
+    X(slash, SDL_SCANCODE_SLASH)\
+    X(capslock, SDL_SCANCODE_CAPSLOCK)\
+    X(f1, SDL_SCANCODE_F1)\
+    X(f2, SDL_SCANCODE_F2)\
+    X(f3, SDL_SCANCODE_F3)\
+    X(f4, SDL_SCANCODE_F4)\
+    X(f5, SDL_SCANCODE_F5)\
+    X(f6, SDL_SCANCODE_F6)\
+    X(f7, SDL_SCANCODE_F7)\
+    X(f8, SDL_SCANCODE_F8)\
+    X(f9, SDL_SCANCODE_F9)\
+    X(f10, SDL_SCANCODE_F10)\
+    X(f11, SDL_SCANCODE_F11)\
+    X(f12, SDL_SCANCODE_F12)\
+    X(printscreen, SDL_SCANCODE_PRINTSCREEN)\
+    X(scrolllock, SDL_SCANCODE_SCROLLLOCK)\
+    X(pause, SDL_SCANCODE_PAUSE)\
+    X(insert, SDL_SCANCODE_INSERT)\
+    X(home, SDL_SCANCODE_HOME)\
+    X(pageup, SDL_SCANCODE_PAGEUP)\
+    X(delete_key, SDL_SCANCODE_DELETE)\
+    X(end, SDL_SCANCODE_END)\
+    X(pagedown, SDL_SCANCODE_PAGEDOWN)\
+    X(right, SDL_SCANCODE_RIGHT)\
+    X(left, SDL_SCANCODE_LEFT)\
+    X(down, SDL_SCANCODE_DOWN)\
+    X(up, SDL_SCANCODE_UP)\
+    X(numlockclear, SDL_SCANCODE_NUMLOCKCLEAR)\
+    X(kp_divide, SDL_SCANCODE_KP_DIVIDE)\
+    X(kp_multiply, SDL_SCANCODE_KP_MULTIPLY)\
+    X(kp_minus, SDL_SCANCODE_KP_MINUS)\
+    X(kp_plus, SDL_SCANCODE_KP_PLUS)\
+    X(kp_enter, SDL_SCANCODE_KP_ENTER)\
+    X(kp_1, SDL_SCANCODE_KP_1)\
+    X(kp_2, SDL_SCANCODE_KP_2)\
+    X(kp_3, SDL_SCANCODE_KP_3)\
+    X(kp_4, SDL_SCANCODE_KP_4)\
+    X(kp_5, SDL_SCANCODE_KP_5)\
+    X(kp_6, SDL_SCANCODE_KP_6)\
+    X(kp_7, SDL_SCANCODE_KP_7)\
+    X(kp_8, SDL_SCANCODE_KP_8)\
+    X(kp_9, SDL_SCANCODE_KP_9)\
+    X(kp_0, SDL_SCANCODE_KP_0)\
+    X(kp_period, SDL_SCANCODE_KP_PERIOD)\
+    X(nonusbackslash, SDL_SCANCODE_NONUSBACKSLASH)\
+    X(application, SDL_SCANCODE_APPLICATION)\
+    X(power, SDL_SCANCODE_POWER)\
+    X(kp_equals, SDL_SCANCODE_KP_EQUALS)\
+    X(f13, SDL_SCANCODE_F13)\
+    X(f14, SDL_SCANCODE_F14)\
+    X(f15, SDL_SCANCODE_F15)\
+    X(f16, SDL_SCANCODE_F16)\
+    X(f17, SDL_SCANCODE_F17)\
+    X(f18, SDL_SCANCODE_F18)\
+    X(f19, SDL_SCANCODE_F19)\
+    X(f20, SDL_SCANCODE_F20)\
+    X(f21, SDL_SCANCODE_F21)\
+    X(f22, SDL_SCANCODE_F22)\
+    X(f23, SDL_SCANCODE_F23)\
+    X(f24, SDL_SCANCODE_F24)\
+    X(execute, SDL_SCANCODE_EXECUTE)\
+    X(help, SDL_SCANCODE_HELP)\
+    X(menu, SDL_SCANCODE_MENU)\
+    X(select, SDL_SCANCODE_SELECT)\
+    X(stop, SDL_SCANCODE_STOP)\
+    X(again, SDL_SCANCODE_AGAIN)\
+    X(undo, SDL_SCANCODE_UNDO)\
+    X(cut, SDL_SCANCODE_CUT)\
+    X(copy, SDL_SCANCODE_COPY)\
+    X(paste, SDL_SCANCODE_PASTE)\
+    X(find, SDL_SCANCODE_FIND)\
+    X(mute, SDL_SCANCODE_MUTE)\
+    X(volumeup, SDL_SCANCODE_VOLUMEUP)\
+    X(volumedown, SDL_SCANCODE_VOLUMEDOWN)\
+    X(kp_comma, SDL_SCANCODE_KP_COMMA)\
+    X(kp_equalsas400, SDL_SCANCODE_KP_EQUALSAS400)\
+    X(international1, SDL_SCANCODE_INTERNATIONAL1)\
+    X(international2, SDL_SCANCODE_INTERNATIONAL2)\
+    X(international3, SDL_SCANCODE_INTERNATIONAL3)\
+    X(international4, SDL_SCANCODE_INTERNATIONAL4)\
+    X(international5, SDL_SCANCODE_INTERNATIONAL5)\
+    X(international6, SDL_SCANCODE_INTERNATIONAL6)\
+    X(international7, SDL_SCANCODE_INTERNATIONAL7)\
+    X(international8, SDL_SCANCODE_INTERNATIONAL8)\
+    X(international9, SDL_SCANCODE_INTERNATIONAL9)\
+    X(lang1, SDL_SCANCODE_LANG1)\
+    X(lang2, SDL_SCANCODE_LANG2)\
+    X(lang3, SDL_SCANCODE_LANG3)\
+    X(lang4, SDL_SCANCODE_LANG4)\
+    X(lang5, SDL_SCANCODE_LANG5)\
+    X(lang6, SDL_SCANCODE_LANG6)\
+    X(lang7, SDL_SCANCODE_LANG7)\
+    X(lang8, SDL_SCANCODE_LANG8)\
+    X(lang9, SDL_SCANCODE_LANG9)\
+    X(alterase, SDL_SCANCODE_ALTERASE)\
+    X(sysreq, SDL_SCANCODE_SYSREQ)\
+    X(cancel, SDL_SCANCODE_CANCEL)\
+    X(clear, SDL_SCANCODE_CLEAR)\
+    X(prior, SDL_SCANCODE_PRIOR)\
+    X(return2, SDL_SCANCODE_RETURN2)\
+    X(separator, SDL_SCANCODE_SEPARATOR)\
+    X(out, SDL_SCANCODE_OUT)\
+    X(oper, SDL_SCANCODE_OPER)\
+    X(clearagain, SDL_SCANCODE_CLEARAGAIN)\
+    X(crsel, SDL_SCANCODE_CRSEL)\
+    X(exsel, SDL_SCANCODE_EXSEL)\
+    X(kp_00, SDL_SCANCODE_KP_00)\
+    X(kp_000, SDL_SCANCODE_KP_000)\
+    X(thousandsseparator, SDL_SCANCODE_THOUSANDSSEPARATOR)\
+    X(decimalseparator, SDL_SCANCODE_DECIMALSEPARATOR)\
+    X(currencyunit, SDL_SCANCODE_CURRENCYUNIT)\
+    X(currencysubunit, SDL_SCANCODE_CURRENCYSUBUNIT)\
+    X(kp_leftparen, SDL_SCANCODE_KP_LEFTPAREN)\
+    X(kp_rightparen, SDL_SCANCODE_KP_RIGHTPAREN)\
+    X(kp_leftbrace, SDL_SCANCODE_KP_LEFTBRACE)\
+    X(kp_rightbrace, SDL_SCANCODE_KP_RIGHTBRACE)\
+    X(kp_tab, SDL_SCANCODE_KP_TAB)\
+    X(kp_backspace, SDL_SCANCODE_KP_BACKSPACE)\
+    X(kp_a, SDL_SCANCODE_KP_A)\
+    X(kp_b, SDL_SCANCODE_KP_B)\
+    X(kp_c, SDL_SCANCODE_KP_C)\
+    X(kp_d, SDL_SCANCODE_KP_D)\
+    X(kp_e, SDL_SCANCODE_KP_E)\
+    X(kp_f, SDL_SCANCODE_KP_F)\
+    X(kp_xor, SDL_SCANCODE_KP_XOR)\
+    X(kp_power, SDL_SCANCODE_KP_POWER)\
+    X(kp_percent, SDL_SCANCODE_KP_PERCENT)\
+    X(kp_less, SDL_SCANCODE_KP_LESS)\
+    X(kp_greater, SDL_SCANCODE_KP_GREATER)\
+    X(kp_ampersand, SDL_SCANCODE_KP_AMPERSAND)\
+    X(kp_dblampersand, SDL_SCANCODE_KP_DBLAMPERSAND)\
+    X(kp_verticalbar, SDL_SCANCODE_KP_VERTICALBAR)\
+    X(kp_dblverticalbar, SDL_SCANCODE_KP_DBLVERTICALBAR)\
+    X(kp_colon, SDL_SCANCODE_KP_COLON)\
+    X(kp_hash, SDL_SCANCODE_KP_HASH)\
+    X(kp_space, SDL_SCANCODE_KP_SPACE)\
+    X(kp_at, SDL_SCANCODE_KP_AT)\
+    X(kp_exclam, SDL_SCANCODE_KP_EXCLAM)\
+    X(kp_memstore, SDL_SCANCODE_KP_MEMSTORE)\
+    X(kp_memrecall, SDL_SCANCODE_KP_MEMRECALL)\
+    X(kp_memclear, SDL_SCANCODE_KP_MEMCLEAR)\
+    X(kp_memadd, SDL_SCANCODE_KP_MEMADD)\
+    X(kp_memsubtract, SDL_SCANCODE_KP_MEMSUBTRACT)\
+    X(kp_memmultiply, SDL_SCANCODE_KP_MEMMULTIPLY)\
+    X(kp_memdivide, SDL_SCANCODE_KP_MEMDIVIDE)\
+    X(kp_plusminus, SDL_SCANCODE_KP_PLUSMINUS)\
+    X(kp_clear, SDL_SCANCODE_KP_CLEAR)\
+    X(kp_clearentry, SDL_SCANCODE_KP_CLEARENTRY)\
+    X(kp_binary, SDL_SCANCODE_KP_BINARY)\
+    X(kp_octal, SDL_SCANCODE_KP_OCTAL)\
+    X(kp_decimal, SDL_SCANCODE_KP_DECIMAL)\
+    X(kp_hexadecimal, SDL_SCANCODE_KP_HEXADECIMAL)\
+    X(lctrl, SDL_SCANCODE_LCTRL)\
+    X(lshift, SDL_SCANCODE_LSHIFT)\
+    X(lalt, SDL_SCANCODE_LALT)\
+    X(lgui, SDL_SCANCODE_LGUI)\
+    X(rctrl, SDL_SCANCODE_RCTRL)\
+    X(rshift, SDL_SCANCODE_RSHIFT)\
+    X(ralt, SDL_SCANCODE_RALT)\
+    X(rgui, SDL_SCANCODE_RGUI)\
+    X(mode, SDL_SCANCODE_MODE)\
+    X(sleep, SDL_SCANCODE_SLEEP)\
+    X(wake, SDL_SCANCODE_WAKE)\
+    X(channel_increment, SDL_SCANCODE_CHANNEL_INCREMENT)\
+    X(channel_decrement, SDL_SCANCODE_CHANNEL_DECREMENT)\
+    X(media_play, SDL_SCANCODE_MEDIA_PLAY)\
+    X(media_pause, SDL_SCANCODE_MEDIA_PAUSE)\
+    X(media_record, SDL_SCANCODE_MEDIA_RECORD)\
+    X(media_fast_forward, SDL_SCANCODE_MEDIA_FAST_FORWARD)\
+    X(media_rewind, SDL_SCANCODE_MEDIA_REWIND)\
+    X(media_next_track, SDL_SCANCODE_MEDIA_NEXT_TRACK)\
+    X(media_previous_track, SDL_SCANCODE_MEDIA_PREVIOUS_TRACK)\
+    X(media_stop, SDL_SCANCODE_MEDIA_STOP)\
+    X(media_eject, SDL_SCANCODE_MEDIA_EJECT)\
+    X(media_play_pause, SDL_SCANCODE_MEDIA_PLAY_PAUSE)\
+    X(media_select, SDL_SCANCODE_MEDIA_SELECT)\
+    X(ac_new, SDL_SCANCODE_AC_NEW)\
+    X(ac_open, SDL_SCANCODE_AC_OPEN)\
+    X(ac_close, SDL_SCANCODE_AC_CLOSE)\
+    X(ac_exit, SDL_SCANCODE_AC_EXIT)\
+    X(ac_save, SDL_SCANCODE_AC_SAVE)\
+    X(ac_print, SDL_SCANCODE_AC_PRINT)\
+    X(ac_properties, SDL_SCANCODE_AC_PROPERTIES)\
+    X(ac_search, SDL_SCANCODE_AC_SEARCH)\
+    X(ac_home, SDL_SCANCODE_AC_HOME)\
+    X(ac_back, SDL_SCANCODE_AC_BACK)\
+    X(ac_forward, SDL_SCANCODE_AC_FORWARD)\
+    X(ac_stop, SDL_SCANCODE_AC_STOP)\
+    X(ac_refresh, SDL_SCANCODE_AC_REFRESH)\
+    X(ac_bookmarks, SDL_SCANCODE_AC_BOOKMARKS)\
+    X(softleft, SDL_SCANCODE_SOFTLEFT)\
+    X(softright, SDL_SCANCODE_SOFTRIGHT)\
+    X(call, SDL_SCANCODE_CALL)\
+    X(endcall, SDL_SCANCODE_ENDCALL)\
+    X(reserved, SDL_SCANCODE_RESERVED)\
+    X(count, SDL_SCANCODE_COUNT)
+
     enum class scancode : uint16_t
     {
 #define X(a, b) a = b,
@@ -476,8 +479,9 @@ X(a, SDL_SCANCODE_A)\
     }
 
 #undef KEYS_SCANCODE_X_MACROS_DATA
+
     // =========================================================================
-    // БАЗОВЫЕ СТРУКТУРЫ (Для иерархии данных)
+    // БАЗОВЫЕ СТРУКТУРЫ
     // =========================================================================
     struct eventBase
     {
@@ -519,52 +523,62 @@ X(a, SDL_SCANCODE_A)\
     };
 
     // =========================================================================
-    // СТРУКТУРЫ СОБЫТИЙ (Транзитные типы для шины событий)
+    // СТРУКТУРЫ СОБЫТИЙ
     // =========================================================================
 
     // --- Application ---
-    struct appQuit : eventBase { };
-    struct appTerminating : eventBase { };
-    struct appLowMemory : eventBase { };
-    struct appWillEnterBackground : eventBase { };
-    struct appDidEnterBackground : eventBase { };
-    struct appWillEnterForeground : eventBase { };
-    struct appDidEnterForeground : eventBase { };
-    struct appLocaleChanged : eventBase { };
-    struct appSystemThemeChanged : eventBase { };
+    struct appQuit : eventBase {};
+    struct appTerminating : eventBase {};
+    struct appLowMemory : eventBase {};
+    struct appWillEnterBackground : eventBase {};
+    struct appDidEnterBackground : eventBase {};
+    struct appWillEnterForeground : eventBase {};
+    struct appDidEnterForeground : eventBase {};
+    struct appLocaleChanged : eventBase {};
+    struct appSystemThemeChanged : eventBase {};
 
     // --- Display ---
-    struct displayAdded : displayEvent { };
-    struct displayRemoved : displayEvent { };
-    struct displayDesktopModeChanged : displayEvent { int width; int height; };
-    struct displayCurrentModeChanged : displayEvent { int width; int height; };
+    struct displayOrientation : displayEvent { display_orientation orientation; };
+    struct displayAdded : displayEvent {};
+    struct displayRemoved : displayEvent {};
+    struct displayMoved : displayEvent {};
+    struct displayDesktopModeChanged : displayEvent {};
+    struct displayCurrentModeChanged : displayEvent {};
+    struct displayContentScaleChanged : displayEvent { float contentScale; };
 
     // --- Window ---
-    struct windowShown : windowEvent { };
-    struct windowHidden : windowEvent { };
-    struct windowMinimized : windowEvent { };
-    struct windowMaximized : windowEvent { };
-    struct windowRestored : windowEvent { };
-    struct windowOccluded : windowEvent { };
-    struct windowEnterFullscreen : windowEvent { };
-    struct windowLeaveFullscreen : windowEvent { };
-    struct windowDestroyed : windowEvent { };
-    struct windowMouseEnter : windowEvent { };
-    struct windowMouseLeave : windowEvent { };
-    struct windowFocusGained : windowEvent { };
-    struct windowFocusLost : windowEvent { };
+    struct windowShown : windowEvent {};
+    struct windowHidden : windowEvent {};
+    struct windowExposed : windowEvent {};
+    struct windowMoved : windowEvent { glm::ivec2 position; };
+    struct windowResized : windowEvent { glm::ivec2 size; };
     struct windowPixelSizeChanged : windowEvent { glm::ivec2 size; };
-    struct windowMetalViewResized : windowEvent { glm::ivec2 size; };
-    struct windowCloseRequest : windowEvent { };
-    struct windowIccProfChanged : windowEvent { };
+    struct windowMetalViewResized : windowEvent {};
+    struct windowMinimized : windowEvent {};
+    struct windowMaximized : windowEvent {};
+    struct windowRestored : windowEvent {};
+    struct windowMouseEnter : windowEvent {};
+    struct windowMouseLeave : windowEvent {};
+    struct windowFocusGained : windowEvent {};
+    struct windowFocusLost : windowEvent {};
+    struct windowCloseRequest : windowEvent {};
+    struct windowHitTest : windowEvent {};
+    struct windowIccProfChanged : windowEvent {};
+    struct windowDisplayChanged : windowEvent { uint32_t displayID; };
+    struct windowDisplayScaleChanged : windowEvent {};
+    struct windowSafeAreaChanged : windowEvent {};
+    struct windowOccluded : windowEvent {};
+    struct windowEnterFullscreen : windowEvent {};
+    struct windowLeaveFullscreen : windowEvent {};
+    struct windowDestroyed : windowEvent {};
 
     // --- Keyboard ---
     struct keyboardDevice : eventBase { uint32_t keyboardID; };
-    struct keymapChanged : eventBase { };
+    struct keymapChanged : eventBase {};
     struct keyboardAdded : eventBase { uint32_t keyboardID; };
     struct keyboardRemoved : eventBase { uint32_t keyboardID; };
-    struct screenKeyboardShown : eventBase { };
-    struct screenKeyboardHidden : eventBase { };
+    struct screenKeyboardShown : eventBase {};
+    struct screenKeyboardHidden : eventBase {};
 
     struct keyDown : windowEvent
     {
@@ -606,78 +620,44 @@ X(a, SDL_SCANCODE_A)\
     };
     struct mouseWheel : windowEvent
     {
-        uint32_t mouseID; glm::vec2 scroll; glm::vec2 mousePos;
-        int32_t intScroll[2]; wheel_direction direction;
+        uint32_t which;
+        glm::vec2 scroll;
+        glm::vec2 mousePos;
+        glm::ivec2 integerScroll;
+        wheel_direction direction;
     };
 
     // --- Joystick ---
-    struct joystickEvent : eventBase { uint32_t joystickID; };
-    struct joystickDevice : joystickEvent { };
-    struct joystickAxisMoved : joystickEvent { uint8_t axis; int16_t value; };
-    struct joystickBallMoved : joystickEvent { uint8_t ball; glm::ivec2 rel; };
-    struct joystickHatPressed : joystickEvent { uint8_t hat; hat_position position; };
-    struct joystickButtonDown : joystickEvent { uint8_t button; bool pressed; };
-    struct joystickButtonUp : joystickEvent { uint8_t button; bool pressed; };
-    struct joystickAdded : joystickEvent { };
-    struct joystickRemoved : joystickEvent { };
-    struct joystickUpdateComplete : joystickEvent { };
-    struct joystickBattery : joystickEvent { power_state state; float percent; };
+    struct joystickAxisMoved : eventBase { uint32_t which; uint8_t axis; int16_t value; };
+    struct joystickBallMoved : eventBase { uint32_t which; uint8_t ball; glm::ivec2 relative; };
+    struct joystickHatPressed : eventBase { uint32_t which; uint8_t hat; hat_position value; };
+    struct joystickButtonDown : eventBase { uint32_t which; uint8_t button; bool down; };
+    struct joystickButtonUp : eventBase { uint32_t which; uint8_t button; bool down; };
+    struct joystickAdded : eventBase { uint32_t which; };
+    struct joystickRemoved : eventBase { uint32_t which; };
+    struct joystickUpdateComplete : eventBase { uint32_t which; };
+    struct joystickBattery : eventBase { uint32_t which; power_state state; float percent; };
 
     // --- Gamepad ---
-    struct gamepadEvent : eventBase { uint32_t joystickID; };
-    struct gamepadDevice : gamepadEvent { };
-    struct gamepadAdded : gamepadEvent { };
-    struct gamepadRemoved : gamepadEvent { };
-    struct gamepadRemapped : gamepadEvent { };
-    struct gamepadUpdateComplete : gamepadEvent { };
-    struct gamepadSteamHandleUpdated : gamepadEvent { };
-    struct gamepadAxis : gamepadEvent { gamepad_axis axis; int16_t value; };
-    struct gamepadButtonDown : gamepadEvent { gamepad_button button; bool is_down; };
-    struct gamepadButtonUp : gamepadEvent { gamepad_button button; bool is_down; };
+    struct gamepadAxis : eventBase { uint32_t which; gamepad_axis axis; int16_t value; };
+    struct gamepadButtonDown : eventBase { uint32_t which; gamepad_button button; bool down; };
+    struct gamepadButtonUp : eventBase { uint32_t which; gamepad_button button; bool down; };
+    struct gamepadAdded : eventBase { uint32_t which; };
+    struct gamepadRemoved : eventBase { uint32_t which; };
+    struct gamepadRemapped : eventBase { uint32_t which; };
+    struct gamepadUpdateComplete : eventBase { uint32_t which; };
+    struct gamepadSteamHandleUpdated : eventBase { uint32_t which; };
 
-    struct gamepadTouchpadDown : gamepadEvent
-    {
-        int32_t touchpad; int32_t finger; glm::vec2 position; float pressure;
-    };
-    struct gamepadTouchpadMotion : gamepadEvent
-    {
-        int32_t touchpad; int32_t finger; glm::vec2 position; float pressure;
-    };
-    struct gamepadTouchpadUp : gamepadEvent
-    {
-        int32_t touchpad; int32_t finger; glm::vec2 position; float pressure;
-    };
-    struct gamepadSensor : gamepadEvent
-    {
-        sensor_type sensor; float data[3]; uint64_t timestamp;
-    };
+    struct gamepadTouchpadDown : eventBase { uint32_t which; int32_t touchpad; int32_t finger; glm::vec2 position; float pressure; };
+    struct gamepadTouchpadMotion : eventBase { uint32_t which; int32_t touchpad; int32_t finger; glm::vec2 position; float pressure; };
+    struct gamepadTouchpadUp : eventBase { uint32_t which; int32_t touchpad; int32_t finger; glm::vec2 position; float pressure; };
+    struct gamepadSensor : eventBase { uint32_t which; sensor_type sensor; glm::vec3 data; uint64_t sensorTimestamp; };
 
     // --- Touch ---
-    struct touchEvent : eventBase
-    {
-        uint64_t touchID; uint64_t fingerID; uint32_t windowID;
-        glm::vec2 position; glm::vec2 delta; float pressure; bool canceled;
-    };
-    struct fingerDown : eventBase
-    {
-        uint64_t touchID; uint64_t fingerID; uint32_t windowID;
-        glm::vec2 position; glm::vec2 delta; float pressure;
-    };
-    struct fingerUp : eventBase
-    {
-        uint64_t touchID; uint64_t fingerID; uint32_t windowID;
-        glm::vec2 position; glm::vec2 delta; float pressure;
-    };
-    struct fingerMotion : eventBase
-    {
-        uint64_t touchID; uint64_t fingerID; uint32_t windowID;
-        glm::vec2 position; glm::vec2 delta; float pressure;
-    };
-    struct fingerCanceled : eventBase
-    {
-        uint64_t touchID; uint64_t fingerID; uint32_t windowID;
-        glm::vec2 position; glm::vec2 delta; float pressure;
-    };
+    struct fingerDown : eventBase { uint64_t touchID; uint64_t fingerID; uint32_t windowID; glm::vec2 position; glm::vec2 delta; float pressure; };
+    struct fingerMotion : eventBase { uint64_t touchID; uint64_t fingerID; uint32_t windowID; glm::vec2 position; glm::vec2 delta; float pressure; };
+    struct fingerUp : eventBase { uint64_t touchID; uint64_t fingerID; uint32_t windowID; glm::vec2 position; glm::vec2 delta; float pressure; };
+    struct fingerCanceled : eventBase { uint64_t touchID; uint64_t fingerID; uint32_t windowID; glm::vec2 position; glm::vec2 delta; float pressure; };
 
     // --- Pinch ---
     struct pinchBegin : eventBase { uint32_t windowID; float scale; };
@@ -714,93 +694,20 @@ X(a, SDL_SCANCODE_A)\
     struct cameraDeviceDenied : eventBase { uint32_t cameraID; };
 
     // --- Render ---
-    struct renderTargetsReset : windowEvent { };
-    struct renderDeviceReset : windowEvent { };
-    struct renderDeviceLost : windowEvent { };
+    struct renderTargetsReset : windowEvent {};
+    struct renderDeviceReset : windowEvent {};
+    struct renderDeviceLost : windowEvent {};
 
     // --- Internal ---
-    struct pollSentinel : eventBase { };
+    struct pollSentinel : eventBase {};
     struct userEvent : eventBase
     {
         uint32_t windowID; int32_t code; void* data1; void* data2;
     };
 
     // =========================================================================
-    // ДОБАВЛЕННЫЕ И ИСПРАВЛЕННЫЕ СТРУКТУРЫ ДЛЯ EVENT_STRUCTS.HPP
-    // =========================================================================
-
-    // --- Дополнительные оконные и дисплейные события, которых не хватало ---
-    struct displayOrientation : displayEvent { display_orientation orientation; };
-    struct displayAdded : displayEvent { };
-    struct displayRemoved : displayEvent { };
-    struct displayMoved : displayEvent { };
-    struct displayDesktopModeChanged : displayEvent { };
-    struct displayCurrentModeChanged : displayEvent { };
-    struct displayContentScaleChanged : displayEvent { float contentScale; };
-
-    struct windowShown : windowEvent { };
-    struct windowHidden : windowEvent { };
-    struct windowExposed : windowEvent { };
-    struct windowMoved : windowEvent { glm::ivec2 position; };
-    struct windowResized : windowEvent { glm::ivec2 size; };
-    struct windowHitTest : windowEvent { };
-    struct windowDisplayChanged : windowEvent { uint32_t displayID; };
-    struct windowDisplayScaleChanged : windowEvent { };
-    struct windowSafeAreaChanged : windowEvent { };
-
-    // --- Исправленные события ввода (убираем narrowing conversion и исправляем типы) ---
-
-    // Мышь (wheelDirectionEnum вместо wheelDirection)
-    struct mouseWheel : windowEvent
-    {
-        uint32_t which;
-        glm::vec2 scroll;
-        glm::vec2 mousePos;
-        glm::ivec2 integerScroll;
-        wheel_direction direction; // в твоем enum_class это wheel_direction или wheelDirectionEnum
-    };
-
-    // Джойстики
-    struct joystickAxisMoved : eventBase { uint32_t which; uint8_t axis; int16_t value; };
-    struct joystickBallMoved : eventBase { uint32_t which; uint8_t ball; glm::ivec2 relative; };
-    struct joystickHatPressed : eventBase { uint32_t which; uint8_t hat; hat_position value; };
-    struct joystickButtonDown : eventBase { uint32_t which; uint8_t button; bool down; };
-    struct joystickButtonUp : eventBase { uint32_t which; uint8_t button; bool down; };
-    struct joystickAdded : eventBase { uint32_t which; };
-    struct joystickRemoved : eventBase { uint32_t which; };
-    struct joystickBattery : eventBase { uint32_t which; power_state state; float percent; };
-
-    // Геймпады
-    struct gamepadAxis : eventBase { uint32_t which; gamepad_axis axis; int16_t value; };
-    struct gamepadButtonDown : eventBase { uint32_t which; gamepad_button button; bool down; };
-    struct gamepadButtonUp : eventBase { uint32_t which; gamepad_button button; bool down; };
-    struct gamepadAdded : eventBase { uint32_t which; };
-    struct gamepadRemoved : eventBase { uint32_t which; };
-    struct gamepadRemapped : eventBase { uint32_t which; };
-
-    // В SDL3 координаты тачпадов геймпада — это float, поэтому строго glm::vec2!
-    struct gamepadTouchpadDown : eventBase { uint32_t which; int32_t touchpad; int32_t finger; glm::vec2 position; float pressure; };
-    struct gamepadTouchpadMotion : eventBase { uint32_t which; int32_t touchpad; int32_t finger; glm::vec2 position; float pressure; };
-    struct gamepadTouchpadUp : eventBase { uint32_t which; int32_t touchpad; int32_t finger; glm::vec2 position; float pressure; };
-    struct gamepadSensor : eventBase { uint32_t which; sensor_type sensor; glm::vec3 data; uint64_t sensorTimestamp; };
-
-    // Тач (В SDL3 координаты нормализованные float, d — это тоже float дельта!)
-    struct fingerDown : eventBase { uint64_t touchID; uint64_t fingerID; uint32_t windowID; glm::vec2 position; glm::vec2 delta; float pressure; };
-    struct fingerMotion : eventBase { uint64_t touchID; uint64_t fingerID; uint32_t windowID; glm::vec2 position; glm::vec2 delta; float pressure; };
-    struct fingerUp : eventBase { uint64_t touchID; uint64_t fingerID; uint32_t windowID; glm::vec2 position; glm::vec2 delta; float pressure; };
-
-    // Дропы (В SDL3 оконные координаты x и y — это строго float!)
-    struct dropFile : windowEvent { glm::vec2 position; std::string source; std::string data; };
-    struct dropText : windowEvent { glm::vec2 position; std::string source; std::string data; };
-    struct dropBegin : windowEvent { glm::vec2 position; std::string source; };
-    struct dropComplete : windowEvent { glm::vec2 position; std::string source; };
-    struct dropPosition : windowEvent { glm::vec2 position; std::string source; std::string data; };
-
-    // =========================================================================
     // 1. КОНЦЕПТ ДЛЯ ПРОВЕРКИ ТИПА СОБЫТИЯ
     // =========================================================================
-    // Проверяет, что тип T унаследован от eventBase. 
-    // Это отсечет int, кастомные классы и пропустит только твои структуры событий.
     template<typename T>
     concept EventType = std::derived_from<T, eventBase>;
 
@@ -810,7 +717,6 @@ X(a, SDL_SCANCODE_A)\
     class event_manager
     {
     public:
-        // Используем move_only_function для максимальной скорости и поддержки лямбд с захватом move-only объектов
         template<EventType T>
         using callback = std::move_only_function<void(const T&)>;
 
@@ -823,14 +729,13 @@ X(a, SDL_SCANCODE_A)\
             return inst;
         }
 
-        // Подписка на события с ограничением через концепт EventType
         template<EventType T>
         static void on(callback<T> cb)
         {
+            instance();
             getListeners<T>().push_back(std::move(cb));
         }
 
-        // Ручной вызов события (если понадобится сгенерировать фейковое событие внутри движка)
         template<EventType T>
         static void emit(const T& event)
         {
@@ -843,7 +748,6 @@ X(a, SDL_SCANCODE_A)\
     private:
         event_manager()
         {
-            // Регистрируем низкоуровневый фильтр SDL3, который перехватывает абсолютно все события на лету
             SDL_AddEventWatch(sdlEventWatcher, this);
         }
 
@@ -856,10 +760,9 @@ X(a, SDL_SCANCODE_A)\
         {
             auto* manager = static_cast<event_manager*>(userData);
             manager->dispatchEvent(*event);
-            return true; // Возвращаем true, чтобы событие оставалось в системной очереди SDL для PollEvent
+            return true;
         }
 
-        // Хранилище подписчиков на основе статических векторов для каждого типа структуры
         template<EventType T>
         static auto& getListeners()
         {
@@ -867,13 +770,11 @@ X(a, SDL_SCANCODE_A)\
             return listeners;
         }
 
-        // Основной диспетчер: трансляция из структуры SDL_Event в структуры mngl и мгновенный emit
         void dispatchEvent(const SDL_Event& e)
         {
             const auto type = static_cast<Events>(e.type);
             const uint64_t ts = e.common.timestamp;
 
-            // Вызываем только если на данный тип события есть активные подписчики
             switch (type)
             {
                 // --- Application Events ---
@@ -1213,8 +1114,6 @@ X(a, SDL_SCANCODE_A)\
         }
     };
 
-    // Облегченная глобальная функция для кадра: только прокачивает очередь SDL3.
-    // Нам больше не нужно самим бегать циклом по событиям ради инпутов — watcher все сделает за нас внутри SDL_PumpEvents / SDL_PollEvent.
     inline void pollEvents()
     {
         SDL_PumpEvents();
