@@ -1,7 +1,7 @@
 #pragma once
 #include "utilities.hpp"
 #include "device.hpp"
-#include "texture.hpp"
+#include "gpu_texture.hpp"
 
 
 namespace mngl::gpu

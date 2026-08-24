@@ -166,10 +166,12 @@
     <ClCompile Include="MNGL.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="gpu_buffer.hpp" />
     <ClInclude Include="color.hpp" />
     <ClInclude Include="command_buffer.hpp" />
     <ClInclude Include="device.hpp" />
     <ClInclude Include="event.hpp" />
+    <ClInclude Include="graphics_pipeline.hpp" />
     <ClInclude Include="input.hpp" />
     <ClInclude Include="iupdate.h" />
     <ClInclude Include="line.hpp" />
@@ -178,10 +180,14 @@
     <ClInclude Include="proxy.hpp" />
     <ClInclude Include="rectangle.hpp" />
     <ClInclude Include="render_pass.hpp" />
-    <ClInclude Include="shader.hpp" />
+    <ClInclude Include="graphics_shader.hpp" />
+    <ClInclude Include="sampler.hpp" />
+    <ClInclude Include="shader_loader.hpp" />
     <ClInclude Include="surface.hpp" />
+    <ClInclude Include="gpu_texture.hpp" />
     <ClInclude Include="texture.hpp" />
     <ClInclude Include="utilities.hpp" />
+    <ClInclude Include="vertex_layout.hpp" />
     <ClInclude Include="window.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

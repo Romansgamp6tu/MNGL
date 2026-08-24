@@ -34,6 +34,9 @@
     <Filter Include="Файлы заголовков\gpu">
       <UniqueIdentifier>{90890103-94f9-4d51-a1c2-ea3a66abd748}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Файлы заголовков\renderer">
+      <UniqueIdentifier>{8974fa44-908d-4d4d-8ed6-526a835f72d6}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="MNGL.cpp">
@@ -86,11 +89,29 @@
     <ClInclude Include="render_pass.hpp">
       <Filter>Файлы заголовков\gpu</Filter>
     </ClInclude>
-    <ClInclude Include="texture.hpp">
+    <ClInclude Include="gpu_texture.hpp">
       <Filter>Файлы заголовков\gpu</Filter>
     </ClInclude>
-    <ClInclude Include="shader.hpp">
+    <ClInclude Include="graphics_shader.hpp">
       <Filter>Файлы заголовков\gpu</Filter>
+    </ClInclude>
+    <ClInclude Include="shader_loader.hpp">
+      <Filter>Файлы заголовков\gpu</Filter>
+    </ClInclude>
+    <ClInclude Include="vertex_layout.hpp">
+      <Filter>Файлы заголовков\gpu</Filter>
+    </ClInclude>
+    <ClInclude Include="graphics_pipeline.hpp">
+      <Filter>Файлы заголовков\gpu</Filter>
+    </ClInclude>
+    <ClInclude Include="gpu_buffer.hpp">
+      <Filter>Файлы заголовков\gpu</Filter>
+    </ClInclude>
+    <ClInclude Include="sampler.hpp">
+      <Filter>Файлы заголовков\gpu</Filter>
+    </ClInclude>
+    <ClInclude Include="texture.hpp">
+      <Filter>Файлы заголовков\renderer</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

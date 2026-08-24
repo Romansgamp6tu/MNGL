@@ -180,3 +180,77 @@ constexpr inline bool debug_mode = true;
 #else
 constexpr inline bool debug_mode = false;
 #endif
+
+
+#include <filesystem>
+#include <fstream>
+#include <vector>
+#include <array>
+#include <cstdio>
+#include <format>
+#include <cstdint>
+
+#if defined(_WIN32)
+#define MNGL_POPEN _popen
+#define MNGL_PCLOSE _pclose
+#else
+#include <sys/wait.h>
+#define MNGL_POPEN popen
+#define MNGL_PCLOSE pclose
+#endif
+
+struct process_result
+{
+	int exit_code = 0;
+	std::string output;
+};
+
+inline process_result run_command(const std::string& cmd)
+{
+	std::string full_cmd = cmd + " 2>&1";
+	std::array<char, 256> buffer{};
+	std::string output;
+
+	FILE* pipe = MNGL_POPEN(full_cmd.c_str(), "r");
+	if (!pipe)
+	{
+		throw std::runtime_error(std::format("Failed to spawn process for command: {}", cmd));
+	}
+
+	while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr)
+	{
+		output += buffer.data();
+	}
+
+	int raw_code = MNGL_PCLOSE(pipe);
+	int exit_code = raw_code;
+
+#if !defined(_WIN32)
+	if (WIFEXITED(raw_code))
+	{
+		exit_code = WEXITSTATUS(raw_code);
+	}
+#endif
+
+	return {exit_code, std::move(output)};
+}
+
+inline std::vector<uint8_t> read_binary_file(const std::filesystem::path& path)
+{
+	std::ifstream file(path, std::ios::binary | std::ios::ate);
+	if (!file.is_open())
+	{
+		throw std::runtime_error(std::format("Failed to open file: {}", path.string()));
+	}
+
+	const auto size = file.tellg();
+	file.seekg(0, std::ios::beg);
+
+	std::vector<uint8_t> buffer(static_cast<size_t>(size));
+	if (size > 0 && !file.read(reinterpret_cast<char*>(buffer.data()), size))
+	{
+		throw std::runtime_error(std::format("Failed to read binary file: {}", path.string()));
+	}
+
+	return buffer;
+}
