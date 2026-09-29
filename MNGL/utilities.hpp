@@ -6,7 +6,8 @@
 
 // определим информацию о приложении, если не была задана пользователем
 
-#define STR(x) #x
+#define MNGL_STRINGIFY_IMPL(x) #x
+#define STR(x) MNGL_STRINGIFY_IMPL(x)
 
 #ifndef APP_NAME
 #define APP_NAME "SDL3 app"
@@ -185,55 +186,15 @@ constexpr inline bool debug_mode = false;
 #include <filesystem>
 #include <fstream>
 #include <vector>
-#include <array>
-#include <cstdio>
 #include <format>
 #include <cstdint>
-
-#if defined(_WIN32)
-#define MNGL_POPEN _popen
-#define MNGL_PCLOSE _pclose
-#else
-#include <sys/wait.h>
-#define MNGL_POPEN popen
-#define MNGL_PCLOSE pclose
-#endif
+#include <limits>
 
 struct process_result
 {
 	int exit_code = 0;
 	std::string output;
 };
-
-inline process_result run_command(const std::string& cmd)
-{
-	std::string full_cmd = cmd + " 2>&1";
-	std::array<char, 256> buffer{};
-	std::string output;
-
-	FILE* pipe = MNGL_POPEN(full_cmd.c_str(), "r");
-	if (!pipe)
-	{
-		throw std::runtime_error(std::format("Failed to spawn process for command: {}", cmd));
-	}
-
-	while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr)
-	{
-		output += buffer.data();
-	}
-
-	int raw_code = MNGL_PCLOSE(pipe);
-	int exit_code = raw_code;
-
-#if !defined(_WIN32)
-	if (WIFEXITED(raw_code))
-	{
-		exit_code = WEXITSTATUS(raw_code);
-	}
-#endif
-
-	return {exit_code, std::move(output)};
-}
 
 inline std::vector<uint8_t> read_binary_file(const std::filesystem::path& path)
 {
@@ -243,11 +204,25 @@ inline std::vector<uint8_t> read_binary_file(const std::filesystem::path& path)
 		throw std::runtime_error(std::format("Failed to open file: {}", path.string()));
 	}
 
-	const auto size = file.tellg();
-	file.seekg(0, std::ios::beg);
+	const auto size = static_cast<std::streamoff>(file.tellg());
+	if (size < 0)
+	{
+		throw std::runtime_error(std::format("Failed to determine file size: {}", path.string()));
+	}
+	const auto unsigned_size = static_cast<uintmax_t>(size);
+	if (unsigned_size > std::numeric_limits<size_t>::max() ||
+		unsigned_size > static_cast<uintmax_t>(std::numeric_limits<std::streamsize>::max()))
+	{
+		throw std::length_error(std::format("File is too large to read: {}", path.string()));
+	}
+	if (!file.seekg(0, std::ios::beg))
+	{
+		throw std::runtime_error(std::format("Failed to seek in file: {}", path.string()));
+	}
 
-	std::vector<uint8_t> buffer(static_cast<size_t>(size));
-	if (size > 0 && !file.read(reinterpret_cast<char*>(buffer.data()), size))
+	std::vector<uint8_t> buffer(static_cast<size_t>(unsigned_size));
+	if (!buffer.empty() &&
+		!file.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(buffer.size())))
 	{
 		throw std::runtime_error(std::format("Failed to read binary file: {}", path.string()));
 	}

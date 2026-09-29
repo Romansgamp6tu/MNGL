@@ -39,8 +39,8 @@ public:
 	{
 		((cout << std::forward<T>(out)), ...);
 		((fout << std::forward<T>(out)), ...);
-		cout << std::endl;
-		fout << std::endl;
+		cout << '\n';
+		fout << '\n';
 		return *this;
 	}
 

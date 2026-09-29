@@ -84,6 +84,7 @@ namespace mngl::gpu
 		)
 		{
 			m_buffers.push_back({slot, pitch, input_rate, instance_step_rate});
+			return *this;
 		}
 
 		vertex_layout& add_attribute(
@@ -94,6 +95,7 @@ namespace mngl::gpu
 		)
 		{
 			m_attributes.push_back({location, buffer_slot, format, offset});
+			return *this;
 		}
 
 		vertex_layout& add_attribute(
@@ -103,6 +105,7 @@ namespace mngl::gpu
 		)
 		{
 			m_attributes.push_back({location, 0, format, offset});
+			return *this;
 		}
 
 		[[nodiscard]] std::span<const vertex_buffer_description> buffers() const noexcept { return m_buffers; }

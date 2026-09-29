@@ -24,7 +24,7 @@ namespace mngl
 			};
 		};
 
-		rectangle() = default;
+		rectangle() : pos(0.0f), size(0.0f) {}
 		rectangle(glm::vec2 p, glm::vec2 s) : pos(p), size(s) {}
 		rectangle(float x, float y, float w, float h) : pos(x, y), size(w, h) {}
 		rectangle(const SDL_Rect& r) : pos(r.x, r.y), size(r.w, r.h) {}

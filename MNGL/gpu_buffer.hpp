@@ -4,6 +4,13 @@
 #include "device.hpp"
 #include "command_buffer.hpp"
 
+#include <cstring>
+#include <limits>
+#include <span>
+#include <stdexcept>
+#include <type_traits>
+#include <utility>
+
 namespace mngl::gpu
 {
 	enum class buffer_usage : uint8_t
@@ -70,9 +77,10 @@ namespace mngl::gpu
 			if (m_device && m_handle)
 			{
 				SDL_ReleaseGPUBuffer(m_device, m_handle);
-				m_handle = nullptr;
-				m_size = 0;
 			}
+			m_handle = nullptr;
+			m_device = nullptr;
+			m_size = 0;
 		}
 
 		template<typename T>
@@ -80,25 +88,42 @@ namespace mngl::gpu
 		{
 			static_assert(std::is_trivially_copyable_v<T>, "Data must be trivially copyable!");
 
-			const uint32_t upload_size = static_cast<uint32_t>(data.size_bytes());
+			const uint32_t upload_size = checked_size(data.size_bytes());
 			if (upload_size == 0) return;
+			if (!device)
+			{
+				throw std::invalid_argument("Cannot upload GPU buffer data with a null device");
+			}
+			if (!cmd.valid())
+			{
+				throw std::invalid_argument("Cannot upload GPU buffer data with an invalid command buffer");
+			}
+			if (cmd.device_raw() && cmd.device_raw() != device)
+			{
+				throw std::invalid_argument("GPU buffer and command buffer must use the same device");
+			}
+			if (m_handle && m_device != device)
+			{
+				throw std::invalid_argument("GPU buffer cannot be uploaded using a different device");
+			}
 
 			// Пересоздаем буфер, если текущий размер слишком мал
 			if (upload_size > m_size || !m_handle)
 			{
 				destroy();
-				m_device = device;
-				m_size = upload_size;
 
 				SDL_GPUBufferCreateInfo info{};
 				info.usage = static_cast<SDL_GPUBufferUsageFlags>(m_usage);
-				info.size = m_size;
+				info.size = upload_size;
 
-				m_handle = SDL_CreateGPUBuffer(m_device, &info);
-				if (!m_handle)
+				auto* new_handle = SDL_CreateGPUBuffer(device, &info);
+				if (!new_handle)
 				{
 					throw sdl_error("Failed to allocate GPU buffer: ");
 				}
+				m_device = device;
+				m_handle = new_handle;
+				m_size = upload_size;
 			}
 
 			// 1. Создаем временный Transfer Buffer в RAM
@@ -157,12 +182,21 @@ namespace mngl::gpu
 			buffer_usage usage
 		)
 		{
-			buffer buf(device, static_cast<uint32_t>(data.size_bytes()), usage);
+			buffer buf(device, checked_size(data.size_bytes()), usage);
 			buf.upload(device, cmd, data);
 			return buf;
 		}
 
 	private:
+		static uint32_t checked_size(std::size_t size)
+		{
+			if (size > std::numeric_limits<uint32_t>::max())
+			{
+				throw std::length_error("GPU buffer data exceeds SDL's 32-bit size limit");
+			}
+			return static_cast<uint32_t>(size);
+		}
+
 		SDL_GPUDevice* m_device = nullptr;
 		SDL_GPUBuffer* m_handle = nullptr;
 		uint32_t m_size = 0;
