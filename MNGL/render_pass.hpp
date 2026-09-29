@@ -6,8 +6,8 @@
 #include "gpu_texture.hpp"
 #include "graphics_pipeline.hpp"
 
+#include <array>
 #include <span>
-#include <vector>
 #include <stdexcept>
 
 namespace mngl::gpu
@@ -75,8 +75,8 @@ namespace mngl::gpu
 				throw std::invalid_argument("Render pass supports at most four color targets");
 			}
 
-			std::vector<SDL_GPUColorTargetInfo> sdl_color_targets;
-			sdl_color_targets.reserve(color_targets.size());
+			std::array<SDL_GPUColorTargetInfo, 4> sdl_color_targets{};
+			uint32_t color_target_count = 0;
 
 			for (const auto& attachment : color_targets)
 			{
@@ -91,7 +91,7 @@ namespace mngl::gpu
 				info.load_op = static_cast<SDL_GPULoadOp>(attachment.load);
 				info.store_op = static_cast<SDL_GPUStoreOp>(attachment.store);
 
-				sdl_color_targets.push_back(info);
+				sdl_color_targets[color_target_count++] = info;
 			}
 
 			SDL_GPUDepthStencilTargetInfo sdl_depth_info{};
@@ -116,12 +116,8 @@ namespace mngl::gpu
 				depth_ptr = &sdl_depth_info;
 			}
 
-			handle = SDL_BeginGPURenderPass(
-				cmd.raw(),
-				sdl_color_targets.data(),
-				static_cast<uint32_t>(sdl_color_targets.size()),
-				depth_ptr
-			);
+			const auto* color_target_data = color_target_count ? sdl_color_targets.data() : nullptr;
+			handle = SDL_BeginGPURenderPass(cmd.raw(), color_target_data, color_target_count, depth_ptr);
 
 			if (!handle)
 			{

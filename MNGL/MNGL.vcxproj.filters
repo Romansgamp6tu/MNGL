@@ -37,6 +37,9 @@
     <Filter Include="Файлы заголовков\renderer">
       <UniqueIdentifier>{8974fa44-908d-4d4d-8ed6-526a835f72d6}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Файлы заголовков\2d">
+      <UniqueIdentifier>{B3771E92-89AC-4D23-9DF5-0D1AFCEBAF63}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="MNGL.cpp">
@@ -107,11 +110,58 @@
     <ClInclude Include="gpu_buffer.hpp">
       <Filter>Файлы заголовков\gpu</Filter>
     </ClInclude>
+    <ClInclude Include="batcher2d.hpp">
+      <Filter>Файлы заголовков\gpu</Filter>
+    </ClInclude>
+    <ClInclude Include="renderer2d.hpp">
+      <Filter>Файлы заголовков\2d</Filter>
+    </ClInclude>
     <ClInclude Include="sampler.hpp">
       <Filter>Файлы заголовков\gpu</Filter>
     </ClInclude>
     <ClInclude Include="texture.hpp">
       <Filter>Файлы заголовков\renderer</Filter>
     </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="shaders\batcher2d.vert.hlsl">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="shaders\batcher2d.frag.hlsl">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="shaders\custom_fill.frag.hlsl">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="shaders\custom_storage.frag.hlsl">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="shaders\custom_storage_texture.frag.hlsl">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="shaders\batcher2d.vert.dxil">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="shaders\batcher2d.frag.dxil">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="shaders\custom_fill.frag.dxil">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="shaders\custom_storage.frag.dxil">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="shaders\custom_storage_texture.frag.dxil">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="$(SolutionDir)libs\SDL3.dll">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="$(SolutionDir)libs\SDL3_image.dll">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="$(SolutionDir)libs\freetype.dll">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
   </ItemGroup>
 </Project>

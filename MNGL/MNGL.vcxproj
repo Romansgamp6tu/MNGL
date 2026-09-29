@@ -167,6 +167,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="gpu_buffer.hpp" />
+    <ClInclude Include="batcher2d.hpp" />
+    <ClInclude Include="renderer2d.hpp" />
     <ClInclude Include="color.hpp" />
     <ClInclude Include="command_buffer.hpp" />
     <ClInclude Include="device.hpp" />
@@ -189,6 +191,47 @@
     <ClInclude Include="utilities.hpp" />
     <ClInclude Include="vertex_layout.hpp" />
     <ClInclude Include="window.hpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="shaders\batcher2d.vert.hlsl">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="shaders\batcher2d.frag.hlsl">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="shaders\custom_fill.frag.hlsl">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="shaders\custom_storage.frag.hlsl">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="shaders\custom_storage_texture.frag.hlsl">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="shaders\batcher2d.vert.dxil">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="shaders\batcher2d.frag.dxil">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="shaders\custom_fill.frag.dxil">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="shaders\custom_storage.frag.dxil">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="shaders\custom_storage_texture.frag.dxil">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="$(SolutionDir)libs\SDL3.dll" Condition="'$(Platform)'=='x64'">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="$(SolutionDir)libs\SDL3_image.dll" Condition="'$(Platform)'=='x64'">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="$(SolutionDir)libs\freetype.dll" Condition="'$(Platform)'=='x64'">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
