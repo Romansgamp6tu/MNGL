@@ -148,15 +148,13 @@ namespace mngl::gpu
 
 	struct shader_formats
 	{
-		constexpr static inline int spirv = SDL_GPU_SHADERFORMAT_SPIRV;
-		constexpr static inline int dxil = SDL_GPU_SHADERFORMAT_DXIL;
-		constexpr static inline int msl = SDL_GPU_SHADERFORMAT_MSL;
-		constexpr static inline int dxbc = SDL_GPU_SHADERFORMAT_DXBC;
-		constexpr static inline int metallib = SDL_GPU_SHADERFORMAT_METALLIB;
-		constexpr static inline int invalid = SDL_GPU_SHADERFORMAT_INVALID;
+		constexpr static inline SDL_GPUShaderFormat spirv = SDL_GPU_SHADERFORMAT_SPIRV;
+		constexpr static inline SDL_GPUShaderFormat dxil = SDL_GPU_SHADERFORMAT_DXIL;
+		constexpr static inline SDL_GPUShaderFormat msl = SDL_GPU_SHADERFORMAT_MSL;
+		constexpr static inline SDL_GPUShaderFormat dxbc = SDL_GPU_SHADERFORMAT_DXBC;
+		constexpr static inline SDL_GPUShaderFormat metallib = SDL_GPU_SHADERFORMAT_METALLIB;
+		constexpr static inline SDL_GPUShaderFormat invalid = SDL_GPU_SHADERFORMAT_INVALID;
 	};
-
-	typedef uint32_t shader_format;
 
 #ifdef SDL_PLATFORM_WINDOWS
 #define MNGL_DEFAULT_SHADER_FORMAT shader_formats::dxil
@@ -179,9 +177,22 @@ namespace mngl::gpu
 			return handle;
 		}
 
-		void wait() const
+		bool wait() const noexcept
 		{
-			SDL_WaitForGPUIdle(handle);
+			if (!handle)
+			{
+				return false;
+			}
+
+			if (!SDL_WaitForGPUIdle(handle))
+			{
+				SDL_LogError(
+					SDL_LOG_CATEGORY_APPLICATION,
+					"Failed to wait for GPU idle: %s",
+					SDL_GetError());
+				return false;
+			}
+			return true;
 		}
 
 		device(const device&) = delete;
@@ -193,11 +204,7 @@ namespace mngl::gpu
 		{
 			if (this != &o)
 			{
-				if (handle)
-				{
-					wait();
-					SDL_DestroyGPUDevice(handle);
-				}
+				destroy();
 				handle = o.handle;
 				o.handle = nullptr;
 			}
@@ -212,11 +219,7 @@ namespace mngl::gpu
 
 		~device()
 		{
-			if (handle)
-			{
-				wait();
-				SDL_DestroyGPUDevice(handle);
-			}
+			destroy();
 		}
 
 		SDL_GPUShaderFormat shader_format() const
@@ -262,6 +265,16 @@ namespace mngl::gpu
 			return (texture_format)SDL_GetGPUSwapchainTextureFormat(handle, win.raw());
 		}
 	private:
+		void destroy() noexcept
+		{
+			if (handle)
+			{
+				(void)wait();
+				SDL_DestroyGPUDevice(handle);
+				handle = nullptr;
+			}
+		}
+
 		SDL_GPUDevice* handle;
 	};
 }

@@ -1,7 +1,10 @@
 #pragma once
 
 #include "utilities.hpp"
+#include <algorithm>
+#include <atomic>
 #include <bitset>
+#include <mutex>
 
 #include "event.hpp"
 #include "iupdate.h"
@@ -21,7 +24,33 @@ namespace mngl
 	class Input
 	{
 	private:
-		static inline double dt = 0.1;
+		static inline std::atomic<double> dt = 0.1;
+		static inline std::atomic<uint32_t> max_fps_limit = 60;
+		static inline uint64_t next_frame_ns = 0;
+		static inline std::atomic_bool frame_clock_initialized = false;
+
+		static void wait_for_next_frame()
+		{
+			const uint32_t fps = max_fps_limit.load(std::memory_order_relaxed);
+			if (fps == 0) return;
+
+			const uint64_t frame_interval_ns =
+				std::max<uint64_t>(SDL_NS_PER_SECOND / fps, 1);
+			uint64_t now = SDL_GetTicksNS();
+			if (!frame_clock_initialized.exchange(true, std::memory_order_relaxed))
+			{
+				next_frame_ns = now;
+			}
+
+			while (now < next_frame_ns)
+			{
+				SDL_DelayNS(next_frame_ns - now);
+				now = SDL_GetTicksNS();
+			}
+
+			next_frame_ns += ((now - next_frame_ns) / frame_interval_ns + 1) * frame_interval_ns;
+		}
+
 		static void update_dt()
 		{
 			static uint64_t last_time = 0;
@@ -31,32 +60,64 @@ namespace mngl
 				return;
 			}
 			auto current_time = performance_counter();
-			dt = std::min((current_time - last_time) / static_cast<double>(performance_frequency()), 0.1);
+			dt.store(
+				std::min((current_time - last_time) / static_cast<double>(performance_frequency()), 0.1),
+				std::memory_order_relaxed);
 			last_time = current_time;
 		}
 		static void init_all()
 		{
 			static [[maybe_unused]] bool app_quit_inited = [&]() -> bool
 			{
-				event_manager::on<appQuit>([](const appQuit& e) { should_work = false; });
-				event_manager::on<appTerminating>([](const appTerminating& e) { should_work = false; });
-				event_manager::on<windowCloseRequest>([](const windowCloseRequest& e) { should_work = false; });
+				event_manager::on<appQuit>([](const appQuit&) { should_work.store(false, std::memory_order_release); });
+				event_manager::on<appTerminating>([](const appTerminating&) { should_work.store(false, std::memory_order_release); });
+				event_manager::on<windowCloseRequest>([](const windowCloseRequest&) { should_work.store(false, std::memory_order_release); });
 				return true;
 			}();
 
 			static [[maybe_unused]] bool kboard_inited = [&]() -> bool
 			{
-				event_manager::on<keyDown>([](const keyDown& e) { if(!e.repeat) [[likely]] pressed_keys.insert(e.code); });
-				event_manager::on<keyUp>([](const keyUp& e) { released_keys.insert(e.code); holded_keys.erase(e.code); });
+				event_manager::on<keyDown>([](const keyDown& e)
+				{
+					if (!e.repeat) [[likely]]
+					{
+						std::lock_guard lock(state_mutex);
+						pressed_keys.insert(e.code);
+					}
+				});
+				event_manager::on<keyUp>([](const keyUp& e)
+				{
+					std::lock_guard lock(state_mutex);
+					released_keys.insert(e.code);
+					holded_keys.erase(e.code);
+				});
 				return true;
 			}();
 
 			static [[maybe_unused]] bool mouse_inited = [&]() -> bool
 			{
-				event_manager::on<mouseMotion>([](const mouseMotion& e) { mdelta += e.position - mpos; mpos = e.position; });
-				event_manager::on<mouseButtonDown>([](const mouseButtonDown& e) { mpressed |= 1 << (e.button - 1); });
-				event_manager::on<mouseButtonUp>([](const mouseButtonUp& e) { mreleased |= 1 << (e.button - 1); mholded &= ~(1 << (e.button - 1)); });
-				event_manager::on<mouseWheel>([](const mouseWheel& e) { mscrolldelta += e.scroll; });
+				event_manager::on<mouseMotion>([](const mouseMotion& e)
+				{
+					std::lock_guard lock(state_mutex);
+					mdelta += e.position - mpos;
+					mpos = e.position;
+				});
+				event_manager::on<mouseButtonDown>([](const mouseButtonDown& e)
+				{
+					std::lock_guard lock(state_mutex);
+					mpressed |= 1 << (e.button - 1);
+				});
+				event_manager::on<mouseButtonUp>([](const mouseButtonUp& e)
+				{
+					std::lock_guard lock(state_mutex);
+					mreleased |= 1 << (e.button - 1);
+					mholded &= ~(1 << (e.button - 1));
+				});
+				event_manager::on<mouseWheel>([](const mouseWheel& e)
+				{
+					std::lock_guard lock(state_mutex);
+					mscrolldelta += e.scroll;
+				});
 				return true;
 			}();
 		}
@@ -72,9 +133,11 @@ namespace mngl
 		static inline uint32_t mpressed;
 		static inline uint32_t mholded;
 		static inline uint32_t mreleased;
+		static inline std::mutex state_mutex;
 
 		static void update_info()
 		{
+			std::lock_guard lock(state_mutex);
 			holded_keys.insert(pressed_keys.begin(), pressed_keys.end());
 			pressed_keys.clear();
 			released_keys.clear();
@@ -89,7 +152,9 @@ namespace mngl
 		{
 			update_info();
 			SDL_PumpEvents();
+#ifndef NO_SDLINPUT_QUEUE_FLUSH
 			SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
+#endif
 		}
 	public:
 		static uint64_t performance_counter()
@@ -102,61 +167,86 @@ namespace mngl
 		}
 		static double get_dt()
 		{
-			return dt;
+			return dt.load(std::memory_order_relaxed);
 		}
+
+		// Ноль отключает ограничение частоты кадров.
+		static void set_max_fps(uint32_t fps)
+		{
+			max_fps_limit.store(fps, std::memory_order_relaxed);
+			frame_clock_initialized.store(false, std::memory_order_relaxed);
+		}
+
+		static uint32_t get_max_fps()
+		{
+			return max_fps_limit.load(std::memory_order_relaxed);
+		}
+
 		static bool continue_work()
 		{
 			init_all();
+			if (!should_work.load(std::memory_order_acquire)) [[unlikely]]
+				return false;
+			wait_for_next_frame();
 			pool_events();
-			if (!should_work) [[unlikely]]
+			if (!should_work.load(std::memory_order_acquire)) [[unlikely]]
 				return false;
 			//перерасчёт всех дельт, и тому подобного
 			update_dt();
-			update_manager::tick(dt);
+			update_manager::tick(dt.load(std::memory_order_relaxed));
 			return true;
 		}
 
 		static bool is_key_pressed(scancode code)
 		{
+			std::lock_guard lock(state_mutex);
 			return pressed_keys.find(code) != pressed_keys.end();
 		}
 		static bool is_key_holded(scancode code)
 		{
+			std::lock_guard lock(state_mutex);
 			return holded_keys.find(code) != holded_keys.end();
 		}
 		static bool is_key_released(scancode code)
 		{
+			std::lock_guard lock(state_mutex);
 			return released_keys.find(code) != released_keys.end();
 		}
 
 		static glm::vec2 get_mouse_position()
 		{
+			std::lock_guard lock(state_mutex);
 			return mpos;
 		}
 		static glm::vec2 get_mouse_delta()
 		{
+			std::lock_guard lock(state_mutex);
 			return mdelta;
 		}
 		static glm::vec2 get_mouse_scroll_delta()
 		{
+			std::lock_guard lock(state_mutex);
 			return mscrolldelta;
 		}
 
 		static bool is_mouse_button_pressed(mouse_button button)
 		{
+			std::lock_guard lock(state_mutex);
 			return mpressed & (1 << (static_cast<uint8_t>(button) - 1));
 		}
 		static bool is_mouse_button_holded(mouse_button button)
 		{
+			std::lock_guard lock(state_mutex);
 			return mholded & (1 << (static_cast<uint8_t>(button) - 1));
 		}
 		static bool is_mouse_button_released(mouse_button button)
 		{
+			std::lock_guard lock(state_mutex);
 			return mreleased & (1 << (static_cast<uint8_t>(button) - 1));
 		}
 
 
 
-		inline static bool should_work = true;
+		inline static std::atomic_bool should_work = true;
 	};
 }

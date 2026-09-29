@@ -3,31 +3,52 @@
 #include "utilities.hpp"
 #include "device.hpp"
 
+#include <stdexcept>
+#include <utility>
+
 namespace mngl::gpu
 {
 	class texture
 	{
 	public:
-		texture() {}
+		texture() noexcept {}
 		~texture()
 		{
 			destroy();
 		}
 		texture(const texture& other) = delete;
 		texture& operator=(const texture& other) = delete;
-		texture(texture&& other)
+		texture(texture&& other) noexcept
 		{
 			swap(*this, other);
 		}
-		texture& operator=(texture&& other)
+		texture& operator=(texture&& other) noexcept
 		{
-			swap(*this, other);
+			if (this != &other)
+			{
+				destroy();
+				swap(*this, other);
+			}
 			return *this;
 		}
 
 		texture(const device& device, glm::uvec2 texture_size, texture_format format, uint32_t flags)
 			: dev(device.raw()), fmt(format), usage_flag(flags), size(texture_size), is_swapchain(false)
 		{
+			if (!dev)
+			{
+				throw std::invalid_argument("Cannot create a GPU texture with a null device");
+			}
+			if (size.x == 0 || size.y == 0)
+			{
+				throw std::invalid_argument("GPU texture dimensions must be non-zero");
+			}
+			if (!SDL_GPUTextureSupportsFormat(
+				dev, static_cast<SDL_GPUTextureFormat>(format), SDL_GPU_TEXTURETYPE_2D, flags))
+			{
+				throw std::invalid_argument("GPU device does not support this texture format/usage combination");
+			}
+
 			SDL_GPUTextureCreateInfo create_info{};
 			create_info.type = SDL_GPU_TEXTURETYPE_2D;
 			create_info.format = static_cast<SDL_GPUTextureFormat>(format);
@@ -37,7 +58,11 @@ namespace mngl::gpu
 			create_info.layer_count_or_depth = 1;
 			create_info.num_levels = 1; // Для начала без мип-мапов
 
-			TRY_SDL(handle = SDL_CreateGPUTexture(dev, &create_info));
+			handle = SDL_CreateGPUTexture(dev, &create_info);
+			if (!handle)
+			{
+				throw sdl_error("Failed to create GPU texture: ");
+			}
 		}
 
 		struct usage_flags
@@ -77,12 +102,16 @@ namespace mngl::gpu
 			}
 			handle = nullptr;
 			dev = nullptr;
+			fmt = texture_format::invalid;
+			usage_flag = 0;
+			size = { 0, 0 };
+			is_swapchain = false;
 		}
 
 	private:
 		SDL_GPUTexture* handle	= nullptr;
 		SDL_GPUDevice* dev		= nullptr;
-		texture_format fmt		= texture_format::r8_snorm;
+		texture_format fmt		= texture_format::invalid;
 		uint32_t usage_flag		= 0;
 		glm::uvec2 size			= { 0, 0 };
 		bool is_swapchain		= false;
@@ -94,7 +123,7 @@ namespace mngl::gpu
 			usage_flag(SDL_GPU_TEXTUREUSAGE_COLOR_TARGET), size(texture_size), is_swapchain(true)
 		{}
 
-		friend inline void swap(mngl::gpu::texture& l, mngl::gpu::texture& r)
+		friend inline void swap(mngl::gpu::texture& l, mngl::gpu::texture& r) noexcept
 		{
 			using std::swap;
 			swap(l.handle, r.handle);

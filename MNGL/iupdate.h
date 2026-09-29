@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <cstddef>
 #include <vector>
 
 namespace mngl
@@ -20,7 +22,7 @@ namespace mngl
 
 		static void tick(double dt)
 		{
-			for (size_t i = 0; i < updatables.size(); ++i)
+			for (std::size_t i = 0; i < updatables.size(); ++i)
 			{
 				if (updatables[i])
 				{
@@ -51,12 +53,12 @@ namespace mngl
 		}
 	};
 
-	Iupdatable::~Iupdatable()
+	inline Iupdatable::~Iupdatable()
 	{
 		update_manager::remove(this);
 	}
 
-	Iupdatable::Iupdatable()
+	inline Iupdatable::Iupdatable()
 	{
 		update_manager::add(this);
 	}

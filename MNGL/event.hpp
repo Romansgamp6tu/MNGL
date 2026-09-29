@@ -1,6 +1,9 @@
 #pragma once
 
 #include "utilities.hpp"
+#include <atomic>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 #include <functional>
@@ -733,19 +736,29 @@ namespace mngl
         static void on(callback<T> cb)
         {
             instance();
-            getListeners<T>().push_back(std::move(cb));
+            auto& listeners = getListeners<T>();
+            std::lock_guard lock(listeners.writer_mutex);
+            auto updated = std::make_shared<typename listener_collection<T>::listener_vector>(
+                *listeners.callbacks.load(std::memory_order_acquire));
+            updated->push_back(std::make_shared<callback<T>>(std::move(cb)));
+            listeners.callbacks.store(std::move(updated), std::memory_order_release);
         }
 
         template<EventType T>
         static void emit(const T& event)
         {
-            for (auto& cb : getListeners<T>())
+            std::lock_guard lock(dispatch_mutex);
+            const auto listeners = getListeners<T>().callbacks.load(std::memory_order_acquire);
+            for (const auto& cb : *listeners)
             {
-                if (cb) cb(event);
+                if (*cb) (*cb)(event);
             }
         }
 
     private:
+        // SDL event watches may run on posting threads; serialize callbacks while allowing nested emits.
+        static inline std::recursive_mutex dispatch_mutex;
+
         event_manager()
         {
             SDL_AddEventWatch(sdlEventWatcher, this);
@@ -764,9 +777,25 @@ namespace mngl
         }
 
         template<EventType T>
-        static auto& getListeners()
+        struct listener_collection
         {
-            static std::vector<callback<T>> listeners;
+            using listener_vector = std::vector<std::shared_ptr<callback<T>>>;
+
+            std::mutex writer_mutex;
+            std::atomic<std::shared_ptr<const listener_vector>> callbacks{
+                std::make_shared<const listener_vector>()
+            };
+
+            bool empty() const
+            {
+                return callbacks.load(std::memory_order_acquire)->empty();
+            }
+        };
+
+        template<EventType T>
+        static listener_collection<T>& getListeners()
+        {
+            static listener_collection<T> listeners;
             return listeners;
         }
 

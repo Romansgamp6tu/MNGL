@@ -73,11 +73,12 @@ namespace mngl
 		{
 			std::unique_lock lg(mut);
 			auto id = SDL_GetWindowID(win);
-			elements.insert({ id, data });
+			elements.insert_or_assign(id, data);
 		}
 
 		static void remove_window(SDL_Window* win)
 		{
+			if (!win) return;
 			std::unique_lock lg(mut);
 			auto id = SDL_GetWindowID(win);
 			elements.erase(id);
@@ -145,14 +146,14 @@ namespace mngl
 		mngl::rectangle bounds() const
 		{
 			mngl::rectangle rect;
-			if (!SDL_GetDisplayBounds(disp, mngl::rectangleProxy(rect))) throw sdl_error("failed to get disply bounds: ");
+			if (!SDL_GetDisplayBounds(disp, mngl::rectangleProxy(rect, mngl::proxy_mode::output))) throw sdl_error("failed to get disply bounds: ");
 			return rect;
 		}
 
 		mngl::rectangle usable_bounds() const
 		{
 			mngl::rectangle rect;
-			if (!SDL_GetDisplayUsableBounds(disp, mngl::rectangleProxy(rect))) throw sdl_error("failed to get disply bounds: ");
+			if (!SDL_GetDisplayUsableBounds(disp, mngl::rectangleProxy(rect, mngl::proxy_mode::output))) throw sdl_error("failed to get disply bounds: ");
 			return rect;
 		}
 
@@ -189,7 +190,7 @@ namespace mngl
 		static display for_rect(mngl::rectangle rect)
 		{
 			std::lock_guard lg(mut);
-			auto d = SDL_GetDisplayForRect(mngl::rectangleProxy(rect));
+			auto d = SDL_GetDisplayForRect(mngl::rectangleProxy(rect, mngl::proxy_mode::input));
 			if (!d) throw sdl_error("failed to find such display for rectangle at position " + to_string(rect.pos) + " and size " + to_string(rect.size) + ": ");
 			return d;
 		}
@@ -382,16 +383,14 @@ namespace mngl
 		window(const window&) = delete;
 		window& operator=(const window&) = delete;
 
-		window(window&& other) noexcept
+		window(window&& other) noexcept : win(other.win)
 		{
-			win = other.win;
-			other.win = nullptr;
 			if (win)
 			{
-				window_manager::remove_window(other.win);
 				window_manager::add_window(win, this);
 				logger.debug("moved window ", win);
 			}
+			other.win = nullptr;
 		}
 
 		window& operator=(window&& other) noexcept
@@ -399,15 +398,19 @@ namespace mngl
 			if (this == &other) return *this;
 			if (win)
 			{
-				SDL_DestroyWindow(win);
-				window_manager::remove_window(win);
-				logger.debug("destroyed old window ", win, " due to move assignment");
+				SDL_Window* old_win = win;
+				window_manager::remove_window(old_win);
+				win = nullptr;
+				SDL_DestroyWindow(old_win);
+				logger.debug("destroyed old window ", old_win, " due to move assignment");
 			}
-			window_manager::remove_window(other.win);
 			win = other.win;
-			other.win = nullptr;
-			window_manager::add_window(win, this);
-			logger.debug("moved window ", win);
+			if (win)
+			{
+				window_manager::add_window(win, this);
+				other.win = nullptr;
+				logger.debug("moved window ", win);
+			}
 			return *this;
 		}
 
@@ -415,9 +418,11 @@ namespace mngl
 		{
 			if (win)
 			{
-				SDL_DestroyWindow(win);
-				window_manager::remove_window(win);
-				logger.debug("destroyed window ", win);
+				SDL_Window* old_win = win;
+				window_manager::remove_window(old_win);
+				win = nullptr;
+				SDL_DestroyWindow(old_win);
+				logger.debug("destroyed window ", old_win);
 			}
 		}
 
@@ -468,7 +473,7 @@ namespace mngl
 
 		void size(glm::uvec2 new_size)
 		{
-			SDL_SetWindowSize(win, new_size.x, new_size.y);
+			if (!SDL_SetWindowSize(win, new_size.x, new_size.y)) throw sdl_error("failed to set window size: ");
 			logger.debug("changed window ", win, " size to {", new_size.x, ",", new_size.y, "}");
 		}
 
@@ -607,7 +612,7 @@ namespace mngl
 		mngl::rectangle safe_area() const
 		{
 			mngl::rectangle res;
-			if (!SDL_GetWindowSafeArea(win, mngl::rectangleProxy(res))) throw sdl_error("failed to get safe area for window: ");
+			if (!SDL_GetWindowSafeArea(win, mngl::rectangleProxy(res, mngl::proxy_mode::output))) throw sdl_error("failed to get safe area for window: ");
 			return res;
 		}
 

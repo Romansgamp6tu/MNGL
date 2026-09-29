@@ -1,91 +1,148 @@
-#pragma once
+﻿#pragma once
 
 #include "command_buffer.hpp"
 #include "gpu_texture.hpp"
 
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <limits>
+#include <memory>
+#include <span>
+#include <stdexcept>
+#include <type_traits>
+#include <utility>
+
 namespace mngl
 {
+	namespace detail
+	{
+		struct surface_deleter
+		{
+			void operator()(SDL_Surface* s) const noexcept { if (s) SDL_DestroySurface(s); }
+		};
+		using surface_ptr = std::unique_ptr<SDL_Surface, surface_deleter>;
+
+		// Освобождает transfer buffer при любом выходе из области видимости
+		class transfer_buffer_guard
+		{
+		public:
+			transfer_buffer_guard(SDL_GPUDevice* device, SDL_GPUTransferBuffer* buffer) noexcept
+				: dev(device), buf(buffer) {}
+			~transfer_buffer_guard()
+			{
+				if (buf) SDL_ReleaseGPUTransferBuffer(dev, buf);
+			}
+			transfer_buffer_guard(const transfer_buffer_guard&) = delete;
+			transfer_buffer_guard& operator=(const transfer_buffer_guard&) = delete;
+
+		private:
+			SDL_GPUDevice* dev;
+			SDL_GPUTransferBuffer* buf;
+		};
+	}
+
 	class texture
 	{
 	public:
-		using format = gpu::texture_format;
+		using pixel_format = gpu::texture_format;
 		using usage = gpu::texture::usage_flags;
 
+		// Для загруженных с CPU текстур достаточно чтения в шейдере
+		static constexpr uint32_t default_upload_usage = usage::sampler;
+
 		texture() = default;
+		texture(const texture&) = delete;
+		texture& operator=(const texture&) = delete;
+		texture(texture&&) noexcept = default;
+		texture& operator=(texture&&) noexcept = default;
 
 		// 1. Создание пустой текстуры (для Render Target или вычислительных шейдеров)
 		texture(
-			gpu::device& dev,
+			const gpu::device& dev,
 			uint32_t width,
 			uint32_t height,
-			format fmt = format::r8g8b8a8_unorm,
+			pixel_format fmt = pixel_format::r8g8b8a8_unorm,
 			uint32_t usg = usage::sampler | usage::color_target
 		)
-			: m_gpu_tex(dev, glm::uvec2{width, height}, fmt, usg)
+			: m_gpu_tex(dev, glm::uvec2{ width, height }, fmt, usg)
 		{ }
 
 		// 2. Создание текстуры из готового SDL_Surface
-		texture(gpu::device& dev, gpu::command_buffer& cmd, SDL_Surface* surface)
+		texture(
+			const gpu::device& dev,
+			gpu::command_buffer& cmd,
+			SDL_Surface* surface,
+			uint32_t usg = default_upload_usage
+		)
 		{
-			load_from_surface(dev, cmd, surface);
+			load_from_surface(dev, cmd, surface, usg);
 		}
 
 		// 3. Создание текстуры из массива float-данных (для HDR, симуляций, высотных карт)
 		texture(
-			gpu::device& dev,
+			const gpu::device& dev,
 			gpu::command_buffer& cmd,
 			uint32_t width,
 			uint32_t height,
 			std::span<const float> float_pixels,
-			format fmt = format::r32g32b32a32_float
+			pixel_format fmt = pixel_format::r32g32b32a32_float,
+			uint32_t usg = default_upload_usage
 		)
 		{
-			m_gpu_tex = gpu::texture(dev, glm::uvec2{width, height}, fmt, usage::sampler | usage::color_target);
-			upload_bytes(cmd, float_pixels.data(), static_cast<uint32_t>(float_pixels.size_bytes()));
+			gpu::texture tex(dev, glm::uvec2{ width, height }, fmt, usg);
+			upload_raw(tex, cmd, float_pixels.data(), float_pixels.size_bytes());
+			m_gpu_tex = std::move(tex);
 		}
 
-		void load_from_surface(const gpu::device& dev, gpu::command_buffer& cmd, SDL_Surface* surface)
+		// Гарантия: при исключении текущая текстура остаётся нетронутой
+		void load_from_surface(
+			const gpu::device& dev,
+			gpu::command_buffer& cmd,
+			SDL_Surface* surface,
+			uint32_t usg = default_upload_usage
+		)
 		{
 			if (!surface)
 			{
 				throw std::invalid_argument("Cannot create texture from null SDL_Surface!");
 			}
 
-			// Конвертируем в стандартизированный RGBA32
-			SDL_Surface* formatted_surface = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA8888);
-			if (!formatted_surface)
+			// RGBA32 — байтовый порядок R,G,B,A независимо от endianness (в отличие от RGBA8888)
+			detail::surface_ptr converted(SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32));
+			if (!converted)
 			{
 				throw sdl_error("Failed to convert surface format: ");
 			}
+			if (converted->w <= 0 || converted->h <= 0 || !converted->pixels || converted->pitch < converted->w * 4)
+			{
+				throw std::invalid_argument("SDL_Surface has invalid dimensions or pixel data");
+			}
 
-			const glm::uvec2 img_size{
-				static_cast<uint32_t>(formatted_surface->w),
-				static_cast<uint32_t>(formatted_surface->h)
-			};
+			const uint32_t w = static_cast<uint32_t>(converted->w);
+			const uint32_t h = static_cast<uint32_t>(converted->h);
 
-			// Создаем / Пересоздаем GPU ресурс
-			m_gpu_tex = gpu::texture(
-				dev,
-				img_size,
-				gpu::texture_format::r8g8b8a8_unorm,
-				gpu::texture::usage_flags::sampler | gpu::texture::usage_flags::color_target
+			gpu::texture tex(dev, glm::uvec2{ w, h }, pixel_format::r8g8b8a8_unorm, usg);
+			upload_rows(
+				tex, cmd,
+				converted->pixels,
+				static_cast<std::size_t>(w) * 4,
+				static_cast<std::size_t>(converted->pitch),
+				h
 			);
-
-			upload_bytes(
-				cmd,
-				formatted_surface->pixels,
-				static_cast<uint32_t>(img_size.y * formatted_surface->pitch)
-			);
-
-			SDL_DestroySurface(formatted_surface);
+			m_gpu_tex = std::move(tex);
 		}
 
+		// Размер данных должен точно соответствовать размеру текстуры в её формате
 		template<typename T>
 		void update_pixels(gpu::command_buffer& cmd, std::span<const T> pixels)
 		{
 			static_assert(std::is_trivially_copyable_v<T>, "Pixel data must be trivially copyable!");
-			upload_bytes(cmd, pixels.data(), static_cast<uint32_t>(pixels.size_bytes()));
+			upload_raw(m_gpu_tex, cmd, pixels.data(), pixels.size_bytes());
 		}
+
+		[[nodiscard]] bool valid() const noexcept { return m_gpu_tex.valid(); }
+		explicit operator bool() const noexcept { return valid(); }
 
 		[[nodiscard]] glm::uvec2 size() const noexcept { return m_gpu_tex.get_size(); }
 		[[nodiscard]] uint32_t width() const noexcept { return m_gpu_tex.width(); }
@@ -95,20 +152,64 @@ namespace mngl
 		[[nodiscard]] const gpu::texture& raw_gpu_texture() const noexcept { return m_gpu_tex; }
 		[[nodiscard]] gpu::texture& raw_gpu_texture() noexcept { return m_gpu_tex; }
 
-
-
-
-
 	private:
 		gpu::texture m_gpu_tex;
 
-		void upload_bytes(gpu::command_buffer& cmd, const void* data, uint32_t data_size)
+		static uint32_t checked_size(std::size_t size)
 		{
-			if (!data || data_size == 0 || !m_gpu_tex.valid()) return;
+			if (size > std::numeric_limits<uint32_t>::max())
+			{
+				throw std::length_error("Texture data exceeds SDL's 32-bit size limit");
+			}
+			return static_cast<uint32_t>(size);
+		}
 
-			SDL_GPUDevice* device_raw = m_gpu_tex.device_raw();
+		// Плотно упакованные данные всей текстуры
+		static void upload_raw(gpu::texture& tex, gpu::command_buffer& cmd, const void* data, std::size_t bytes)
+		{
+			upload_rows(tex, cmd, data, bytes, bytes, 1);
+		}
 
-			// 1. Создаем трансферный буфер
+		// Копирует rows строк по row_bytes байт (шаг источника src_stride) в плотный transfer buffer
+		static void upload_rows(
+			gpu::texture& tex,
+			gpu::command_buffer& cmd,
+			const void* data,
+			std::size_t row_bytes,
+			std::size_t src_stride,
+			std::size_t rows)
+		{
+			if (!tex.valid())
+			{
+				throw std::logic_error("Cannot upload pixels to an invalid texture");
+			}
+			if (!cmd.valid())
+			{
+				throw std::invalid_argument("Cannot upload texture data with an invalid command buffer");
+			}
+			SDL_GPUDevice* device_raw = tex.device_raw();
+			if (cmd.device_raw() != device_raw)
+			{
+				throw std::invalid_argument("Texture and command buffer belong to different GPU devices");
+			}
+			if (!data)
+			{
+				throw std::invalid_argument("Texture pixel data is null");
+			}
+			if (src_stride < row_bytes)
+			{
+				throw std::invalid_argument("Texture row stride is smaller than row size");
+			}
+
+			const uint32_t expected = SDL_CalculateGPUTextureFormatSize(
+				static_cast<SDL_GPUTextureFormat>(tex.format()), tex.width(), tex.height(), 1);
+			const std::size_t total = row_bytes * rows;
+			if (expected == 0 || total != expected)
+			{
+				throw std::invalid_argument("Texture pixel data size does not match texture dimensions and format");
+			}
+			const uint32_t data_size = checked_size(total);
+
 			SDL_GPUTransferBufferCreateInfo transfer_info{};
 			transfer_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 			transfer_info.size = data_size;
@@ -118,42 +219,47 @@ namespace mngl
 			{
 				throw sdl_error("Failed to create transfer buffer for texture: ");
 			}
+			detail::transfer_buffer_guard guard(device_raw, transfer_buf);
 
-			// 2. Копируем в RAM/VRAM видимую область
 			void* mapped = SDL_MapGPUTransferBuffer(device_raw, transfer_buf, false);
 			if (!mapped)
 			{
-				SDL_ReleaseGPUTransferBuffer(device_raw, transfer_buf);
 				throw sdl_error("Failed to map transfer buffer: ");
 			}
 
-			std::memcpy(mapped, data, data_size);
+			if (src_stride == row_bytes)
+			{
+				std::memcpy(mapped, data, total);
+			}
+			else
+			{
+				const auto* src = static_cast<const std::byte*>(data);
+				auto* dst = static_cast<std::byte*>(mapped);
+				for (std::size_t y = 0; y < rows; ++y)
+				{
+					std::memcpy(dst + y * row_bytes, src + y * src_stride, row_bytes);
+				}
+			}
 			SDL_UnmapGPUTransferBuffer(device_raw, transfer_buf);
 
-			// 3. Передаем в texture через CopyPass
 			SDL_GPUCopyPass* copy_pass = SDL_BeginGPUCopyPass(cmd.raw());
 			if (!copy_pass)
 			{
-				SDL_ReleaseGPUTransferBuffer(device_raw, transfer_buf);
 				throw sdl_error("Failed to begin copy pass for texture upload: ");
 			}
 
+			// Нули = плотная упаковка по размеру региона
 			SDL_GPUTextureTransferInfo src_info{};
 			src_info.transfer_buffer = transfer_buf;
-			src_info.offset = 0;
-			src_info.pixels_per_row = m_gpu_tex.width();
-			src_info.rows_per_layer = m_gpu_tex.height();
 
 			SDL_GPUTextureRegion dst_region{};
-			dst_region.texture = m_gpu_tex.raw();
-			dst_region.w = m_gpu_tex.width();
-			dst_region.h = m_gpu_tex.height();
+			dst_region.texture = tex.raw();
+			dst_region.w = tex.width();
+			dst_region.h = tex.height();
 			dst_region.d = 1;
 
 			SDL_UploadToGPUTexture(copy_pass, &src_info, &dst_region, false);
 			SDL_EndGPUCopyPass(copy_pass);
-
-			SDL_ReleaseGPUTransferBuffer(device_raw, transfer_buf);
 		}
 	};
 }

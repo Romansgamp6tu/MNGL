@@ -66,9 +66,13 @@ namespace mngl::gpu
 			const depth_attachment* depth = nullptr
 		)
 		{
-			if (color_targets.empty())
+			if (color_targets.empty() && !depth)
 			{
-				throw std::invalid_argument("Render pass must have at least one color target!");
+				throw std::invalid_argument("Render pass requires at least one color or depth target");
+			}
+			if (color_targets.size() > 4)
+			{
+				throw std::invalid_argument("Render pass supports at most four color targets");
 			}
 
 			std::vector<SDL_GPUColorTargetInfo> sdl_color_targets;

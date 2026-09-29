@@ -7,6 +7,7 @@
 #include <string>
 #include <span>
 #include <cstdint>
+#include <stdexcept>
 #include <utility>
 
 namespace mngl::gpu
@@ -19,11 +20,28 @@ namespace mngl::gpu
 
 	enum class shader_format : uint32_t
 	{
-		invalid = 0,
+		invalid = SDL_GPU_SHADERFORMAT_INVALID,
 		spirv = SDL_GPU_SHADERFORMAT_SPIRV,
+		dxbc = SDL_GPU_SHADERFORMAT_DXBC,
 		dxil = SDL_GPU_SHADERFORMAT_DXIL,
 		msl = SDL_GPU_SHADERFORMAT_MSL,
+		metallib = SDL_GPU_SHADERFORMAT_METALLIB,
 	};
+
+	constexpr bool valid_shader_format(shader_format format) noexcept
+	{
+		switch (format)
+		{
+		case shader_format::spirv:
+		case shader_format::dxbc:
+		case shader_format::dxil:
+		case shader_format::msl:
+		case shader_format::metallib:
+			return true;
+		default:
+			return false;
+		}
+	}
 
 	constexpr bool valid_shader_stage(graphics_shader_stage stage) noexcept
 	{
@@ -48,7 +66,7 @@ namespace mngl::gpu
 
 	struct shader_bytecode
 	{
-		shader_format format = shader_formats::invalid;
+		shader_format format = shader_format::invalid;
 		std::vector<uint8_t> bytes;
 
 		void assign(shader_format fmt, std::vector<uint8_t> data)
@@ -59,13 +77,13 @@ namespace mngl::gpu
 
 		void clear() noexcept
 		{
-			format = shader_formats::invalid;
+			format = shader_format::invalid;
 			bytes.clear();
 		}
 
 		bool valid() const noexcept
 		{
-			return format != shader_formats::invalid && !bytes.empty();
+			return valid_shader_format(format) && !bytes.empty();
 		}
 
 		explicit operator bool() const noexcept { return valid(); }
@@ -75,7 +93,7 @@ namespace mngl::gpu
 	struct graphics_shader_create_view
 	{
 		graphics_shader_stage stage = graphics_shader_stage::vertex;
-		shader_format format = shader_formats::invalid;
+		shader_format format = shader_format::invalid;
 		std::span<const uint8_t> code;
 		const char* entrypoint = "main";
 		shader_resource_layout resources{};
@@ -83,7 +101,7 @@ namespace mngl::gpu
 		bool valid() const noexcept
 		{
 			return valid_shader_stage(stage) &&
-				format != shader_formats::invalid &&
+				valid_shader_format(format) &&
 				!code.empty() &&
 				entrypoint != nullptr && entrypoint[0] != '\0';
 		}
@@ -113,7 +131,10 @@ namespace mngl::gpu
 		shader_resource_layout resources{};
 		std::string debug_name;
 
-		bool valid() const noexcept { return code.valid() && !entrypoint.empty(); }
+		bool valid() const noexcept
+		{
+			return valid_shader_stage(stage) && code.valid() && !entrypoint.empty();
+		}
 		explicit operator bool() const noexcept { return valid(); }
 
 		graphics_shader_create_view view() const noexcept
@@ -142,10 +163,26 @@ namespace mngl::gpu
 		graphics_shader(SDL_GPUDevice* device, const graphics_shader_asset& asset)
 			: m_device(device)
 		{
-			if (m_device && asset.valid())
+			if (!m_device)
 			{
-				auto info = asset.create_info();
-				m_handle = SDL_CreateGPUShader(m_device, &info);
+				throw std::invalid_argument("Cannot create graphics_shader with a null device");
+			}
+			if (!asset.valid())
+			{
+				throw std::invalid_argument("Cannot create graphics_shader from an invalid asset");
+			}
+
+			const auto format = static_cast<SDL_GPUShaderFormat>(asset.code.format);
+			if ((SDL_GetGPUShaderFormats(m_device) & format) == 0)
+			{
+				throw std::invalid_argument("GPU device does not support the shader asset's format");
+			}
+
+			auto info = asset.create_info();
+			m_handle = SDL_CreateGPUShader(m_device, &info);
+			if (!m_handle)
+			{
+				throw sdl_error("Failed to create GPU shader: ");
 			}
 		}
 
