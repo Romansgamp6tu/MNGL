@@ -7,10 +7,12 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <ranges>
 #include <span>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace mngl::gpu
 {
@@ -235,5 +237,81 @@ namespace mngl::gpu
 		uint32_t m_size = 0;
 		uint32_t m_transfer_capacity = 0;
 		buffer_usage m_usage = buffer_usage::vertex;
+	};
+
+	template<typename T>
+	class vertex_buffer
+	{
+	public:
+		vertex_buffer() = default;
+
+		template<typename Range>
+			requires std::ranges::input_range<const Range>
+		vertex_buffer(const device& device, command_buffer& cmd, const Range& vertices)
+			: m_buffer(device.raw(), 0, buffer_usage::vertex)
+		{
+			upload(device, cmd, vertices);
+		}
+
+		vertex_buffer(const vertex_buffer&) = delete;
+		vertex_buffer& operator=(const vertex_buffer&) = delete;
+		vertex_buffer(vertex_buffer&&) noexcept = default;
+		vertex_buffer& operator=(vertex_buffer&&) noexcept = default;
+
+		template<typename Range>
+			requires std::ranges::input_range<const Range>
+		void upload(const device& device, command_buffer& cmd, const Range& vertices, bool cycle = false)
+		{
+			using element_type = std::remove_cv_t<std::ranges::range_value_t<const Range>>;
+			static_assert(std::is_same_v<element_type, T>, "Vertex range element type must match vertex_buffer<T>");
+			static_assert(std::is_trivially_copyable_v<T>, "Vertex data must be trivially copyable");
+
+			if constexpr (
+				std::ranges::contiguous_range<const Range> &&
+				std::ranges::sized_range<const Range>)
+			{
+				const std::size_t count = std::ranges::size(vertices);
+				validate_count(count);
+				const std::span<const T> data(std::ranges::data(vertices), count);
+				m_buffer.upload(device.raw(), cmd, data, cycle);
+				m_count = static_cast<uint32_t>(count);
+			}
+			else
+			{
+				std::vector<T> packed;
+				if constexpr (std::ranges::sized_range<const Range>)
+				{
+					packed.reserve(std::ranges::size(vertices));
+				}
+				for (const auto& vertex : vertices)
+				{
+					packed.push_back(vertex);
+				}
+				validate_count(packed.size());
+				m_buffer.upload(device.raw(), cmd, std::span<const T>(packed), cycle);
+				m_count = static_cast<uint32_t>(packed.size());
+			}
+		}
+
+		[[nodiscard]] const buffer& gpu_buffer() const noexcept { return m_buffer; }
+		[[nodiscard]] buffer& gpu_buffer() noexcept { return m_buffer; }
+		[[nodiscard]] uint32_t size() const noexcept { return m_count; }
+		[[nodiscard]] bool empty() const noexcept { return m_count == 0; }
+
+	private:
+		static void validate_count(std::size_t count)
+		{
+			if (count == 0)
+			{
+				throw std::invalid_argument("A vertex buffer cannot be uploaded from an empty range");
+			}
+			if (count > std::numeric_limits<uint32_t>::max())
+			{
+				throw std::length_error("Vertex count exceeds SDL's 32-bit limit");
+			}
+		}
+
+		buffer m_buffer;
+		uint32_t m_count = 0;
 	};
 }

@@ -169,6 +169,7 @@
     <ClInclude Include="gpu_buffer.hpp" />
     <ClInclude Include="batcher2d.hpp" />
     <ClInclude Include="renderer2d.hpp" />
+    <ClInclude Include="render_window.hpp" />
     <ClInclude Include="color.hpp" />
     <ClInclude Include="command_buffer.hpp" />
     <ClInclude Include="device.hpp" />

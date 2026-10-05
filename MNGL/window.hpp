@@ -414,7 +414,7 @@ namespace mngl
 			return *this;
 		}
 
-		~window()
+		virtual ~window()
 		{
 			if (win)
 			{

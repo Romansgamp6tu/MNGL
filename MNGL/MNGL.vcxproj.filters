@@ -116,6 +116,9 @@
     <ClInclude Include="renderer2d.hpp">
       <Filter>Файлы заголовков\2d</Filter>
     </ClInclude>
+    <ClInclude Include="render_window.hpp">
+      <Filter>Файлы заголовков\window</Filter>
+    </ClInclude>
     <ClInclude Include="sampler.hpp">
       <Filter>Файлы заголовков\gpu</Filter>
     </ClInclude>

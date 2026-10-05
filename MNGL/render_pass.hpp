@@ -3,6 +3,7 @@
 #include "utilities.hpp"
 #include "color.hpp"
 #include "command_buffer.hpp"
+#include "gpu_buffer.hpp"
 #include "gpu_texture.hpp"
 #include "graphics_pipeline.hpp"
 
@@ -217,6 +218,25 @@ namespace mngl::gpu
 		{
 			const SDL_GPUBufferBinding binding{.buffer = buffer, .offset = offset};
 			SDL_BindGPUVertexBuffers(handle, slot, &binding, 1);
+		}
+
+		void bind_vertex_buffer(uint32_t slot, const buffer& buffer, uint32_t offset = 0) const
+		{
+			if (!buffer.valid() || buffer.usage() != buffer_usage::vertex)
+			{
+				throw std::invalid_argument("Vertex binding requires a valid vertex-usage GPU buffer");
+			}
+			bind_vertex_buffer(slot, buffer.raw(), offset);
+		}
+
+		template<typename T>
+		void bind_vertex_buffer(
+			uint32_t slot,
+			const vertex_buffer<T>& buffer,
+			uint32_t offset = 0
+		) const
+		{
+			bind_vertex_buffer(slot, buffer.gpu_buffer(), offset);
 		}
 
 		// Связывание индексного буфера (16-bit или 32-bit)

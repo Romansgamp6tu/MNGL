@@ -1,7 +1,10 @@
 ﻿#pragma once
 
+#include "color.hpp"
 #include "command_buffer.hpp"
 #include "gpu_texture.hpp"
+#include "rectangle.hpp"
+#include "surface.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -15,8 +18,31 @@
 
 namespace mngl
 {
+	class texture;
+	struct sprite;
+
+	namespace two_d
+	{
+		struct circle;
+		struct ellipse;
+		struct rounded_rectangle;
+	}
+
 	namespace detail
 	{
+		class texture_render_session
+		{
+		public:
+			virtual ~texture_render_session() = default;
+			virtual void draw(const sprite& value) = 0;
+			virtual void draw(const two_d::circle& value) = 0;
+			virtual void draw(const two_d::ellipse& value) = 0;
+			virtual void draw(const two_d::rounded_rectangle& value) = 0;
+			virtual void draw(const rectangle& bounds, const color& tint) = 0;
+			virtual void draw(const texture& source, const rectangle& bounds, const color& tint) = 0;
+			virtual void display() = 0;
+		};
+
 		struct surface_deleter
 		{
 			void operator()(SDL_Surface* s) const noexcept { if (s) SDL_DestroySurface(s); }
@@ -48,14 +74,15 @@ namespace mngl
 		using pixel_format = gpu::texture_format;
 		using usage = gpu::texture::usage_flags;
 
-		// Для загруженных с CPU текстур достаточно чтения в шейдере
-		static constexpr uint32_t default_upload_usage = usage::sampler;
+		// Uploaded textures can be sampled and used as color render targets by default.
+		static constexpr uint32_t default_upload_usage = usage::sampler | usage::color_target;
 
 		texture() = default;
 		texture(const texture&) = delete;
 		texture& operator=(const texture&) = delete;
-		texture(texture&&) noexcept = default;
-		texture& operator=(texture&&) noexcept = default;
+		texture(texture&& other);
+		texture& operator=(texture&& other);
+		~texture() = default;
 
 		// 1. Создание пустой текстуры (для Render Target или вычислительных шейдеров)
 		texture(
@@ -68,6 +95,15 @@ namespace mngl
 			: m_gpu_tex(dev, glm::uvec2{ width, height }, fmt, usg)
 		{ }
 
+		texture(
+			uint32_t width,
+			uint32_t height,
+			pixel_format fmt = pixel_format::r8g8b8a8_unorm,
+			uint32_t usg = usage::sampler | usage::color_target
+		)
+			: texture(gpu::device::global(), width, height, fmt, usg)
+		{ }
+
 		// 2. Создание текстуры из готового SDL_Surface
 		texture(
 			const gpu::device& dev,
@@ -78,6 +114,35 @@ namespace mngl
 		{
 			load_from_surface(dev, cmd, surface, usg);
 		}
+
+		explicit texture(
+			SDL_Surface* surface,
+			uint32_t usg = default_upload_usage
+		)
+		{
+			auto& device = gpu::device::global();
+			gpu::command_buffer cmd(device);
+			load_from_surface(device, cmd, surface, usg);
+			cmd.submit();
+		}
+
+		// Uploads only the surface's current frame.
+		texture(
+			const gpu::device& dev,
+			gpu::command_buffer& cmd,
+			const mngl::surface& source,
+			uint32_t usg = default_upload_usage
+		)
+		{
+			load_from_surface(dev, cmd, source.raw(), usg);
+		}
+
+		explicit texture(
+			const mngl::surface& source,
+			uint32_t usg = default_upload_usage
+		)
+			: texture(source.raw(), usg)
+		{ }
 
 		// 3. Создание текстуры из массива float-данных (для HDR, симуляций, высотных карт)
 		texture(
@@ -93,6 +158,22 @@ namespace mngl
 			gpu::texture tex(dev, glm::uvec2{ width, height }, fmt, usg);
 			upload_raw(tex, cmd, float_pixels.data(), float_pixels.size_bytes());
 			m_gpu_tex = std::move(tex);
+		}
+
+		texture(
+			uint32_t width,
+			uint32_t height,
+			std::span<const float> float_pixels,
+			pixel_format fmt = pixel_format::r32g32b32a32_float,
+			uint32_t usg = default_upload_usage
+		)
+		{
+			auto& device = gpu::device::global();
+			gpu::command_buffer cmd(device);
+			gpu::texture tex(device, glm::uvec2{ width, height }, fmt, usg);
+			upload_raw(tex, cmd, float_pixels.data(), float_pixels.size_bytes());
+			m_gpu_tex = std::move(tex);
+			cmd.submit();
 		}
 
 		// Гарантия: при исключении текущая текстура остаётся нетронутой
@@ -147,13 +228,75 @@ namespace mngl
 		[[nodiscard]] glm::uvec2 size() const noexcept { return m_gpu_tex.get_size(); }
 		[[nodiscard]] uint32_t width() const noexcept { return m_gpu_tex.width(); }
 		[[nodiscard]] uint32_t height() const noexcept { return m_gpu_tex.height(); }
+		// Drawing coordinates start at the bottom-left; the shorter side is 1 and the longer follows the texture aspect ratio.
+		[[nodiscard]] glm::vec2 coordinate_size() const noexcept
+		{
+			const auto dimensions = size();
+			const float short_side = static_cast<float>(
+				dimensions.x < dimensions.y ? dimensions.x : dimensions.y);
+			if (short_side == 0.0f)
+			{
+				return {};
+			}
+			return {
+				static_cast<float>(dimensions.x) / short_side,
+				static_cast<float>(dimensions.y) / short_side
+			};
+		}
 		[[nodiscard]] gpu::texture_format format() const noexcept { return m_gpu_tex.format(); }
+		[[nodiscard]] bool can_render_to() const noexcept
+		{
+			return valid() && m_gpu_tex.has_usage(usage::color_target);
+		}
+		[[nodiscard]] bool rendering() const noexcept
+		{
+			return m_render_session != nullptr || m_external_render_active;
+		}
 
 		[[nodiscard]] const gpu::texture& raw_gpu_texture() const noexcept { return m_gpu_tex; }
 		[[nodiscard]] gpu::texture& raw_gpu_texture() noexcept { return m_gpu_tex; }
 
+		void clear(const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f));
+		void draw(const sprite& value);
+		void draw(const two_d::circle& value);
+		void draw(const two_d::ellipse& value);
+		void draw(const two_d::rounded_rectangle& value);
+		void draw(
+			const rectangle& bounds,
+			const color& tint = color(1.0f, 1.0f, 1.0f, 1.0f)
+		);
+		// The source is borrowed until display() submits the target texture's frame.
+		void draw(
+			const texture& source,
+			const rectangle& bounds,
+			const color& tint = color(1.0f, 1.0f, 1.0f, 1.0f)
+		);
+		void display();
+
 	private:
+		friend class render_window;
+
 		gpu::texture m_gpu_tex;
+		std::unique_ptr<detail::texture_render_session> m_render_session;
+		bool m_external_render_active = false;
+
+		explicit texture(gpu::texture&& texture) noexcept
+			: m_gpu_tex(std::move(texture))
+		{ }
+
+		void begin_external_render()
+		{
+			if (rendering())
+			{
+				throw std::logic_error("Texture is already being rendered to");
+			}
+			m_external_render_active = true;
+		}
+
+		void end_external_render() noexcept
+		{
+			m_external_render_active = false;
+		}
 
 		static uint32_t checked_size(std::size_t size)
 		{

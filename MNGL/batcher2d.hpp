@@ -111,6 +111,134 @@ namespace mngl::gpu
 			uniform_blocks.push_back(std::move(block));
 		}
 
+		void add_uniform_block_bytes(std::span<const uint8_t> block)
+		{
+			if (block.empty() || block.size() % 16 != 0 ||
+				block.size() > std::numeric_limits<uint32_t>::max())
+			{
+				throw std::invalid_argument(
+					"Fragment uniform blocks must be non-empty, 16-byte aligned, and fit in a 32-bit size");
+			}
+			uniform_blocks.emplace_back(block.begin(), block.end());
+		}
+
+		void add_uniform_blocks(const graphics_shader_asset& shader)
+		{
+			const auto blocks = shader.uniform_block_data();
+			if (blocks.size() != shader.resources.uniform_buffers)
+			{
+				throw std::invalid_argument(
+					"Shader asset does not provide named data for every fragment uniform buffer");
+			}
+			if (!uniform_blocks.empty() && !blocks.empty())
+			{
+				throw std::logic_error(
+					"Uniform blocks cannot be supplied both by the shader asset and explicit bindings");
+			}
+			for (const auto& block : blocks)
+			{
+				add_uniform_block_bytes(block);
+			}
+		}
+
+		void add_shader_resources(
+			const graphics_shader_asset& shader,
+			const sampler* default_sampler
+		)
+		{
+			const auto& layout = shader.resource_layout();
+			const auto& values = shader.resource_values();
+
+			auto find_resource = [&](shader_resource_kind kind, uint32_t slot)
+				-> const shader_resource_field_layout&
+			{
+				const auto found = std::find_if(
+					layout.begin(),
+					layout.end(),
+					[kind, slot](const shader_resource_field_layout& field) {
+						return field.kind == kind && field.slot == slot;
+					});
+				if (found == layout.end())
+				{
+					throw std::invalid_argument("Reflected shader resource layout is missing a required slot");
+				}
+				return *found;
+			};
+
+			auto find_value = [&](const shader_resource_field_layout& field)
+				-> const shader_resource_assignment&
+			{
+				const auto found = values.find(field.name);
+				if (found == values.end())
+				{
+					throw std::invalid_argument(
+						"Shader resource '" + field.name + "' has not been assigned");
+				}
+				return found->second;
+			};
+
+			if (shader.resources.samplers != 0)
+			{
+				if (!samplers.empty())
+				{
+					throw std::logic_error("Sampler resources cannot be bound both explicitly and by shader keys");
+				}
+				for (uint32_t slot = 0; slot < shader.resources.samplers; ++slot)
+				{
+					const auto& field = find_resource(shader_resource_kind::sampled_texture, slot);
+					const auto& value = find_value(field);
+					if (!value.texture)
+					{
+						throw std::invalid_argument("Sampled texture resource has no texture value");
+					}
+					const sampler* state = value.sampler_state ? value.sampler_state : default_sampler;
+					if (!state)
+					{
+						throw std::logic_error("A default sampler is required for automatic texture binding");
+					}
+					add_sampler(value.texture->raw_gpu_texture(), *state);
+				}
+			}
+
+			if (shader.resources.storage_textures != 0)
+			{
+				if (!storage_textures.empty())
+				{
+					throw std::logic_error(
+						"Storage textures cannot be bound both explicitly and by shader keys");
+				}
+				for (uint32_t slot = 0; slot < shader.resources.storage_textures; ++slot)
+				{
+					const auto& field = find_resource(shader_resource_kind::storage_texture, slot);
+					const auto& value = find_value(field);
+					if (!value.texture)
+					{
+						throw std::invalid_argument("Storage texture resource has no texture value");
+					}
+					add_storage_texture(value.texture->raw_gpu_texture());
+				}
+			}
+
+			if (shader.resources.storage_buffers != 0)
+			{
+				if (!storage_buffers.empty())
+				{
+					throw std::logic_error(
+						"Storage buffers cannot be bound both explicitly and by shader keys");
+				}
+				for (uint32_t slot = 0; slot < shader.resources.storage_buffers; ++slot)
+				{
+					const auto& field = find_resource(shader_resource_kind::storage_buffer, slot);
+					const auto& value = find_value(field);
+					if (!value.storage_buffer)
+					{
+						throw std::invalid_argument("Storage buffer resource has no buffer value");
+					}
+					add_storage_buffer(*value.storage_buffer);
+				}
+			}
+		}
+
 	private:
 		friend class batcher2d;
 
@@ -618,9 +746,9 @@ namespace mngl::gpu
 				.effect_parameters = { state.effect_parameters.x, state.effect_parameters.y },
 				.uv = {
 					source.uv_bounds.x,
-					source.uv_bounds.y,
+					source.uv_bounds.w,
 					source.uv_bounds.z,
-					source.uv_bounds.w
+					source.uv_bounds.y
 				},
 				.tint = {
 					pack_channel(rgba.r),
@@ -686,7 +814,7 @@ namespace mngl::gpu
 		// Records upload and render commands but leaves command-buffer submission to the caller.
 		void flush(command_buffer& cmd, texture& target)
 		{
-			const auto projection = pixel_projection(target);
+			const auto projection = coordinate_projection(target);
 			flush(cmd, target, projection);
 		}
 
@@ -888,6 +1016,11 @@ namespace mngl::gpu
 		[[nodiscard]] const frame_stats& last_frame_stats() const noexcept
 		{
 			return m_last_stats;
+		}
+
+		[[nodiscard]] texture_format target_format() const noexcept
+		{
+			return m_target_format;
 		}
 
 	private:
@@ -1114,7 +1247,7 @@ namespace mngl::gpu
 				(!batch.scissor || equal_scissor(*batch.scissor, *state.scissor));
 		}
 
-		static glm::mat4 pixel_projection(const texture& target)
+		static glm::mat4 coordinate_projection(const texture& target)
 		{
 			glm::mat4 projection(1.0f);
 			if (target.width() == 0 || target.height() == 0)
@@ -1122,10 +1255,14 @@ namespace mngl::gpu
 				return projection;
 			}
 
-			projection[0][0] = 2.0f / static_cast<float>(target.width());
-			projection[1][1] = -2.0f / static_cast<float>(target.height());
+			const float short_side = static_cast<float>(
+				std::min(target.width(), target.height()));
+			const float coordinate_width = static_cast<float>(target.width()) / short_side;
+			const float coordinate_height = static_cast<float>(target.height()) / short_side;
+			projection[0][0] = 2.0f / coordinate_width;
+			projection[1][1] = 2.0f / coordinate_height;
 			projection[3][0] = -1.0f;
-			projection[3][1] = 1.0f;
+			projection[3][1] = -1.0f;
 			return projection;
 		}
 
