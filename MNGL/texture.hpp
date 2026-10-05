@@ -3,11 +3,13 @@
 #include "color.hpp"
 #include "command_buffer.hpp"
 #include "gpu_texture.hpp"
+#include "hit_test.hpp"
 #include "rectangle.hpp"
 #include "surface.hpp"
 #include "view.hpp"
 
 #include <cstddef>
+#include <concepts>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -25,6 +27,9 @@ namespace mngl
 
 	namespace two_d
 	{
+		class Frame2D;
+		class renderer;
+		class transform;
 		struct circle;
 		struct ellipse;
 		struct rounded_rectangle;
@@ -41,7 +46,19 @@ namespace mngl
 			virtual void draw(const two_d::ellipse& value) = 0;
 			virtual void draw(const two_d::rounded_rectangle& value) = 0;
 			virtual void draw(const rectangle& bounds, const color& tint) = 0;
+			virtual void draw(
+				const rectangle& bounds,
+				const color& tint,
+				const two_d::transform& transform
+			) = 0;
 			virtual void draw(const texture& source, const rectangle& bounds, const color& tint) = 0;
+			virtual void draw(
+				const texture& source,
+				const rectangle& bounds,
+				const color& tint,
+				const two_d::transform& transform
+			) = 0;
+			virtual two_d::Frame2D& frame() noexcept = 0;
 			virtual void display() = 0;
 		};
 
@@ -222,6 +239,7 @@ namespace mngl
 		{
 			static_assert(std::is_trivially_copyable_v<T>, "Pixel data must be trivially copyable!");
 			upload_raw(m_gpu_tex, cmd, pixels.data(), pixels.size_bytes());
+			m_hit_test_frame.reset();
 		}
 
 		[[nodiscard]] bool valid() const noexcept { return m_gpu_tex.valid(); }
@@ -282,6 +300,42 @@ namespace mngl
 			return m_view;
 		}
 
+		void enable_hit_testing(bool enabled = true)
+		{
+			if (rendering())
+			{
+				throw std::logic_error("Cannot change hit testing while the texture is being rendered to");
+			}
+			if (enabled && !can_render_to())
+			{
+				throw std::invalid_argument("Hit testing requires a color-target texture");
+			}
+			m_hit_testing_enabled = enabled;
+			if (!enabled)
+			{
+				m_hit_test_frame.reset();
+			}
+		}
+
+		[[nodiscard]] bool hit_testing_enabled() const noexcept
+		{
+			return m_hit_testing_enabled;
+		}
+
+		// The position is in target pixels, with the origin at the bottom-left.
+		[[nodiscard]] std::optional<hit_test_result> hit_test(glm::vec2 pixel_position) const
+		{
+			if (!m_hit_testing_enabled)
+			{
+				throw std::logic_error("Enable hit testing before rendering to this texture");
+			}
+			if (!m_hit_test_frame)
+			{
+				throw std::logic_error("No completed hit-test frame is available for this texture");
+			}
+			return detail::hit_test_frame_at_pixel(*m_hit_test_frame, pixel_position);
+		}
+
 		[[nodiscard]] const gpu::texture& raw_gpu_texture() const noexcept { return m_gpu_tex; }
 		[[nodiscard]] gpu::texture& raw_gpu_texture() noexcept { return m_gpu_tex; }
 
@@ -294,19 +348,36 @@ namespace mngl
 			const rectangle& bounds,
 			const color& tint = color(1.0f, 1.0f, 1.0f, 1.0f)
 		);
+		void draw(
+			const rectangle& bounds,
+			const color& tint,
+			const two_d::transform& transform
+		);
 		// The source is borrowed until display() submits the target texture's frame.
 		void draw(
 			const texture& source,
 			const rectangle& bounds,
 			const color& tint = color(1.0f, 1.0f, 1.0f, 1.0f)
 		);
+		void draw(
+			const texture& source,
+			const rectangle& bounds,
+			const color& tint,
+			const two_d::transform& transform
+		);
+		template<typename DrawFunction>
+			requires std::invocable<DrawFunction, two_d::Frame2D&>
+		void draw(DrawFunction&& draw_function);
 		void display();
 
 	private:
 		friend class render_window;
+		friend class two_d::renderer;
 
 		gpu::texture m_gpu_tex;
 		std::optional<view> m_view;
+		bool m_hit_testing_enabled = false;
+		std::shared_ptr<const detail::hit_test_frame> m_hit_test_frame;
 		std::unique_ptr<detail::texture_render_session> m_render_session;
 		bool m_external_render_active = false;
 

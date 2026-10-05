@@ -128,6 +128,12 @@
     <ClInclude Include="view.hpp">
       <Filter>Файлы заголовков\2d</Filter>
     </ClInclude>
+    <ClInclude Include="hit_test.hpp">
+      <Filter>Файлы заголовков\2d</Filter>
+    </ClInclude>
+    <ClInclude Include="transform.hpp">
+      <Filter>Файлы заголовков\2d</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Content Include="shaders\batcher2d.vert.hlsl">

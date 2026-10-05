@@ -1,14 +1,17 @@
 #pragma once
 
 #include "batcher2d.hpp"
+#include "hit_test.hpp"
 #include "view.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <concepts>
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -164,63 +167,76 @@ namespace mngl
 			gpu::quad_draw_state state = {}
 		)
 			: source_texture(&image)
+			, destination(destination)
 			, tint(tint)
 			, state(std::move(state))
-		{
-			transform.destination = destination;
-		}
+		{ }
 
 		sprite(
 			two_d::texture_region source,
-			gpu::quad_transform transform = {},
+			const rectangle& destination = {},
 			const color& tint = color(1.0f, 1.0f, 1.0f, 1.0f),
 			gpu::quad_draw_state state = {}
 		)
 			: source(source)
-			, transform(std::move(transform))
+			, destination(destination)
 			, tint(tint)
 			, state(std::move(state))
 		{ }
 
 		[[nodiscard]] glm::vec2 position() const noexcept
 		{
-			return transform.destination.pos;
+			return destination.pos;
 		}
 
 		sprite& position(glm::vec2 value) noexcept
 		{
-			transform.destination.pos = value;
+			destination.pos = value;
 			return *this;
 		}
 
 		[[nodiscard]] glm::vec2 size() const noexcept
 		{
-			return transform.destination.size;
+			return destination.size;
 		}
 
 		sprite& size(glm::vec2 value) noexcept
 		{
-			transform.destination.size = value;
+			destination.size = value;
 			return *this;
 		}
 
 		[[nodiscard]] float rotation() const noexcept
 		{
-			return transform.rotation_radians;
+			return rotation_radians;
 		}
 
 		sprite& rotation(float value) noexcept
 		{
-			transform.rotation_radians = value;
+			rotation_radians = value;
 			return *this;
+		}
+
+		void on_click(hit_test_callback callback)
+		{
+			detail::set_hit_test_callback(click_callback, std::move(callback));
+		}
+
+		void clear_on_click() noexcept
+		{
+			click_callback.reset();
 		}
 
 		two_d::texture_region source{};
 		// Non-owning; keep this texture alive until each frame using the sprite is submitted.
 		const texture* source_texture = nullptr;
-		gpu::quad_transform transform{};
+		rectangle destination{};
+		glm::vec2 pivot{ 0.5f, 0.5f };
+		float rotation_radians = 0.0f;
+		two_d::transform transform{};
 		color tint = color(1.0f, 1.0f, 1.0f, 1.0f);
 		gpu::quad_draw_state state{};
+		std::shared_ptr<const hit_test_callback> click_callback{};
 	};
 }
 
@@ -232,6 +248,18 @@ namespace mngl::two_d
 		float radius = 0.0f;
 		color tint = color(1.0f, 1.0f, 1.0f, 1.0f);
 		gpu::quad_draw_state state{};
+		::mngl::two_d::transform transform{};
+		std::shared_ptr<const ::mngl::hit_test_callback> click_callback{};
+
+		void on_click(::mngl::hit_test_callback callback)
+		{
+			::mngl::detail::set_hit_test_callback(click_callback, std::move(callback));
+		}
+
+		void clear_on_click() noexcept
+		{
+			click_callback.reset();
+		}
 	};
 
 	struct ellipse
@@ -240,6 +268,18 @@ namespace mngl::two_d
 		glm::vec2 radii{ 0.0f, 0.0f };
 		color tint = color(1.0f, 1.0f, 1.0f, 1.0f);
 		gpu::quad_draw_state state{};
+		::mngl::two_d::transform transform{};
+		std::shared_ptr<const ::mngl::hit_test_callback> click_callback{};
+
+		void on_click(::mngl::hit_test_callback callback)
+		{
+			::mngl::detail::set_hit_test_callback(click_callback, std::move(callback));
+		}
+
+		void clear_on_click() noexcept
+		{
+			click_callback.reset();
+		}
 	};
 
 	struct rounded_rectangle
@@ -248,6 +288,18 @@ namespace mngl::two_d
 		float radius = 0.0f;
 		color tint = color(1.0f, 1.0f, 1.0f, 1.0f);
 		gpu::quad_draw_state state{};
+		::mngl::two_d::transform transform{};
+		std::shared_ptr<const ::mngl::hit_test_callback> click_callback{};
+
+		void on_click(::mngl::hit_test_callback callback)
+		{
+			::mngl::detail::set_hit_test_callback(click_callback, std::move(callback));
+		}
+
+		void clear_on_click() noexcept
+		{
+			click_callback.reset();
+		}
 	};
 
 	class renderer;
@@ -287,11 +339,22 @@ namespace mngl::two_d
 			const ::mngl::rectangle& bounds,
 			const color& tint = color(1.0f, 1.0f, 1.0f, 1.0f)
 		);
+		void draw(
+			const ::mngl::rectangle& bounds,
+			const color& tint,
+			const transform& object_transform
+		);
 		// The source is borrowed until finish() submits the frame's command buffer.
 		void draw(
 			const ::mngl::texture& source,
 			const ::mngl::rectangle& bounds,
 			const color& tint = color(1.0f, 1.0f, 1.0f, 1.0f)
+		);
+		void draw(
+			const ::mngl::texture& source,
+			const ::mngl::rectangle& bounds,
+			const color& tint,
+			const transform& object_transform
 		);
 		void draw_quad(
 			const texture_region& source,
@@ -299,6 +362,13 @@ namespace mngl::two_d
 			const color& tint = color(1.0f, 1.0f, 1.0f, 1.0f),
 			const gpu::quad_draw_state& state = {}
 		);
+		template<typename DrawFunction>
+			requires std::invocable<DrawFunction, Frame2D&>
+		void draw(DrawFunction&& draw_function)
+		{
+			ensure_active();
+			std::invoke(std::forward<DrawFunction>(draw_function), *this);
+		}
 
 		void set_view_projection(const glm::mat4& matrix);
 		void set_view(const ::mngl::view& value);
@@ -439,6 +509,7 @@ namespace mngl::two_d
 
 			m_batcher.begin_frame(clear_color);
 			m_active_target = target;
+			m_hit_test_items.clear();
 			if (++m_next_frame_token == 0)
 			{
 				++m_next_frame_token;
@@ -584,7 +655,10 @@ namespace mngl::two_d
 			const texture_region& source,
 			const gpu::quad_transform& transform,
 			const color& tint,
-			const gpu::quad_draw_state& state
+			const gpu::quad_draw_state& state,
+			::mngl::detail::hit_test_shape shape = ::mngl::detail::hit_test_shape::quad,
+			float corner_radius = 0.0f,
+			const std::shared_ptr<const ::mngl::hit_test_callback>& click_callback = {}
 		)
 		{
 			ensure_frame(token);
@@ -593,9 +667,11 @@ namespace mngl::two_d
 				throw std::logic_error("Custom materials are unavailable for this render-target format");
 			}
 			const gpu::texture* page = nullptr;
+			const ::mngl::texture* source_texture = nullptr;
 			if (source.page.valid())
 			{
-				page = &m_textures.resolve(source.page).raw_gpu_texture();
+				source_texture = &m_textures.resolve(source.page);
+				page = &source_texture->raw_gpu_texture();
 				if (m_active_target && page == &m_active_target->raw_gpu_texture())
 				{
 					throw std::invalid_argument("A render target texture cannot also be sampled in the same frame");
@@ -610,13 +686,27 @@ namespace mngl::two_d
 				transform,
 				tint,
 				state);
+			record_hit_item(
+				transform,
+				source.uv_bounds,
+				source_texture,
+				state,
+				shape,
+				corner_radius,
+				click_callback);
 		}
 
-		void submit_rectangle(uint64_t token, const rectangle& bounds, const color& tint)
+		void submit_rectangle(
+			uint64_t token,
+			const rectangle& bounds,
+			const color& tint,
+			const ::mngl::two_d::transform& object_transform = {}
+		)
 		{
 			ensure_frame(token);
 			gpu::quad_transform transform{};
 			transform.destination = bounds;
+			transform.matrix(object_transform.matrix());
 			submit_quad(token, m_textures.white_region(), transform, tint, {});
 		}
 
@@ -625,7 +715,8 @@ namespace mngl::two_d
 			const ::mngl::texture& source,
 			const gpu::quad_transform& transform,
 			const color& tint,
-			const gpu::quad_draw_state& state
+			const gpu::quad_draw_state& state,
+			const std::shared_ptr<const ::mngl::hit_test_callback>& click_callback = {}
 		)
 		{
 			ensure_frame(token);
@@ -657,6 +748,14 @@ namespace mngl::two_d
 				transform,
 				tint,
 				state);
+			record_hit_item(
+				transform,
+				glm::vec4(0.0f, 0.0f, 1.0f, 1.0f),
+				&source,
+				state,
+				::mngl::detail::hit_test_shape::quad,
+				0.0f,
+				click_callback);
 		}
 
 		void submit_circle(uint64_t token, const circle& value)
@@ -679,9 +778,18 @@ namespace mngl::two_d
 				value.radius * 2.0f,
 				value.radius * 2.0f
 			};
+			transform.matrix(value.transform.matrix());
 			auto state = value.state;
 			state.effect = gpu::quad_effect::circle;
-			submit_quad(token, m_textures.white_region(), transform, value.tint, state);
+			submit_quad(
+				token,
+				m_textures.white_region(),
+				transform,
+				value.tint,
+				state,
+				::mngl::detail::hit_test_shape::circle,
+				0.0f,
+				value.click_callback);
 		}
 
 		void submit_ellipse(uint64_t token, const ellipse& value)
@@ -705,9 +813,18 @@ namespace mngl::two_d
 				value.radii.x * 2.0f,
 				value.radii.y * 2.0f
 			};
+			transform.matrix(value.transform.matrix());
 			auto state = value.state;
 			state.effect = gpu::quad_effect::ellipse;
-			submit_quad(token, m_textures.white_region(), transform, value.tint, state);
+			submit_quad(
+				token,
+				m_textures.white_region(),
+				transform,
+				value.tint,
+				state,
+				::mngl::detail::hit_test_shape::ellipse,
+				0.0f,
+				value.click_callback);
 		}
 
 		void submit_rounded_rectangle(uint64_t token, const rounded_rectangle& value)
@@ -730,12 +847,102 @@ namespace mngl::two_d
 
 			gpu::quad_transform transform{};
 			transform.destination = value.bounds;
+			transform.matrix(value.transform.matrix());
 			auto state = value.state;
 			state.effect = gpu::quad_effect::rounded_rectangle;
 			const float half_min_dimension =
 				std::min(value.bounds.size.x, value.bounds.size.y) * 0.5f;
 			state.effect_parameters.x = std::clamp(value.radius / half_min_dimension, 0.0f, 1.0f);
-			submit_quad(token, m_textures.white_region(), transform, value.tint, state);
+			submit_quad(
+				token,
+				m_textures.white_region(),
+				transform,
+				value.tint,
+				state,
+				::mngl::detail::hit_test_shape::rounded_rectangle,
+				value.radius,
+				value.click_callback);
+		}
+
+		void record_hit_item(
+			const gpu::quad_transform& transform,
+			const glm::vec4& uv_bounds,
+			const ::mngl::texture* source,
+			const gpu::quad_draw_state& state,
+			::mngl::detail::hit_test_shape shape,
+			float corner_radius,
+			const std::shared_ptr<const ::mngl::hit_test_callback>& click_callback
+		)
+		{
+			if (!m_active_target || !m_active_target->m_hit_testing_enabled)
+			{
+				return;
+			}
+
+			std::shared_ptr<const ::mngl::detail::hit_test_frame> child_frame;
+			if (source && source->m_hit_test_frame &&
+				source->m_hit_test_frame->depth < ::mngl::detail::hit_test_max_depth)
+			{
+				child_frame = source->m_hit_test_frame;
+			}
+
+			if (shape == ::mngl::detail::hit_test_shape::quad)
+			{
+				switch (state.effect)
+				{
+				case gpu::quad_effect::circle:
+					shape = ::mngl::detail::hit_test_shape::circle;
+					break;
+				case gpu::quad_effect::ellipse:
+					shape = ::mngl::detail::hit_test_shape::ellipse;
+					break;
+				case gpu::quad_effect::rounded_rectangle:
+					shape = ::mngl::detail::hit_test_shape::rounded_rectangle;
+					corner_radius = std::clamp(
+						state.effect_parameters.x,
+						0.0f,
+						1.0f) * std::min(
+							transform.destination.size.x,
+							transform.destination.size.y) * 0.5f;
+					break;
+				case gpu::quad_effect::textured:
+					break;
+				}
+			}
+
+			std::optional<glm::ivec4> scissor;
+			if (state.scissor)
+			{
+				scissor = glm::ivec4{
+					state.scissor->x,
+					state.scissor->y,
+					state.scissor->w,
+					state.scissor->h
+				};
+			}
+			const glm::mat4 local_to_world = transform.model_matrix();
+			const float determinant = glm::determinant(local_to_world);
+			glm::mat4 world_to_local(1.0f);
+			bool inverse_valid =
+				std::isfinite(determinant) &&
+				std::abs(determinant) > std::numeric_limits<float>::min();
+			if (inverse_valid)
+			{
+				world_to_local = glm::inverse(local_to_world);
+				inverse_valid = ::mngl::detail::finite(world_to_local);
+			}
+			m_hit_test_items.push_back(::mngl::detail::hit_test_item{
+				.draw_index = m_hit_test_items.size(),
+				.destination = transform.destination,
+				.world_to_local = world_to_local,
+				.inverse_valid = inverse_valid,
+				.shape = shape,
+				.corner_radius = corner_radius,
+				.uv_bounds = uv_bounds,
+				.scissor = scissor,
+				.child_frame = std::move(child_frame),
+				.click_callback = click_callback
+			});
 		}
 
 		void finish_frame(Frame2D& frame, gpu::command_buffer* external_command_buffer = nullptr)
@@ -743,6 +950,24 @@ namespace mngl::two_d
 			ensure_frame(frame.m_token);
 			try
 			{
+				std::shared_ptr<::mngl::detail::hit_test_frame> hit_frame;
+				if (m_active_target && m_active_target->m_hit_testing_enabled)
+				{
+					hit_frame = std::make_shared<::mngl::detail::hit_test_frame>();
+					hit_frame->target_size = m_active_target->size();
+					hit_frame->view_projection = projection_for_frame(frame, hit_frame->target_size);
+					hit_frame->items = std::move(m_hit_test_items);
+					for (const auto& item : hit_frame->items)
+					{
+						if (item.child_frame)
+						{
+							hit_frame->depth = std::max(
+								hit_frame->depth,
+								item.child_frame->depth + 1);
+						}
+					}
+				}
+
 				auto flush = [&](gpu::command_buffer& cmd)
 				{
 					if (!cmd.valid() || cmd.device_raw() != m_device.raw())
@@ -752,19 +977,10 @@ namespace mngl::two_d
 
 					auto flush_target = [&](gpu::texture& target)
 					{
-						if (frame.m_view_projection)
-						{
-							m_batcher.flush(cmd, target, *frame.m_view_projection);
-						}
-						else if (frame.m_view)
-						{
-							const auto projection = frame.m_view->projection(target.get_size());
-							m_batcher.flush(cmd, target, projection);
-						}
-						else
-						{
-							m_batcher.flush(cmd, target);
-						}
+						const auto projection = projection_for_frame(
+							frame,
+							target.get_size());
+						m_batcher.flush(cmd, target, projection);
 					};
 
 					if (m_active_target)
@@ -792,6 +1008,11 @@ namespace mngl::two_d
 					flush(cmd);
 					cmd.submit();
 				}
+
+				if (hit_frame)
+				{
+					m_active_target->m_hit_test_frame = std::move(hit_frame);
+				}
 			}
 			catch (...)
 			{
@@ -799,6 +1020,7 @@ namespace mngl::two_d
 				m_frame_active = false;
 				m_active_frame_token = 0;
 				m_active_target = nullptr;
+				m_hit_test_items.clear();
 				frame.detach();
 				throw;
 			}
@@ -806,6 +1028,7 @@ namespace mngl::two_d
 			m_frame_active = false;
 			m_active_frame_token = 0;
 			m_active_target = nullptr;
+			m_hit_test_items.clear();
 			frame.detach();
 		}
 
@@ -817,7 +1040,43 @@ namespace mngl::two_d
 				m_frame_active = false;
 				m_active_frame_token = 0;
 				m_active_target = nullptr;
+				m_hit_test_items.clear();
 			}
+		}
+
+		static glm::mat4 coordinate_projection(glm::uvec2 target_size)
+		{
+			glm::mat4 projection(1.0f);
+			if (target_size.x == 0 || target_size.y == 0)
+			{
+				return projection;
+			}
+
+			const float short_side = static_cast<float>(
+				std::min(target_size.x, target_size.y));
+			const float coordinate_width = static_cast<float>(target_size.x) / short_side;
+			const float coordinate_height = static_cast<float>(target_size.y) / short_side;
+			projection[0][0] = 2.0f / coordinate_width;
+			projection[1][1] = 2.0f / coordinate_height;
+			projection[3][0] = -1.0f;
+			projection[3][1] = -1.0f;
+			return projection;
+		}
+
+		static glm::mat4 projection_for_frame(
+			const Frame2D& frame,
+			glm::uvec2 target_size
+		)
+		{
+			if (frame.m_view_projection)
+			{
+				return *frame.m_view_projection;
+			}
+			if (frame.m_view)
+			{
+				return frame.m_view->projection(target_size);
+			}
+			return coordinate_projection(target_size);
 		}
 
 		void ensure_frame(uint64_t token) const
@@ -835,6 +1094,7 @@ namespace mngl::two_d
 		gpu::batcher2d m_batcher;
 		std::shared_ptr<detail::renderer_frame_control> m_frame_control;
 		::mngl::texture* m_active_target = nullptr;
+		std::vector<::mngl::detail::hit_test_item> m_hit_test_items;
 		bool m_custom_materials_allowed = false;
 		uint64_t m_next_frame_token = 0;
 		uint64_t m_active_frame_token = 0;
@@ -921,10 +1181,28 @@ namespace mngl
 			{
 				m_frame.draw(bounds, tint);
 			}
+			void draw(
+				const rectangle& bounds,
+				const color& tint,
+				const two_d::transform& transform
+			) override
+			{
+				m_frame.draw(bounds, tint, transform);
+			}
 			void draw(const texture& source, const rectangle& bounds, const color& tint) override
 			{
 				m_frame.draw(source, bounds, tint);
 			}
+			void draw(
+				const texture& source,
+				const rectangle& bounds,
+				const color& tint,
+				const two_d::transform& transform
+			) override
+			{
+				m_frame.draw(source, bounds, tint, transform);
+			}
+			two_d::Frame2D& frame() noexcept override { return m_frame; }
 
 			void display() override
 			{
@@ -946,7 +1224,10 @@ namespace mngl
 		}
 		m_gpu_tex = std::move(other.m_gpu_tex);
 		m_view = std::move(other.m_view);
+		m_hit_testing_enabled = std::exchange(other.m_hit_testing_enabled, false);
+		m_hit_test_frame = std::move(other.m_hit_test_frame);
 		other.m_view.reset();
+		other.m_hit_test_frame.reset();
 	}
 
 	inline texture& texture::operator=(texture&& other)
@@ -959,7 +1240,10 @@ namespace mngl
 			}
 			m_gpu_tex = std::move(other.m_gpu_tex);
 			m_view = std::move(other.m_view);
+			m_hit_testing_enabled = std::exchange(other.m_hit_testing_enabled, false);
+			m_hit_test_frame = std::move(other.m_hit_test_frame);
 			other.m_view.reset();
+			other.m_hit_test_frame.reset();
 		}
 		return *this;
 	}
@@ -1026,6 +1310,19 @@ namespace mngl
 		m_render_session->draw(bounds, tint);
 	}
 
+	inline void texture::draw(
+		const rectangle& bounds,
+		const color& tint,
+		const two_d::transform& object_transform
+	)
+	{
+		if (!m_render_session)
+		{
+			throw std::logic_error("Call clear() before drawing to a texture");
+		}
+		m_render_session->draw(bounds, tint, object_transform);
+	}
+
 	inline void texture::draw(const texture& source, const rectangle& bounds, const color& tint)
 	{
 		if (!m_render_session)
@@ -1033,6 +1330,31 @@ namespace mngl
 			throw std::logic_error("Call clear() before drawing to a texture");
 		}
 		m_render_session->draw(source, bounds, tint);
+	}
+
+	inline void texture::draw(
+		const texture& source,
+		const rectangle& bounds,
+		const color& tint,
+		const two_d::transform& object_transform
+	)
+	{
+		if (!m_render_session)
+		{
+			throw std::logic_error("Call clear() before drawing to a texture");
+		}
+		m_render_session->draw(source, bounds, tint, object_transform);
+	}
+
+	template<typename DrawFunction>
+		requires std::invocable<DrawFunction, two_d::Frame2D&>
+	inline void texture::draw(DrawFunction&& draw_function)
+	{
+		if (!m_render_session)
+		{
+			throw std::logic_error("Call clear() before drawing to a texture");
+		}
+		m_render_session->frame().draw(std::forward<DrawFunction>(draw_function));
 	}
 
 	inline void texture::display()
@@ -1049,6 +1371,7 @@ namespace mngl
 		catch (...)
 		{
 			m_render_session.reset();
+			m_hit_test_frame.reset();
 			throw;
 		}
 		m_render_session.reset();
@@ -1081,23 +1404,32 @@ namespace mngl::two_d
 	inline void Frame2D::draw(const ::mngl::sprite& value)
 	{
 		ensure_active();
+		gpu::quad_transform gpu_transform{};
+		gpu_transform.destination = value.destination;
+		gpu_transform.pivot = value.pivot;
+		gpu_transform.rotation_radians = value.rotation_radians;
+		gpu_transform.object_transform = value.transform;
 		if (value.source_texture)
 		{
 			m_control->owner->submit_texture(
 				m_token,
 				*value.source_texture,
-				value.transform,
+				gpu_transform,
 				value.tint,
-				value.state);
+				value.state,
+				value.click_callback);
 		}
 		else
 		{
 			m_control->owner->submit_quad(
 				m_token,
 				value.source,
-				value.transform,
+				gpu_transform,
 				value.tint,
-				value.state);
+				value.state,
+				::mngl::detail::hit_test_shape::quad,
+				0.0f,
+				value.click_callback);
 		}
 	}
 
@@ -1126,6 +1458,16 @@ namespace mngl::two_d
 	}
 
 	inline void Frame2D::draw(
+		const ::mngl::rectangle& bounds,
+		const color& tint,
+		const transform& object_transform
+	)
+	{
+		ensure_active();
+		m_control->owner->submit_rectangle(m_token, bounds, tint, object_transform);
+	}
+
+	inline void Frame2D::draw(
 		const ::mngl::texture& source,
 		const ::mngl::rectangle& bounds,
 		const color& tint
@@ -1135,6 +1477,20 @@ namespace mngl::two_d
 		gpu::quad_transform transform{};
 		transform.destination = bounds;
 		m_control->owner->submit_texture(m_token, source, transform, tint, {});
+	}
+
+	inline void Frame2D::draw(
+		const ::mngl::texture& source,
+		const ::mngl::rectangle& bounds,
+		const color& tint,
+		const transform& object_transform
+	)
+	{
+		ensure_active();
+		gpu::quad_transform quad{};
+		quad.destination = bounds;
+		quad.matrix(object_transform.matrix());
+		m_control->owner->submit_texture(m_token, source, quad, tint, {});
 	}
 
 	inline void Frame2D::draw_quad(

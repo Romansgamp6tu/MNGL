@@ -4,6 +4,8 @@
 #include "view.hpp"
 #include "window.hpp"
 
+#include <cmath>
+#include <concepts>
 #include <optional>
 #include <memory>
 #include <stdexcept>
@@ -69,6 +71,69 @@ namespace mngl
 			return m_view;
 		}
 
+		void enable_hit_testing(bool enabled = true)
+		{
+			if (m_frame || m_command_buffer)
+			{
+				throw std::logic_error("Cannot change hit testing during an active frame");
+			}
+			m_hit_testing_enabled = enabled;
+			if (!enabled)
+			{
+				m_hit_test_frame.reset();
+			}
+		}
+
+		[[nodiscard]] bool hit_testing_enabled() const noexcept
+		{
+			return m_hit_testing_enabled;
+		}
+
+		// The position is in logical window coordinates, with the origin at the top-left.
+		[[nodiscard]] std::optional<hit_test_result> hit_test(glm::vec2 window_position) const
+		{
+			if (!m_hit_testing_enabled)
+			{
+				throw std::logic_error("Enable hit testing before drawing to the render window");
+			}
+			if (!m_hit_test_frame)
+			{
+				throw std::logic_error("No completed hit-test frame is available for this window");
+			}
+			if (!std::isfinite(window_position.x) || !std::isfinite(window_position.y))
+			{
+				return std::nullopt;
+			}
+
+			const auto logical_size = size();
+			if (logical_size.x == 0 || logical_size.y == 0 ||
+				window_position.x < 0.0f || window_position.y < 0.0f ||
+				window_position.x > static_cast<float>(logical_size.x) ||
+				window_position.y > static_cast<float>(logical_size.y))
+			{
+				return std::nullopt;
+			}
+
+			const glm::vec2 pixel_position{
+				window_position.x * static_cast<float>(m_hit_test_frame->target_size.x) /
+					static_cast<float>(logical_size.x),
+				(static_cast<float>(logical_size.y) - window_position.y) *
+					static_cast<float>(m_hit_test_frame->target_size.y) /
+					static_cast<float>(logical_size.y)
+			};
+			return detail::hit_test_frame_at_pixel(*m_hit_test_frame, pixel_position);
+		}
+
+		// Dispatches to the topmost hit object or its nearest clickable ancestor.
+		[[nodiscard]] bool dispatch_click(glm::vec2 window_position) const
+		{
+			if (auto hit = hit_test(window_position))
+			{
+				return hit->invoke_click_callback();
+			}
+			return false;
+		}
+
 		// The target must remain alive until display() finishes this frame.
 		void clear(
 			::mngl::texture& target,
@@ -105,6 +170,14 @@ namespace mngl
 		{
 			active_frame().draw(bounds, tint);
 		}
+		void draw(
+			const rectangle& bounds,
+			const color& tint,
+			const two_d::transform& object_transform
+		)
+		{
+			active_frame().draw(bounds, tint, object_transform);
+		}
 
 		// The source is borrowed until display() submits the window frame.
 		void draw(
@@ -115,6 +188,15 @@ namespace mngl
 		{
 			active_frame().draw(source, bounds, tint);
 		}
+		void draw(
+			const ::mngl::texture& source,
+			const rectangle& bounds,
+			const color& tint,
+			const two_d::transform& object_transform
+		)
+		{
+			active_frame().draw(source, bounds, tint, object_transform);
+		}
 
 		void draw_quad(
 			const two_d::texture_region& source,
@@ -124,6 +206,13 @@ namespace mngl
 		)
 		{
 			active_frame().draw_quad(source, transform, tint, state);
+		}
+
+		template<typename DrawFunction>
+			requires std::invocable<DrawFunction, two_d::Frame2D&>
+		void draw(DrawFunction&& draw_function)
+		{
+			active_frame().draw(std::forward<DrawFunction>(draw_function));
 		}
 
 		void display()
@@ -137,6 +226,9 @@ namespace mngl
 			{
 				m_frame->finish(*m_command_buffer);
 				m_command_buffer->submit();
+				m_hit_test_frame = m_hit_testing_enabled && m_swapchain_texture
+					? m_swapchain_texture->m_hit_test_frame
+					: nullptr;
 			}
 			catch (...)
 			{
@@ -262,6 +354,7 @@ namespace mngl
 					auto swapchain_target = ::mngl::texture(
 						m_command_buffer->acquire_swapchain_texture(*this));
 					m_swapchain_texture.emplace(std::move(swapchain_target));
+					m_swapchain_texture->enable_hit_testing(m_hit_testing_enabled);
 					m_frame.emplace(active_renderer->begin_frame(*m_swapchain_texture, clear_color));
 					if (m_view)
 					{
@@ -334,6 +427,8 @@ namespace mngl
 		std::unordered_map<gpu::texture_format, std::unique_ptr<two_d::renderer>> m_renderers;
 		std::optional<::mngl::view> m_view;
 		::mngl::texture* m_active_texture_target = nullptr;
+		bool m_hit_testing_enabled = false;
+		std::shared_ptr<const detail::hit_test_frame> m_hit_test_frame;
 		std::optional<gpu::command_buffer> m_command_buffer;
 		std::optional<::mngl::texture> m_swapchain_texture;
 		std::optional<two_d::Frame2D> m_frame;

@@ -16,7 +16,7 @@
 | `gpu_buffer.hpp`, `gpu_texture.hpp`, `sampler.hpp` | Низкоуровневые GPU-ресурсы | [GPU-ресурсы](../gpu/resources.md) |
 | `graphics_shader.hpp`, `shader_loader.hpp` | Загрузка/компиляция шейдеров, uniforms и bindings | [Шейдеры](../gpu/shaders.md) |
 | `vertex_layout.hpp`, `graphics_pipeline.hpp`, `render_pass.hpp` | Vertex input и графические проходы | [Pipeline и render pass](../gpu/pipelines-and-passes.md) |
-| `render_window.hpp`, `renderer2d.hpp`, `texture.hpp`, `view.hpp` | Высокоуровневый 2D API | [Раздел 2D](../2d/index.md) |
+| `render_window.hpp`, `renderer2d.hpp`, `texture.hpp`, `view.hpp`, `transform.hpp`, `hit_test.hpp` | Высокоуровневый 2D API | [Раздел 2D](../2d/index.md) |
 | `batcher2d.hpp` | Низкоуровневая пакетная 2D-отрисовка | [Расширенный 2D-рендеринг](../2d/advanced-rendering.md) |
 
 Руководства объясняют главные сценарии и ограничения. Полный symbol-by-symbol справочник по объявлениям C++ пока не генерируется; его можно добавить отдельным Doxygen-выводом, не меняя исходники страниц MkDocs.

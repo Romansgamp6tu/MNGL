@@ -11,6 +11,7 @@
 #include "sampler.hpp"
 #include "shader_loader.hpp"
 #include "texture.hpp"
+#include "transform.hpp"
 #include "vertex_layout.hpp"
 #include "utilities.hpp"
 
@@ -274,6 +275,70 @@ namespace mngl::gpu
 		rectangle destination{};
 		glm::vec2 pivot{ 0.5f, 0.5f };
 		float rotation_radians = 0.0f;
+		two_d::transform object_transform{};
+
+		[[nodiscard]] const glm::mat4& matrix() const noexcept
+		{
+			return object_transform.matrix();
+		}
+
+		quad_transform& matrix(const glm::mat4& value)
+		{
+			object_transform.matrix(value);
+			return *this;
+		}
+
+		quad_transform& translate(glm::vec2 offset)
+		{
+			object_transform.translate(offset);
+			return *this;
+		}
+
+		quad_transform& rotate(float radians, glm::vec2 origin = glm::vec2(0.0f))
+		{
+			object_transform.rotate(radians, origin);
+			return *this;
+		}
+
+		quad_transform& scale(
+			glm::vec2 factors,
+			glm::vec2 origin = glm::vec2(0.0f))
+		{
+			object_transform.scale(factors, origin);
+			return *this;
+		}
+
+		quad_transform& scale(float factor, glm::vec2 origin = glm::vec2(0.0f))
+		{
+			object_transform.scale(factor, origin);
+			return *this;
+		}
+
+		quad_transform& reset() noexcept
+		{
+			object_transform.reset();
+			return *this;
+		}
+
+		[[nodiscard]] glm::mat4 model_matrix() const noexcept
+		{
+			const glm::vec2 pivot_offset = pivot * destination.size;
+			glm::mat4 geometry(1.0f);
+			geometry = glm::translate(
+				geometry,
+				glm::vec3(destination.pos + pivot_offset, 0.0f));
+			geometry = glm::rotate(
+				geometry,
+				rotation_radians,
+				glm::vec3(0.0f, 0.0f, 1.0f));
+			geometry = glm::translate(
+				geometry,
+				glm::vec3(-pivot_offset, 0.0f));
+			geometry = glm::scale(
+				geometry,
+				glm::vec3(destination.size, 1.0f));
+			return object_transform.matrix() * geometry;
+		}
 	};
 
 	struct quad_draw_state
@@ -358,10 +423,9 @@ namespace mngl::gpu
 
 		struct sprite_instance
 		{
-			std::array<float, 2> position;
-			std::array<float, 2> size;
-			std::array<float, 2> pivot;
-			std::array<float, 2> rotation;
+			std::array<float, 2> transform_x;
+			std::array<float, 2> transform_y;
+			std::array<float, 2> transform_translation;
 			std::array<float, 2> effect_parameters;
 			std::array<float, 4> uv;
 			std::array<uint8_t, 4> tint;
@@ -407,12 +471,12 @@ namespace mngl::gpu
 
 		static_assert(std::is_trivially_copyable_v<sprite_instance>);
 		static_assert(std::is_standard_layout_v<sprite_instance>);
-		static_assert(sizeof(sprite_instance) == 60);
-		static_assert(offsetof(sprite_instance, pivot) == 16);
-		static_assert(offsetof(sprite_instance, rotation) == 24);
-		static_assert(offsetof(sprite_instance, effect_parameters) == 32);
-		static_assert(offsetof(sprite_instance, uv) == 40);
-		static_assert(offsetof(sprite_instance, tint) == 56);
+		static_assert(sizeof(sprite_instance) == 52);
+		static_assert(offsetof(sprite_instance, transform_y) == 8);
+		static_assert(offsetof(sprite_instance, transform_translation) == 16);
+		static_assert(offsetof(sprite_instance, effect_parameters) == 24);
+		static_assert(offsetof(sprite_instance, uv) == 32);
+		static_assert(offsetof(sprite_instance, tint) == 48);
 		static_assert(sizeof(glm::mat4) == 64);
 
 	public:
@@ -457,13 +521,12 @@ namespace mngl::gpu
 				1,
 				sizeof(sprite_instance),
 				vertex_input_rate::instance);
-			m_vertex_layout.add_attribute(1, 1, vertex_elemetn_fmt::float2, offsetof(sprite_instance, position));
-			m_vertex_layout.add_attribute(2, 1, vertex_elemetn_fmt::float2, offsetof(sprite_instance, size));
-			m_vertex_layout.add_attribute(3, 1, vertex_elemetn_fmt::float2, offsetof(sprite_instance, pivot));
-			m_vertex_layout.add_attribute(4, 1, vertex_elemetn_fmt::float2, offsetof(sprite_instance, rotation));
-			m_vertex_layout.add_attribute(5, 1, vertex_elemetn_fmt::float2, offsetof(sprite_instance, effect_parameters));
-			m_vertex_layout.add_attribute(6, 1, vertex_elemetn_fmt::float4, offsetof(sprite_instance, uv));
-			m_vertex_layout.add_attribute(7, 1, vertex_elemetn_fmt::ubyte4_norm, offsetof(sprite_instance, tint));
+			m_vertex_layout.add_attribute(1, 1, vertex_elemetn_fmt::float2, offsetof(sprite_instance, transform_x));
+			m_vertex_layout.add_attribute(2, 1, vertex_elemetn_fmt::float2, offsetof(sprite_instance, transform_y));
+			m_vertex_layout.add_attribute(3, 1, vertex_elemetn_fmt::float2, offsetof(sprite_instance, transform_translation));
+			m_vertex_layout.add_attribute(4, 1, vertex_elemetn_fmt::float2, offsetof(sprite_instance, effect_parameters));
+			m_vertex_layout.add_attribute(5, 1, vertex_elemetn_fmt::float4, offsetof(sprite_instance, uv));
+			m_vertex_layout.add_attribute(6, 1, vertex_elemetn_fmt::ubyte4_norm, offsetof(sprite_instance, tint));
 
 			for (uint8_t i = 0; i < static_cast<uint8_t>(sprite_blend_mode::additive) + 1; ++i)
 			{
@@ -681,6 +744,17 @@ namespace mngl::gpu
 			{
 				throw std::invalid_argument("batcher2d transform values must be finite with non-negative dimensions");
 			}
+			const glm::mat4 model_matrix = transform.model_matrix();
+			for (int column = 0; column < 4; ++column)
+			{
+				for (int row = 0; row < 4; ++row)
+				{
+					if (!std::isfinite(model_matrix[column][row]))
+					{
+						throw std::invalid_argument("batcher2d model matrix must be finite");
+					}
+				}
+			}
 			if (destination.size.x == 0.0f || destination.size.y == 0.0f)
 			{
 				return;
@@ -732,17 +806,19 @@ namespace mngl::gpu
 			}
 
 			const auto rgba = tint.rgba_glsl();
-			const float sine = transform.rotation_radians == 0.0f
-				? 0.0f
-				: std::sin(transform.rotation_radians);
-			const float cosine = transform.rotation_radians == 0.0f
-				? 1.0f
-				: std::cos(transform.rotation_radians);
 			sprite_instance instance{
-				.position = { destination.pos.x, destination.pos.y },
-				.size = { destination.size.x, destination.size.y },
-				.pivot = { transform.pivot.x, transform.pivot.y },
-				.rotation = { cosine, sine },
+				.transform_x = {
+					model_matrix[0][0],
+					model_matrix[0][1]
+				},
+				.transform_y = {
+					model_matrix[1][0],
+					model_matrix[1][1]
+				},
+				.transform_translation = {
+					model_matrix[3][0],
+					model_matrix[3][1]
+				},
 				.effect_parameters = { state.effect_parameters.x, state.effect_parameters.y },
 				.uv = {
 					source.uv_bounds.x,

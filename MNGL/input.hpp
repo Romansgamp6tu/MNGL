@@ -99,23 +99,25 @@ namespace mngl
 				event_manager::on<mouseMotion>([](const mouseMotion& e)
 				{
 					std::lock_guard lock(state_mutex);
-					mdelta += e.position - mpos;
-					mpos = e.position;
+					update_mouse_position(e.position);
 				});
 				event_manager::on<mouseButtonDown>([](const mouseButtonDown& e)
 				{
 					std::lock_guard lock(state_mutex);
+					update_mouse_position(e.position);
 					mpressed |= 1 << (e.button - 1);
 				});
 				event_manager::on<mouseButtonUp>([](const mouseButtonUp& e)
 				{
 					std::lock_guard lock(state_mutex);
+					update_mouse_position(e.position);
 					mreleased |= 1 << (e.button - 1);
 					mholded &= ~(1 << (e.button - 1));
 				});
 				event_manager::on<mouseWheel>([](const mouseWheel& e)
 				{
 					std::lock_guard lock(state_mutex);
+					update_mouse_position(e.mousePos);
 					mscrolldelta += e.scroll;
 				});
 				return true;
@@ -129,6 +131,12 @@ namespace mngl
 		static inline glm::vec2 mpos;
 		static inline glm::vec2 mdelta;
 		static inline glm::vec2 mscrolldelta;
+
+		static void update_mouse_position(glm::vec2 position)
+		{
+			mdelta += position - mpos;
+			mpos = position;
+		}
 
 		static inline uint32_t mpressed;
 		static inline uint32_t mholded;

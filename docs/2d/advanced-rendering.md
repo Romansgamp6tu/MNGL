@@ -1,6 +1,6 @@
 # Расширенный 2D-рендеринг
 
-Для обычного рисования используйте [`render_window` и `texture`](index.md). `mngl::two_d::renderer`, `Frame2D` и `mngl::gpu::batcher2d` предназначены для интеграции с собственным GPU lifecycle и более низкоуровневых задач.
+Для обычного рисования используйте [`render_window` и `texture`](index.md). `Frame2D` также доступен внутри callback-отрисовщика, переданного в `draw()`. `mngl::two_d::renderer` и `mngl::gpu::batcher2d` предназначены для интеграции с собственным GPU lifecycle и более низкоуровневых задач.
 
 ## Ручное управление кадром
 

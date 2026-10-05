@@ -16,6 +16,8 @@ nav:
       - Быстрый старт: 2d/quick-start.md
       - Рендер в текстуру: 2d/render-to-texture.md
       - Координаты и view: 2d/coordinates-and-view.md
+      - Трансформации: 2d/transforms.md
+      - Hit testing: 2d/hit-testing.md
       - Расширенный рендеринг: 2d/advanced-rendering.md
   - Основы:
       - Обзор: core/index.md
