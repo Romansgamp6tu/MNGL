@@ -4,6 +4,8 @@
 int main()
 {
 	mngl::window win("hello, world!", {800, 600});
+
+	
 	
 	while (mngl::Input::continue_work())
 	{
