@@ -191,6 +191,7 @@
     <ClInclude Include="texture.hpp" />
     <ClInclude Include="utilities.hpp" />
     <ClInclude Include="vertex_layout.hpp" />
+    <ClInclude Include="view.hpp" />
     <ClInclude Include="window.hpp" />
   </ItemGroup>
   <ItemGroup>

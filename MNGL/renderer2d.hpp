@@ -1,6 +1,7 @@
 #pragma once
 
 #include "batcher2d.hpp"
+#include "view.hpp"
 
 #include <algorithm>
 #include <array>
@@ -269,7 +270,11 @@ namespace mngl::two_d
 			: m_control(std::move(other.m_control))
 			, m_token(std::exchange(other.m_token, 0))
 			, m_view_projection(std::move(other.m_view_projection))
-		{ }
+			, m_view(std::move(other.m_view))
+		{
+			other.m_view_projection.reset();
+			other.m_view.reset();
+		}
 
 		Frame2D& operator=(Frame2D&& other) noexcept;
 		~Frame2D() noexcept;
@@ -296,6 +301,7 @@ namespace mngl::two_d
 		);
 
 		void set_view_projection(const glm::mat4& matrix);
+		void set_view(const ::mngl::view& value);
 		void finish();
 		// Records into the supplied command buffer without submitting it.
 		void finish(gpu::command_buffer& command_buffer);
@@ -317,11 +323,13 @@ namespace mngl::two_d
 			m_control.reset();
 			m_token = 0;
 			m_view_projection.reset();
+			m_view.reset();
 		}
 
 		std::shared_ptr<detail::renderer_frame_control> m_control;
 		uint64_t m_token = 0;
 		std::optional<glm::mat4> m_view_projection;
+		std::optional<::mngl::view> m_view;
 	};
 
 	class renderer
@@ -437,7 +445,12 @@ namespace mngl::two_d
 			}
 			m_active_frame_token = m_next_frame_token;
 			m_frame_active = true;
-			return Frame2D(m_frame_control, m_active_frame_token);
+			Frame2D frame(m_frame_control, m_active_frame_token);
+			if (target)
+			{
+				frame.m_view = target->get_view();
+			}
+			return frame;
 		}
 
 	public:
@@ -737,17 +750,26 @@ namespace mngl::two_d
 						throw std::invalid_argument("2D frame command buffer must belong to the renderer's GPU device");
 					}
 
-					if (m_active_target)
+					auto flush_target = [&](gpu::texture& target)
 					{
-						auto& target = m_active_target->raw_gpu_texture();
 						if (frame.m_view_projection)
 						{
 							m_batcher.flush(cmd, target, *frame.m_view_projection);
+						}
+						else if (frame.m_view)
+						{
+							const auto projection = frame.m_view->projection(target.get_size());
+							m_batcher.flush(cmd, target, projection);
 						}
 						else
 						{
 							m_batcher.flush(cmd, target);
 						}
+					};
+
+					if (m_active_target)
+					{
+						flush_target(m_active_target->raw_gpu_texture());
 					}
 					else
 					{
@@ -756,14 +778,7 @@ namespace mngl::two_d
 							throw std::logic_error("This 2D renderer requires a render target texture");
 						}
 						auto target = cmd.acquire_swapchain_texture(*m_window);
-						if (frame.m_view_projection)
-						{
-							m_batcher.flush(cmd, target, *frame.m_view_projection);
-						}
-						else
-						{
-							m_batcher.flush(cmd, target);
-						}
+						flush_target(target);
 					}
 				};
 
@@ -930,6 +945,8 @@ namespace mngl
 			throw std::logic_error("Cannot move a texture while it is being rendered to");
 		}
 		m_gpu_tex = std::move(other.m_gpu_tex);
+		m_view = std::move(other.m_view);
+		other.m_view.reset();
 	}
 
 	inline texture& texture::operator=(texture&& other)
@@ -941,6 +958,8 @@ namespace mngl
 				throw std::logic_error("Cannot move-assign a texture while either texture is being rendered to");
 			}
 			m_gpu_tex = std::move(other.m_gpu_tex);
+			m_view = std::move(other.m_view);
+			other.m_view.reset();
 		}
 		return *this;
 	}
@@ -1047,6 +1066,9 @@ namespace mngl::two_d
 			m_control = std::move(other.m_control);
 			m_token = std::exchange(other.m_token, 0);
 			m_view_projection = std::move(other.m_view_projection);
+			m_view = std::move(other.m_view);
+			other.m_view_projection.reset();
+			other.m_view.reset();
 		}
 		return *this;
 	}
@@ -1140,6 +1162,14 @@ namespace mngl::two_d
 			}
 		}
 		m_view_projection = matrix;
+		m_view.reset();
+	}
+
+	inline void Frame2D::set_view(const ::mngl::view& value)
+	{
+		ensure_active();
+		m_view = value;
+		m_view_projection.reset();
 	}
 
 	inline void Frame2D::finish()

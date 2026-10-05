@@ -1,6 +1,7 @@
 #pragma once
 
 #include "renderer2d.hpp"
+#include "view.hpp"
 #include "window.hpp"
 
 #include <optional>
@@ -43,6 +44,29 @@ namespace mngl
 		void clear(const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f))
 		{
 			begin_target_frame(nullptr, clear_color);
+		}
+
+		void set_view(const ::mngl::view& value)
+		{
+			if (m_frame || m_command_buffer)
+			{
+				throw std::logic_error("Cannot change the render_window view during an active frame");
+			}
+			m_view = value;
+		}
+
+		void reset_view()
+		{
+			if (m_frame || m_command_buffer)
+			{
+				throw std::logic_error("Cannot reset the render_window view during an active frame");
+			}
+			m_view.reset();
+		}
+
+		[[nodiscard]] std::optional<::mngl::view> get_view() const
+		{
+			return m_view;
 		}
 
 		// The target must remain alive until display() finishes this frame.
@@ -143,7 +167,7 @@ namespace mngl
 			return m_context.gpu_device();
 		}
 
-		// Coordinates start at the bottom-left; the shorter side is 1 and the longer follows the active target aspect ratio.
+		// Without a custom view, coordinates start at the bottom-left and the shorter target side is 1.
 		[[nodiscard]] glm::vec2 coordinate_size() const
 		{
 			if (m_active_texture_target)
@@ -152,6 +176,10 @@ namespace mngl
 			}
 			if (m_swapchain_texture)
 			{
+				if (m_view)
+				{
+					return m_view->visible_area(m_swapchain_texture->size()).size;
+				}
 				return m_swapchain_texture->coordinate_size();
 			}
 
@@ -161,6 +189,10 @@ namespace mngl
 			if (short_side == 0.0f)
 			{
 				return {};
+			}
+			if (m_view)
+			{
+				return m_view->visible_area(dimensions).size;
 			}
 			return {
 				static_cast<float>(dimensions.x) / short_side,
@@ -231,6 +263,10 @@ namespace mngl
 						m_command_buffer->acquire_swapchain_texture(*this));
 					m_swapchain_texture.emplace(std::move(swapchain_target));
 					m_frame.emplace(active_renderer->begin_frame(*m_swapchain_texture, clear_color));
+					if (m_view)
+					{
+						m_frame->set_view(*m_view);
+					}
 				}
 			}
 			catch (...)
@@ -296,6 +332,7 @@ namespace mngl
 
 		two_d::render_context& m_context;
 		std::unordered_map<gpu::texture_format, std::unique_ptr<two_d::renderer>> m_renderers;
+		std::optional<::mngl::view> m_view;
 		::mngl::texture* m_active_texture_target = nullptr;
 		std::optional<gpu::command_buffer> m_command_buffer;
 		std::optional<::mngl::texture> m_swapchain_texture;

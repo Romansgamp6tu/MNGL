@@ -125,6 +125,9 @@
     <ClInclude Include="texture.hpp">
       <Filter>Файлы заголовков\renderer</Filter>
     </ClInclude>
+    <ClInclude Include="view.hpp">
+      <Filter>Файлы заголовков\2d</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Content Include="shaders\batcher2d.vert.hlsl">

@@ -5,12 +5,14 @@
 #include "gpu_texture.hpp"
 #include "rectangle.hpp"
 #include "surface.hpp"
+#include "view.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <type_traits>
@@ -228,8 +230,8 @@ namespace mngl
 		[[nodiscard]] glm::uvec2 size() const noexcept { return m_gpu_tex.get_size(); }
 		[[nodiscard]] uint32_t width() const noexcept { return m_gpu_tex.width(); }
 		[[nodiscard]] uint32_t height() const noexcept { return m_gpu_tex.height(); }
-		// Drawing coordinates start at the bottom-left; the shorter side is 1 and the longer follows the texture aspect ratio.
-		[[nodiscard]] glm::vec2 coordinate_size() const noexcept
+		// Without a custom view, drawing coordinates start at the bottom-left and the shorter texture side is 1.
+		[[nodiscard]] glm::vec2 coordinate_size() const
 		{
 			const auto dimensions = size();
 			const float short_side = static_cast<float>(
@@ -237,6 +239,10 @@ namespace mngl
 			if (short_side == 0.0f)
 			{
 				return {};
+			}
+			if (m_view)
+			{
+				return m_view->visible_area(dimensions).size;
 			}
 			return {
 				static_cast<float>(dimensions.x) / short_side,
@@ -251,6 +257,29 @@ namespace mngl
 		[[nodiscard]] bool rendering() const noexcept
 		{
 			return m_render_session != nullptr || m_external_render_active;
+		}
+
+		void set_view(const view& value)
+		{
+			if (rendering())
+			{
+				throw std::logic_error("Cannot change a texture view while the texture is being rendered to");
+			}
+			m_view = value;
+		}
+
+		void reset_view()
+		{
+			if (rendering())
+			{
+				throw std::logic_error("Cannot reset a texture view while the texture is being rendered to");
+			}
+			m_view.reset();
+		}
+
+		[[nodiscard]] std::optional<view> get_view() const
+		{
+			return m_view;
 		}
 
 		[[nodiscard]] const gpu::texture& raw_gpu_texture() const noexcept { return m_gpu_tex; }
@@ -277,6 +306,7 @@ namespace mngl
 		friend class render_window;
 
 		gpu::texture m_gpu_tex;
+		std::optional<view> m_view;
 		std::unique_ptr<detail::texture_render_session> m_render_session;
 		bool m_external_render_active = false;
 
