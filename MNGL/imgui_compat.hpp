@@ -519,6 +519,12 @@ namespace mngl::imgui_compat::detail
 		const std::string filename = path_to_utf8(source.file);
 		ImFontConfig file_config{};
 		file_config.Flags |= ImFontFlags_NoLoadError;
+		static const ImWchar latin_cyrillic_ranges[] = {
+			0x0020, 0x00FF,
+			0x0400, 0x052F,
+			0
+		};
+		file_config.GlyphRanges = latin_cyrillic_ranges;
 		ImFont* font = atlas.AddFontFromFileTTF(
 			filename.c_str(),
 			source.size_pixels,
@@ -530,38 +536,98 @@ namespace mngl::imgui_compat::detail
 		return font;
 	}
 
-	inline void apply_mngl_style()
+	inline void apply_vs_dark_style()
 	{
 		ImGui::StyleColorsDark();
 
 		ImGuiStyle& style = ImGui::GetStyle();
-		style.WindowPadding = ImVec2(14.0f, 12.0f);
-		style.FramePadding = ImVec2(10.0f, 6.0f);
-		style.ItemSpacing = ImVec2(8.0f, 8.0f);
-		style.WindowRounding = 8.0f;
-		style.FrameRounding = 5.0f;
-		style.PopupRounding = 6.0f;
-		style.ScrollbarRounding = 8.0f;
-		style.GrabRounding = 5.0f;
-		style.TabRounding = 6.0f;
+		style.WindowPadding = ImVec2(10.0f, 10.0f);
+		style.FramePadding = ImVec2(8.0f, 5.0f);
+		style.ItemSpacing = ImVec2(8.0f, 6.0f);
+		style.ItemInnerSpacing = ImVec2(6.0f, 4.0f);
+		style.CellPadding = ImVec2(6.0f, 4.0f);
+		style.WindowRounding = 4.0f;
+		style.ChildRounding = 3.0f;
+		style.FrameRounding = 3.0f;
+		style.PopupRounding = 4.0f;
+		style.ScrollbarRounding = 4.0f;
+		style.GrabRounding = 3.0f;
+		style.TabRounding = 4.0f;
 		style.WindowBorderSize = 1.0f;
 
-		const ImVec4 accent(0.86f, 0.28f, 0.19f, 1.0f);
-		style.Colors[ImGuiCol_WindowBg] = ImVec4(0.08f, 0.09f, 0.12f, 0.98f);
-		style.Colors[ImGuiCol_PopupBg] = ImVec4(0.10f, 0.11f, 0.14f, 0.98f);
-		style.Colors[ImGuiCol_Border] = ImVec4(0.25f, 0.28f, 0.34f, 0.72f);
-		style.Colors[ImGuiCol_FrameBg] = ImVec4(0.14f, 0.16f, 0.20f, 1.0f);
-		style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.20f, 0.22f, 0.27f, 1.0f);
-		style.Colors[ImGuiCol_FrameBgActive] = ImVec4(0.24f, 0.26f, 0.31f, 1.0f);
-		style.Colors[ImGuiCol_Header] = ImVec4(accent.x, accent.y, accent.z, 0.55f);
-		style.Colors[ImGuiCol_HeaderHovered] = ImVec4(accent.x, accent.y, accent.z, 0.78f);
-		style.Colors[ImGuiCol_HeaderActive] = accent;
-		style.Colors[ImGuiCol_Button] = ImVec4(accent.x, accent.y, accent.z, 0.78f);
-		style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.95f, 0.36f, 0.25f, 1.0f);
-		style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.72f, 0.21f, 0.15f, 1.0f);
-		style.Colors[ImGuiCol_CheckMark] = ImVec4(1.0f, 0.68f, 0.39f, 1.0f);
-		style.Colors[ImGuiCol_SliderGrab] = accent;
-		style.Colors[ImGuiCol_SliderGrabActive] = ImVec4(0.98f, 0.42f, 0.29f, 1.0f);
+		const auto color = [](ImU32 value, float alpha = 1.0f)
+		{
+			return ImVec4(
+				static_cast<float>((value >> 16) & 0xFF) / 255.0f,
+				static_cast<float>((value >> 8) & 0xFF) / 255.0f,
+				static_cast<float>(value & 0xFF) / 255.0f,
+				alpha);
+		};
+		const ImVec4 accent = color(0x007ACC);
+		auto& colors = style.Colors;
+		colors[ImGuiCol_Text] = color(0xF1F1F1);
+		colors[ImGuiCol_TextDisabled] = color(0x9D9D9D);
+		colors[ImGuiCol_WindowBg] = color(0x1E1E1E, 0.98f);
+		colors[ImGuiCol_ChildBg] = color(0x1E1E1E, 0.0f);
+		colors[ImGuiCol_PopupBg] = color(0x252526, 0.98f);
+		colors[ImGuiCol_Border] = color(0x454545);
+		colors[ImGuiCol_BorderShadow] = color(0x000000, 0.0f);
+		colors[ImGuiCol_FrameBg] = color(0x333337);
+		colors[ImGuiCol_FrameBgHovered] = color(0x3E3E42);
+		colors[ImGuiCol_FrameBgActive] = color(0x45454A);
+		colors[ImGuiCol_TitleBg] = color(0x252526);
+		colors[ImGuiCol_TitleBgActive] = color(0x2D2D30);
+		colors[ImGuiCol_TitleBgCollapsed] = color(0x252526);
+		colors[ImGuiCol_MenuBarBg] = color(0x2D2D30);
+		colors[ImGuiCol_ScrollbarBg] = color(0x1E1E1E);
+		colors[ImGuiCol_ScrollbarGrab] = color(0x3E3E42);
+		colors[ImGuiCol_ScrollbarGrabHovered] = color(0x56565A);
+		colors[ImGuiCol_ScrollbarGrabActive] = color(0x68686E);
+		colors[ImGuiCol_CheckMark] = color(0x4FC1FF);
+		colors[ImGuiCol_CheckboxSelectedBg] = color(0x007ACC);
+		colors[ImGuiCol_SliderGrab] = accent;
+		colors[ImGuiCol_SliderGrabActive] = color(0x1C97EA);
+		colors[ImGuiCol_Button] = color(0x333337);
+		colors[ImGuiCol_ButtonHovered] = color(0x3E3E42);
+		colors[ImGuiCol_ButtonActive] = color(0x005A9E);
+		colors[ImGuiCol_Header] = color(0x2D2D30);
+		colors[ImGuiCol_HeaderHovered] = color(0x264F78);
+		colors[ImGuiCol_HeaderActive] = accent;
+		colors[ImGuiCol_Separator] = color(0x454545);
+		colors[ImGuiCol_SeparatorHovered] = color(0x4FC1FF);
+		colors[ImGuiCol_SeparatorActive] = accent;
+		colors[ImGuiCol_ResizeGrip] = color(0x007ACC, 0.20f);
+		colors[ImGuiCol_ResizeGripHovered] = color(0x007ACC, 0.65f);
+		colors[ImGuiCol_ResizeGripActive] = color(0x007ACC, 0.95f);
+		colors[ImGuiCol_InputTextCursor] = color(0x4FC1FF);
+		colors[ImGuiCol_TabHovered] = color(0x3E3E42);
+		colors[ImGuiCol_Tab] = color(0x252526);
+		colors[ImGuiCol_TabSelected] = color(0x1E1E1E);
+		colors[ImGuiCol_TabSelectedOverline] = accent;
+		colors[ImGuiCol_TabDimmed] = color(0x2D2D30);
+		colors[ImGuiCol_TabDimmedSelected] = color(0x252526);
+		colors[ImGuiCol_TabDimmedSelectedOverline] = color(0x007ACC, 0.55f);
+		colors[ImGuiCol_DockingPreview] = color(0x007ACC, 0.35f);
+		colors[ImGuiCol_DockingEmptyBg] = color(0x1E1E1E);
+		colors[ImGuiCol_PlotLines] = color(0x75BEFF);
+		colors[ImGuiCol_PlotLinesHovered] = color(0x4FC1FF);
+		colors[ImGuiCol_PlotHistogram] = color(0xB180D7);
+		colors[ImGuiCol_PlotHistogramHovered] = color(0xD7BA7D);
+		colors[ImGuiCol_TableHeaderBg] = color(0x2D2D30);
+		colors[ImGuiCol_TableBorderStrong] = color(0x454545);
+		colors[ImGuiCol_TableBorderLight] = color(0x383838);
+		colors[ImGuiCol_TableRowBg] = color(0x000000, 0.0f);
+		colors[ImGuiCol_TableRowBgAlt] = color(0xFFFFFF, 0.025f);
+		colors[ImGuiCol_TextLink] = color(0x4FC1FF);
+		colors[ImGuiCol_TextSelectedBg] = color(0x007ACC, 0.40f);
+		colors[ImGuiCol_TreeLines] = color(0x454545);
+		colors[ImGuiCol_DragDropTarget] = color(0x4FC1FF);
+		colors[ImGuiCol_DragDropTargetBg] = color(0x007ACC, 0.20f);
+		colors[ImGuiCol_UnsavedMarker] = color(0xDCDCAA);
+		colors[ImGuiCol_NavCursor] = color(0x4FC1FF);
+		colors[ImGuiCol_NavWindowingHighlight] = color(0xFFFFFF, 0.70f);
+		colors[ImGuiCol_NavWindowingDimBg] = color(0x1E1E1E, 0.70f);
+		colors[ImGuiCol_ModalWindowDimBg] = color(0x1E1E1E, 0.75f);
 	}
 }
 
@@ -1028,7 +1094,7 @@ namespace mngl
 			ImGuiIO& io = ImGui::GetIO();
 			io.IniFilename = "MNGL_imgui.ini";
 			io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-			imgui_compat::detail::apply_mngl_style();
+			imgui_compat::detail::apply_vs_dark_style();
 			initialize_fonts(font_config);
 
 			if (!ImGui_ImplSDL3_InitForSDLGPU(window.raw()))
@@ -1191,10 +1257,21 @@ namespace mngl
 		{
 			const auto target_size = target->size();
 			ImGuiIO& io = ImGui::GetIO();
+			if (!std::isfinite(io.DisplayFramebufferScale.x) ||
+				!std::isfinite(io.DisplayFramebufferScale.y) ||
+				io.DisplayFramebufferScale.x <= 0.0f ||
+				io.DisplayFramebufferScale.y <= 0.0f)
+			{
+				throw std::logic_error(
+					"SDL3 returned an invalid framebuffer scale for Dear ImGui");
+			}
 			io.DisplaySize = ImVec2(
-				static_cast<float>(target_size.x),
-				static_cast<float>(target_size.y));
-			io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
+				static_cast<float>(target_size.x) / io.DisplayFramebufferScale.x,
+				static_cast<float>(target_size.y) / io.DisplayFramebufferScale.y);
+			const glm::vec2 framebuffer_scale{
+				io.DisplayFramebufferScale.x,
+				io.DisplayFramebufferScale.y
+			};
 			const float offscreen_cursor = -std::numeric_limits<float>::max();
 			io.AddMousePosEvent(offscreen_cursor, offscreen_cursor);
 			bool cursor_routed = false;
@@ -1225,8 +1302,9 @@ namespace mngl
 							glm::vec2(target_size) /
 							glm::vec2(entry.source_size);
 						last_offscreen_mouse_position = {
-							routed_position.x,
-							static_cast<float>(target_size.y) - routed_position.y
+							routed_position.x / framebuffer_scale.x,
+							(static_cast<float>(target_size.y) - routed_position.y) /
+								framebuffer_scale.y
 						};
 						has_last_offscreen_mouse_position = true;
 						io.AddMousePosEvent(

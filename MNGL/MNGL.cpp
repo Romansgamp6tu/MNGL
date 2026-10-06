@@ -2,8 +2,12 @@
 #include "imgui_compat.hpp"
 #include "render_window.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <filesystem>
 #include <format>
 #include <regex>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -12,20 +16,37 @@ int main()
 {
 	mngl::window::flags window_flags;
 	window_flags.resizeable = true;
-	mngl::render_window window("MNGL ImGui integration check", { 800, 600 }, window_flags);
+	window_flags.high_pixel_density = true;
+	mngl::render_window window("MNGL — проверка ImGui", { 800, 600 }, window_flags);
 	auto workspace_texture = window.create_texture(window.pixel_size());
 	auto workspace_size = window.coordinate_size();
 	mngl::sprite workspace_sprite(
 		workspace_texture,
 		mngl::rectangle{ 0.0f, 0.0f, workspace_size.x, workspace_size.y });
-	mngl::imgui_context gui(window);
-	window.enable_hit_testing();
-	auto panel = window.create_texture({ 400, 300 });
-	panel.enable_hit_testing();
-	panel.set_view(mngl::view{ mngl::rectangle{ 0.0f, 0.0f, 1.2f, 0.9f } });
-
 	const mngl::rectangle bounds{ 0.2f, 0.2f, 0.8f, 0.5f };
 	const mngl::rectangle panel_bounds{ 0.26666668f, 0.2f, 0.8f, 0.6f };
+	const auto panel_resolution = [panel_bounds](glm::uvec2 window_pixels)
+	{
+		const auto short_side = window_pixels.x < window_pixels.y
+			? window_pixels.x
+			: window_pixels.y;
+		const glm::vec2 desired_size =
+			panel_bounds.size * static_cast<float>(short_side);
+		return glm::uvec2{
+			static_cast<unsigned int>(std::max(1.0f, std::round(desired_size.x))),
+			static_cast<unsigned int>(std::max(1.0f, std::round(desired_size.y)))
+		};
+	};
+	const auto create_panel_texture = [&window](glm::uvec2 size)
+	{
+		auto result = window.create_texture(size);
+		result.enable_hit_testing();
+		result.set_view(mngl::view{ mngl::rectangle{ 0.0f, 0.0f, 1.2f, 0.9f } });
+		return result;
+	};
+	window.enable_hit_testing();
+	auto panel = create_panel_texture(panel_resolution(window.pixel_size()));
+
 	mngl::sprite panel_sprite(panel, panel_bounds);
 	mngl::two_d::transform panel_transform;
 	panel_transform.rotate(0.12f, bounds.pos + bounds.size * 0.5f);
@@ -58,7 +79,26 @@ int main()
 	bool show_inspector = true;
 	bool show_output = true;
 
-	const std::vector<std::string> render_modes{ "Solid", "Wireframe", "Points" };
+	const auto demo_font_path = []()
+	{
+		const std::filesystem::path candidates[]{
+			"imgui/misc/fonts/Roboto-Medium.ttf",
+			"MNGL/imgui/misc/fonts/Roboto-Medium.ttf",
+			"../../MNGL/imgui/misc/fonts/Roboto-Medium.ttf"
+		};
+		for (const auto& candidate : candidates)
+		{
+			if (std::filesystem::is_regular_file(candidate))
+			{
+				return candidate;
+			}
+		}
+		throw std::runtime_error("Could not locate the bundled Roboto font for the ImGui demo");
+	};
+	mngl::imgui_compat::font_config font_config;
+	font_config.regular.file = demo_font_path();
+	mngl::imgui_context gui(window, font_config);
+	const std::vector<std::string> render_modes{ "Заливка", "Каркас", "Точки" };
 	const std::vector<int> frame_rates{ 30, 60, 120 };
 	const std::vector<mngl::scancode> keys{
 		mngl::scancode::a,
@@ -75,9 +115,15 @@ int main()
 		{
 			continue;
 		}
+		const auto logical_window_size = window.size();
 		if (workspace_texture.size() != target_size)
 		{
 			workspace_texture = window.create_texture(target_size);
+		}
+		const auto next_panel_size = panel_resolution(target_size);
+		if (panel.size() != next_panel_size)
+		{
+			panel = create_panel_texture(next_panel_size);
 		}
 		workspace_size = window.coordinate_size();
 		if (mngl::Input::is_key_pressed(mngl::scancode::f1))
@@ -91,128 +137,128 @@ int main()
 				auto menu_bar = frame.main_menu_bar();
 				if (menu_bar)
 				{
-					auto view = menu_bar.menu("View");
+					auto view = menu_bar.menu("Вид");
 					if (view)
 					{
-						(void)view.toggle("Controls", show_controls);
-						(void)view.toggle("Hierarchy", show_hierarchy);
-						(void)view.toggle("Inspector", show_inspector);
-						(void)view.toggle("Output", show_output);
-						(void)view.toggle("Workspace surface", show_workspace_surface);
+						(void)view.toggle("Управление", show_controls);
+						(void)view.toggle("Иерархия", show_hierarchy);
+						(void)view.toggle("Инспектор", show_inspector);
+						(void)view.toggle("Вывод", show_output);
+						(void)view.toggle("Поверхность UI", show_workspace_surface);
 					}
 				}
 			}
-			auto workspace = frame.window("Workspace");
+			auto workspace = frame.window("Рабочая область###Workspace");
 			auto docking = workspace.dockspace("MainWorkspace");
 			{
-				auto controls = docking.window("Controls###mngl.controls", show_controls);
+				auto controls = docking.window("Управление###mngl.controls", show_controls);
 				if (controls)
 				{
-					controls.text("Offscreen sprite hit-test modes:");
+					controls.text("Режимы hit-test для offscreen-спрайта:");
 					(void)controls.radio_button(
-						"Full window",
+						"Окно целиком",
 						mapping_mode,
 						0);
 					(void)controls.radio_button(
-						"Translated + scaled",
+						"Смещение + масштаб",
 						mapping_mode,
 						1);
 					(void)controls.radio_button(
-						"Rotated",
+						"Поворот",
 						mapping_mode,
 						2);
 					(void)controls.radio_button(
-						"UV cropped",
+						"Обрезка UV",
 						mapping_mode,
 						3);
 					(void)controls.radio_button(
-						"Combined transform + crop",
+						"Поворот + обрезка UV",
 						mapping_mode,
 						4);
 					const auto mouse_position = mngl::Input::get_mouse_position();
 					controls.text(std::format(
-						"Host cursor: {:.1f}, {:.1f}",
+						"Курсор окна: {:.1f}, {:.1f}",
 						mouse_position.x,
 						mouse_position.y));
-					controls.text("Scroll this panel; edit Username; try buttons and sliders.");
-					controls.text("Dear ImGui runs directly on the SDL_GPU backend.");
-					if (controls.button("Click me"))
+					controls.text("Прокрути панель, попробуй кнопки, поля и ползунки :)");
+					controls.text("Dear ImGui работает напрямую через SDL_GPU.");
+					if (controls.button("Нажми меня :D"))
 					{
 						++imgui_button_clicks;
 					}
-					controls.text(std::format("Button clicks: {}", imgui_button_clicks));
+					controls.text(std::format("Нажатия кнопки: {}", imgui_button_clicks));
 					controls.progress_bar(loading_progress);
 					controls.progress_bar(
 						loading_progress,
-						std::format("Loaded {:.0f}%", loading_progress * 100.0f));
-					if (controls.selectable("Selectable row", selectable_item))
+						std::format("Загружено {:.0f}%", loading_progress * 100.0f));
+					if (controls.selectable("Выбираемый пункт :)", selectable_item))
 					{
 						selectable_item = !selectable_item;
 					}
 					if (const auto action = controls.context_menu({
-						std::string_view{ "Select" },
-						std::string_view{ "Deselect" }
+						std::string_view{ "Выбрать" },
+						std::string_view{ "Снять выбор" }
 					}))
 					{
-						if (*action == "Select")
+						if (*action == "Выбрать")
 						{
 							selectable_item = true;
 						}
-						else if (*action == "Deselect")
+						else if (*action == "Снять выбор")
 						{
 							selectable_item = false;
 						}
 					}
-					controls.bullet("Bullet with its own text");
+					controls.bullet("Пункт списка со своим текстом");
 					controls.bullet();
-					controls.text("Text following a standalone bullet");
-					(void)controls.radio_button("Low quality", selected_quality, 0);
-					(void)controls.radio_button("Medium quality", selected_quality, 1);
-					(void)controls.radio_button("High quality", selected_quality, 2);
-					(void)controls.input("Sample count", sample_count);
+					controls.text("Текст после отдельного маркера");
+					(void)controls.radio_button("Низкое качество", selected_quality, 0);
+					(void)controls.radio_button("Среднее качество", selected_quality, 1);
+					(void)controls.radio_button("Высокое качество", selected_quality, 2);
+					(void)controls.input("Число образцов", sample_count);
 					if (controls.button(sample_count))
 					{
 						++sample_count;
 					}
-					(void)controls.slider("Sample count range", sample_count, 0, 100);
-					(void)controls.input("UI scale", ui_scale);
-					(void)controls.slider("UI scale range", ui_scale, 0.25f, 2.0f);
-					(void)controls.input("Precise value", precise_value);
-					(void)controls.slider("Precise value range", precise_value, 0.0, 1.0);
-					(void)controls.slider("World position", world_position, -1.0f, 1.0f);
-					(void)controls.slider("World direction", world_direction, -1.0f, 1.0f);
-					(void)controls.slider("Tint", tint, 0.0f, 1.0f);
-					(void)controls.slider("Grid position", grid_position, -20, 20);
-					(void)controls.checkbox("Show texture", show_texture);
-					if (const auto mode = controls.combo("Render mode", render_modes))
+					(void)controls.slider("Диапазон образцов", sample_count, 0, 100);
+					(void)controls.input("Масштаб интерфейса", ui_scale);
+					(void)controls.slider("Диапазон масштаба", ui_scale, 0.25f, 2.0f);
+					(void)controls.input("Точное значение", precise_value);
+					(void)controls.slider("Диапазон значения", precise_value, 0.0, 1.0);
+					(void)controls.slider("Положение в мире", world_position, -1.0f, 1.0f);
+					(void)controls.slider("Направление", world_direction, -1.0f, 1.0f);
+					(void)controls.slider("Оттенок", tint, 0.0f, 1.0f);
+					(void)controls.slider("Позиция сетки", grid_position, -20, 20);
+					(void)controls.checkbox("Показывать текстуру", show_texture);
+					if (const auto mode = controls.combo("Режим отрисовки", render_modes))
 					{
 						controls.text(**mode);
 					}
-					if (const auto frame_rate = controls.combo("Frame rate", frame_rates))
+					if (const auto frame_rate = controls.combo("Частота кадров", frame_rates))
 					{
 						controls.text(**frame_rate);
 					}
-					if (const auto key = controls.combo("Key name", keys))
+					if (const auto key = controls.combo("Клавиша", keys))
 					{
 						controls.text(mngl::to_string(**key));
 					}
-					if (const auto quick_mode = controls.combo("Quick mode", { "A", "B" }))
+					if (const auto quick_mode = controls.combo("Быстрый режим", { "A", "B" }))
 					{
 						controls.text(*quick_mode);
 					}
 					if (const auto quality = controls.combo(
-						"Quality",
-						std::initializer_list<std::string>{ "Low", "Medium", "High" }))
+						"Качество",
+						std::initializer_list<std::string>{ "Низкое", "Среднее", "Высокое" }))
 					{
 						controls.text(*quality);
 					}
-					controls.text("Value output overloads:");
+					controls.text("Перегрузки вывода значений:");
 					controls.text(sample_count);
 					controls.text(ui_scale);
 					controls.text(precise_value);
 					controls.text(show_texture);
-					(void)controls.input("Username", username, username_pattern);
-					controls.text(std::format("Username: {}", username));
+					(void)controls.input("Имя пользователя (латиница)", username, username_pattern);
+					controls.text(std::format("Имя пользователя: {}", username));
 					if (show_texture)
 					{
 						controls.image(panel, { 180.0f, 135.0f });
@@ -220,35 +266,50 @@ int main()
 				}
 			}
 			{
-				auto hierarchy = docking.window("Hierarchy###mngl.hierarchy", show_hierarchy);
+				auto hierarchy = docking.window("Иерархия###mngl.hierarchy", show_hierarchy);
 				if (hierarchy)
 				{
-					hierarchy.text("Workspace panes share this host window.");
-					(void)hierarchy.selectable("World", selectable_item);
-					(void)hierarchy.selectable("Camera");
-					(void)hierarchy.selectable("Light");
+					hierarchy.text("Все панели рабочего пространства в одном окне.");
+					(void)hierarchy.selectable("Мир", selectable_item);
+					(void)hierarchy.selectable("Камера");
+					(void)hierarchy.selectable("Источник света");
 				}
 			}
 			{
-				auto inspector = docking.window("Inspector###mngl.inspector", show_inspector);
+				auto inspector = docking.window("Инспектор###mngl.inspector", show_inspector);
 				if (inspector)
 				{
-					inspector.text("Selected object properties");
-					inspector.text(std::format("Sample count: {}", sample_count));
-					inspector.text(std::format("UI scale: {:.2f}", ui_scale));
-					inspector.text(std::format("World position: {}, {}", world_position.x, world_position.y));
+					inspector.text("Параметры выбранного объекта");
+					inspector.text(std::format("Число образцов: {}", sample_count));
+					inspector.text(std::format("Масштаб UI: {:.2f}", ui_scale));
+					inspector.text(std::format(
+						"Положение: {}, {}",
+						world_position.x,
+						world_position.y));
 				}
 			}
 			{
-				auto output = docking.window("Output###mngl.output", show_output);
+				auto output = docking.window("Вывод###mngl.output", show_output);
 				if (output)
 				{
-					output.text("Docked tabs can be rearranged by dragging them.");
-					output.text("F1 hides/shows the UI sprite; hide it to test the red 2D button.");
-					output.text("Resize the window to test offscreen target recreation.");
-					output.text("Transparent pixels still hit the sprite; dragging continues outside its bounds.");
-					output.text(std::format("Button clicks: {}", imgui_button_clicks));
-					output.text(std::format("2D scene button clicks: {}", scene_button_clicks));
+					output.text("Вкладки можно переставлять и делить перетаскиванием :)");
+					output.text("F1 скрывает UI-спрайт: за ним можно нажать красную 2D-кнопку.");
+					output.text("Измени размер окна: обе offscreen-текстуры подстроятся.");
+					output.text("Перетаскивание UI продолжается за границами поверхности.");
+					output.text(std::format(
+						"Окно: {}x{} лог. / {}x{} пикс.",
+						logical_window_size.x,
+						logical_window_size.y,
+						target_size.x,
+						target_size.y));
+					output.text(std::format(
+						"Текстуры: UI {}x{}; сцена {}x{} пикс.",
+						workspace_texture.width(),
+						workspace_texture.height(),
+						panel.width(),
+						panel.height()));
+					output.text(std::format("Нажатия ImGui: {}", imgui_button_clicks));
+					output.text(std::format("Нажатия 2D-кнопки: {}", scene_button_clicks));
 				}
 			}
 		}
