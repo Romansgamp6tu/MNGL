@@ -13,24 +13,36 @@ namespace mngl
 	class color
 	{
 	public:
+		template<std::integral R, std::integral G, std::integral B>
+		constexpr color(R r, G g, B b) : color(r, g, b, 255) {}
 		template<std::integral R, std::integral G, std::integral B, std::integral A>
-		constexpr color(R r, G g, B b, A a = 255) : rgba(r / 255., g / 255., b / 255., a / 255.) {}
+		constexpr color(R r, G g, B b, A a) : rgba(r / 255., g / 255., b / 255., a / 255.) {}
+		template<std::floating_point R, std::floating_point G, std::floating_point B>
+		constexpr color(R r, G g, B b) : color(r, g, b, 1.0f) {}
 		template<std::floating_point R, std::floating_point G, std::floating_point B, std::floating_point A>
-		constexpr color(R r, G g, B b, A a = 1.0f) : rgba(r, g, b, a) {}
+		constexpr color(R r, G g, B b, A a) : rgba(r, g, b, a) {}
 		constexpr explicit color(uint32_t rgba) : rgba((rgba >> 24) / 255., ((rgba >> 16) & 0xFF) / 255., ((rgba >> 8) & 0xFF) / 255., (rgba & 0xFF) / 255.) {}
 		constexpr color(SDL_Color col) : rgba(col.r / 255.f, col.g / 255.f, col.b / 255.f, col.a / 255.f) {}
+		template<std::floating_point RGB, glm::qualifier Q>
+		constexpr color(glm::vec<3, RGB, Q> col) : color(col, 1.0f) {}
 		template<std::floating_point RGB, std::floating_point A, glm::qualifier Q>
-		constexpr color(glm::vec<3, RGB, Q> col, A a = 1.0f) : rgba(col, a) {}
+		constexpr color(glm::vec<3, RGB, Q> col, A a) : rgba(col, a) {}
 		template <std::floating_point RGBA, glm::qualifier Q>
 		constexpr color(glm::vec<4, RGBA, Q> col) : rgba(col) {}
+		template<std::integral RGB, glm::qualifier Q>
+		constexpr color(glm::vec<3, RGB, Q> col) : color(col, 255) {}
 		template<std::integral RGB, std::integral A, glm::qualifier Q>
-		constexpr color(glm::vec<3, RGB, Q> col, A a = 255) : rgba(glm::vec3(col) / 255.f, a / 255.f) {}
+		constexpr color(glm::vec<3, RGB, Q> col, A a) : rgba(glm::vec3(col) / 255.f, a / 255.f) {}
 		template <std::integral RGBA, glm::qualifier Q>
 		constexpr color(glm::vec<4, RGBA, Q> col) : rgba(glm::vec4(col) / 255.f) {}
+		template<std::integral G>
+		constexpr color(G gray) : color(gray, 255) {}
 		template<std::integral G, std::integral A>
-		constexpr color(G gray, A a = 255) : rgba(gray / 255.f, gray / 255.f, gray / 255.f, a / 255.f) {}
+		constexpr color(G gray, A a) : rgba(gray / 255.f, gray / 255.f, gray / 255.f, a / 255.f) {}
+		template<std::floating_point G>
+		constexpr color(G gray) : color(gray, 1.0f) {}
 		template<std::floating_point G, std::floating_point A>
-		constexpr color(G gray, A a = 1.0f) : rgba(gray, gray, gray, a) {}
+		constexpr color(G gray, A a) : rgba(gray, gray, gray, a) {}
 		color(std::string hex) // #RRGGBBAA or #RRGGBB
 		{
 			if (hex.size() != 7 && hex.size() != 9) throw std::invalid_argument("hex color must be in format #RRGGBBAA or #RRGGBB");
@@ -407,6 +419,16 @@ namespace mngl
 			return { hue(p, q, h + 1.f / 3.f), hue(p, q, h), hue(p, q, h - 1.f / 3.f) };
 		}
 	};
+}
+
+constexpr mngl::color operator""rgb(uint64_t x)
+{
+	return mngl::color((x >> 16) & 255, (x >> 8) & 255, (x & 255));
+}
+
+constexpr mngl::color operator""rgba(uint64_t x)
+{
+	return mngl::color((x >> 24) & 255, (x >> 16) & 255, (x >> 8) & 255, (x & 255));
 }
 
 //есть несколько способов хеширования
