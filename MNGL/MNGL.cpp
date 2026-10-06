@@ -17,7 +17,19 @@ int main()
 	mngl::window::flags window_flags;
 	window_flags.resizeable = true;
 	window_flags.high_pixel_density = true;
-	mngl::render_window window("MNGL — проверка ImGui", { 800, 600 }, window_flags);
+
+	float initial_scale = 1.0f;
+	if (auto disp = SDL_GetPrimaryDisplay())
+	{
+		float s = SDL_GetDisplayContentScale(disp);
+		if (s > 0.0f && std::isfinite(s)) initial_scale = s;
+	}
+	const glm::uvec2 base_size{ 960, 720 };
+	const glm::uvec2 initial_size{
+		static_cast<unsigned int>(std::max(1.0f, std::round(base_size.x * initial_scale))),
+		static_cast<unsigned int>(std::max(1.0f, std::round(base_size.y * initial_scale)))
+	};
+	mngl::render_window window("MNGL — проверка ImGui", initial_size, window_flags);
 	auto workspace_texture = window.create_texture(window.pixel_size());
 	auto workspace_size = window.coordinate_size();
 	mngl::sprite workspace_sprite(
@@ -132,6 +144,7 @@ int main()
 		}
 
 		{
+			gui.set_user_scale(ui_scale);
 			auto frame = gui.frame(workspace_texture);
 			{
 				auto menu_bar = frame.main_menu_bar();
@@ -261,7 +274,8 @@ int main()
 					controls.text(std::format("Имя пользователя: {}", username));
 					if (show_texture)
 					{
-						controls.image(panel, { 180.0f, 135.0f });
+						const float eff_scale = gui.effective_scale();
+						controls.image(panel, { 180.0f * eff_scale, 135.0f * eff_scale });
 					}
 				}
 			}
@@ -297,11 +311,11 @@ int main()
 					output.text("Измени размер окна: обе offscreen-текстуры подстроятся.");
 					output.text("Перетаскивание UI продолжается за границами поверхности.");
 					output.text(std::format(
-						"Окно: {}x{} лог. / {}x{} пикс.",
-						logical_window_size.x,
-						logical_window_size.y,
+						"Окно: {}x{} пикс. (Масштаб экрана: {:.2f}, UI: {:.2f})",
 						target_size.x,
-						target_size.y));
+						target_size.y,
+						window.display_scale(),
+						gui.effective_scale()));
 					output.text(std::format(
 						"Текстуры: UI {}x{}; сцена {}x{} пикс.",
 						workspace_texture.width(),

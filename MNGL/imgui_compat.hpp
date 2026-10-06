@@ -536,7 +536,7 @@ namespace mngl::imgui_compat::detail
 		return font;
 	}
 
-	inline void apply_vs_dark_style()
+	inline void apply_vs_dark_style(float scale = 1.0f)
 	{
 		ImGui::StyleColorsDark();
 
@@ -554,6 +554,12 @@ namespace mngl::imgui_compat::detail
 		style.GrabRounding = 3.0f;
 		style.TabRounding = 4.0f;
 		style.WindowBorderSize = 1.0f;
+
+		if (scale > 0.0f && std::isfinite(scale) && std::abs(scale - 1.0f) > 0.001f)
+		{
+			style.ScaleAllSizes(scale);
+		}
+		style.FontScaleDpi = (scale > 0.0f && std::isfinite(scale)) ? scale : 1.0f;
 
 		const auto color = [](ImU32 value, float alpha = 1.0f)
 		{
@@ -1038,6 +1044,25 @@ namespace mngl
 		[[nodiscard]] frame_scope frame();
 		[[nodiscard]] frame_scope frame(::mngl::texture& target);
 
+		void set_user_scale(float scale)
+		{
+			if (std::isfinite(scale) && scale > 0.05f && scale < 10.0f)
+			{
+				m_user_scale = scale;
+			}
+		}
+		[[nodiscard]] float user_scale() const noexcept { return m_user_scale; }
+		[[nodiscard]] float display_scale() const noexcept
+		{
+			return attached_window ? attached_window->display_scale() : 1.0f;
+		}
+		[[nodiscard]] float effective_scale() const noexcept
+		{
+			const float base_scale = display_scale();
+			const float scale = base_scale * m_user_scale;
+			return (scale > 0.05f && std::isfinite(scale)) ? scale : 1.0f;
+		}
+
 	private:
 		void initialize_fonts(const imgui_compat::font_config& config);
 		[[nodiscard]] const loaded_font& get_font(imgui_compat::font_role role) const;
@@ -1060,6 +1085,8 @@ namespace mngl
 		bool draw_data_ready = false;
 		bool offscreen_mouse_captured = false;
 		bool has_last_offscreen_mouse_position = false;
+		float m_applied_scale = 1.0f;
+		float m_user_scale = 1.0f;
 	};
 
 	inline imgui_context::imgui_context(
@@ -1091,10 +1118,12 @@ namespace mngl
 		make_current();
 		try
 		{
+			attached_window = &window;
 			ImGuiIO& io = ImGui::GetIO();
 			io.IniFilename = "MNGL_imgui.ini";
 			io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-			imgui_compat::detail::apply_vs_dark_style();
+			m_applied_scale = effective_scale();
+			imgui_compat::detail::apply_vs_dark_style(m_applied_scale);
 			initialize_fonts(font_config);
 
 			if (!ImGui_ImplSDL3_InitForSDLGPU(window.raw()))
@@ -1253,25 +1282,22 @@ namespace mngl
 
 		ImGui_ImplSDL3_NewFrame();
 		ImGui_ImplSDLGPU3_NewFrame();
+
+		const float needed_scale = effective_scale();
+		if (std::abs(needed_scale - m_applied_scale) > 0.001f)
+		{
+			m_applied_scale = needed_scale;
+			imgui_compat::detail::apply_vs_dark_style(m_applied_scale);
+		}
+
 		if (target)
 		{
 			const auto target_size = target->size();
 			ImGuiIO& io = ImGui::GetIO();
-			if (!std::isfinite(io.DisplayFramebufferScale.x) ||
-				!std::isfinite(io.DisplayFramebufferScale.y) ||
-				io.DisplayFramebufferScale.x <= 0.0f ||
-				io.DisplayFramebufferScale.y <= 0.0f)
-			{
-				throw std::logic_error(
-					"SDL3 returned an invalid framebuffer scale for Dear ImGui");
-			}
 			io.DisplaySize = ImVec2(
-				static_cast<float>(target_size.x) / io.DisplayFramebufferScale.x,
-				static_cast<float>(target_size.y) / io.DisplayFramebufferScale.y);
-			const glm::vec2 framebuffer_scale{
-				io.DisplayFramebufferScale.x,
-				io.DisplayFramebufferScale.y
-			};
+				static_cast<float>(target_size.x),
+				static_cast<float>(target_size.y));
+			io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
 			const float offscreen_cursor = -std::numeric_limits<float>::max();
 			io.AddMousePosEvent(offscreen_cursor, offscreen_cursor);
 			bool cursor_routed = false;
@@ -1302,9 +1328,8 @@ namespace mngl
 							glm::vec2(target_size) /
 							glm::vec2(entry.source_size);
 						last_offscreen_mouse_position = {
-							routed_position.x / framebuffer_scale.x,
-							(static_cast<float>(target_size.y) - routed_position.y) /
-								framebuffer_scale.y
+							routed_position.x,
+							static_cast<float>(target_size.y) - routed_position.y
 						};
 						has_last_offscreen_mouse_position = true;
 						io.AddMousePosEvent(

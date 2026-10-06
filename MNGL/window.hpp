@@ -5,6 +5,7 @@
 #include "surface.hpp"
 #include "event.hpp"
 
+#include <cmath>
 #include <unordered_map>
 #include <vector>
 #include <shared_mutex>
@@ -643,6 +644,16 @@ namespace mngl
 			if (!SDL_GetWindowSizeInPixels(win, &w, &h))
 				throw sdl_error("failed to get window pixel size: ");
 			return { static_cast<unsigned int>(w), static_cast<unsigned int>(h) };
+		}
+
+		float display_scale() const
+		{
+			float s = SDL_GetWindowDisplayScale(win);
+			if (s <= 0.0f || !std::isfinite(s))
+			{
+				s = attached_display().scale();
+			}
+			return (s > 0.0f && std::isfinite(s)) ? s : 1.0f;
 		}
 
 		void aspect_ratio(float min_aspect, float max_aspect)
