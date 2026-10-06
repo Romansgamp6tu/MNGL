@@ -27,6 +27,11 @@ namespace mngl
 		std::size_t draw_index = 0;
 		// Coordinates in the drawable's local space, with the origin at its bottom-left.
 		glm::vec2 local_coords{};
+		// Opaque texture-object identity; zero means this drawable has no texture source.
+		std::uint64_t source_identity = 0;
+		glm::uvec2 source_size{};
+		// Coordinates in the sampled texture, with the origin at its bottom-left.
+		glm::vec2 source_pixel_coords{};
 	};
 
 	struct hit_test_result
@@ -83,6 +88,8 @@ namespace mngl
 			hit_test_shape shape = hit_test_shape::quad;
 			float corner_radius = 0.0f;
 			glm::vec4 uv_bounds{ 0.0f, 0.0f, 1.0f, 1.0f };
+			std::uint64_t source_identity = 0;
+			glm::uvec2 source_size{};
 			std::optional<glm::ivec4> scissor;
 			std::shared_ptr<const hit_test_frame> child_frame;
 			std::shared_ptr<const hit_test_callback> click_callback;
@@ -223,6 +230,42 @@ namespace mngl
 			return result;
 		}
 
+		inline hit_test_path_entry make_hit_test_path_entry(
+			const hit_test_item& item,
+			glm::vec2 local_coords
+		)
+		{
+			glm::vec2 source_pixel_coords{};
+			if (item.source_identity != 0 &&
+				item.source_size.x != 0 &&
+				item.source_size.y != 0 &&
+				item.destination.size.x > 0.0f &&
+				item.destination.size.y > 0.0f)
+			{
+				const glm::vec2 local_uv = local_coords / item.destination.size;
+				const float u = glm::mix(
+					item.uv_bounds.x,
+					item.uv_bounds.z,
+					local_uv.x);
+				const float v = glm::mix(
+					item.uv_bounds.w,
+					item.uv_bounds.y,
+					local_uv.y);
+				source_pixel_coords = {
+					u * static_cast<float>(item.source_size.x),
+					(1.0f - v) * static_cast<float>(item.source_size.y)
+				};
+			}
+
+			return {
+				item.draw_index,
+				local_coords,
+				item.source_identity,
+				item.source_size,
+				source_pixel_coords
+			};
+		}
+
 		inline std::optional<hit_test_result> hit_test_frame_at_pixel(
 			const hit_test_frame& frame,
 			glm::vec2 pixel_position,
@@ -295,7 +338,7 @@ namespace mngl
 					{
 						child_result->path.insert(
 							child_result->path.begin(),
-							hit_test_path_entry{ item.draw_index, *local });
+							make_hit_test_path_entry(item, *local));
 						if (child_result->click_callback)
 						{
 							++child_result->callback_path_index;
@@ -310,7 +353,7 @@ namespace mngl
 				}
 
 				return hit_test_result{
-					.path = { hit_test_path_entry{ item.draw_index, *local } },
+					.path = { make_hit_test_path_entry(item, *local) },
 					.click_callback = item.click_callback,
 					.callback_path_index = 0
 				};

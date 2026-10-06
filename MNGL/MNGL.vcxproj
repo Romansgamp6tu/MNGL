@@ -79,6 +79,8 @@
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp23</LanguageStandard>
+      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)MNGL\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -97,6 +99,8 @@
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp23</LanguageStandard>
+      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)MNGL\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -113,14 +117,14 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp23</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir)include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)MNGL\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
       <OpenMPSupport>true</OpenMPSupport>
       <UseUnicodeForAssemblerListing>true</UseUnicodeForAssemblerListing>
-      <AdditionalOptions>/utf8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/bigobj /utf8 %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
@@ -142,14 +146,14 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp23</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir)include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)MNGL\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
       <OpenMPSupport>true</OpenMPSupport>
       <UseUnicodeForAssemblerListing>true</UseUnicodeForAssemblerListing>
-      <AdditionalOptions>/utf8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/bigobj /utf8 %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
@@ -164,6 +168,12 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="MNGL.cpp" />
+    <ClCompile Include="imgui\imgui.cpp" />
+    <ClCompile Include="imgui\imgui_draw.cpp" />
+    <ClCompile Include="imgui\imgui_tables.cpp" />
+    <ClCompile Include="imgui\imgui_widgets.cpp" />
+    <ClCompile Include="imgui\backends\imgui_impl_sdl3.cpp" />
+    <ClCompile Include="imgui\backends\imgui_impl_sdlgpu3.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="gpu_buffer.hpp" />
@@ -195,6 +205,16 @@
     <ClInclude Include="hit_test.hpp" />
     <ClInclude Include="transform.hpp" />
     <ClInclude Include="window.hpp" />
+    <ClInclude Include="imgui_compat.hpp" />
+    <ClInclude Include="imgui\imconfig.h" />
+    <ClInclude Include="imgui\imgui.h" />
+    <ClInclude Include="imgui\imgui_internal.h" />
+    <ClInclude Include="imgui\imstb_rectpack.h" />
+    <ClInclude Include="imgui\imstb_textedit.h" />
+    <ClInclude Include="imgui\imstb_truetype.h" />
+    <ClInclude Include="imgui\backends\imgui_impl_sdl3.h" />
+    <ClInclude Include="imgui\backends\imgui_impl_sdlgpu3.h" />
+    <ClInclude Include="imgui\backends\imgui_impl_sdlgpu3_shaders.h" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="shaders\batcher2d.vert.hlsl">

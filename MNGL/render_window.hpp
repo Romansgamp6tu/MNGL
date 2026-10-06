@@ -15,6 +15,19 @@
 
 namespace mngl
 {
+	namespace detail
+	{
+		class render_window_overlay
+		{
+		public:
+			virtual ~render_window_overlay() = default;
+			virtual void render(gpu::command_buffer& command_buffer, ::mngl::texture& target) = 0;
+			virtual void detach_from_window() noexcept = 0;
+		};
+	}
+
+	class imgui_context;
+
 	class render_window : public window
 	{
 	public:
@@ -40,6 +53,11 @@ namespace mngl
 			release_active_texture_target();
 			m_swapchain_texture.reset();
 			m_command_buffer.reset();
+			if (m_overlay)
+			{
+				auto* overlay = std::exchange(m_overlay, nullptr);
+				overlay->detach_from_window();
+			}
 			m_context.gpu_device().release_window(*this);
 		}
 
@@ -225,10 +243,24 @@ namespace mngl
 			try
 			{
 				m_frame->finish(*m_command_buffer);
+				if (m_overlay)
+				{
+					if (m_active_texture_target)
+					{
+						m_overlay->render(*m_command_buffer, *m_active_texture_target);
+					}
+					else if (m_swapchain_texture)
+					{
+						m_overlay->render(*m_command_buffer, *m_swapchain_texture);
+					}
+				}
 				m_command_buffer->submit();
-				m_hit_test_frame = m_hit_testing_enabled && m_swapchain_texture
-					? m_swapchain_texture->m_hit_test_frame
-					: nullptr;
+				if (m_swapchain_texture)
+				{
+					m_hit_test_frame = m_hit_testing_enabled
+						? m_swapchain_texture->m_hit_test_frame
+						: nullptr;
+				}
 			}
 			catch (...)
 			{
@@ -316,6 +348,25 @@ namespace mngl
 		}
 
 	private:
+		friend class imgui_context;
+
+		void attach_overlay(detail::render_window_overlay& overlay)
+		{
+			if (m_overlay)
+			{
+				throw std::logic_error("A render_window can only have one active overlay");
+			}
+			m_overlay = &overlay;
+		}
+
+		void detach_overlay(detail::render_window_overlay& overlay) noexcept
+		{
+			if (m_overlay == &overlay)
+			{
+				m_overlay = nullptr;
+			}
+		}
+
 		[[nodiscard]] gpu::texture_format swapchain_format() const
 		{
 			const auto format = gpu_device().swapchain_texture_format(*this);
@@ -432,5 +483,6 @@ namespace mngl
 		std::optional<gpu::command_buffer> m_command_buffer;
 		std::optional<::mngl::texture> m_swapchain_texture;
 		std::optional<two_d::Frame2D> m_frame;
+		detail::render_window_overlay* m_overlay = nullptr;
 	};
 }

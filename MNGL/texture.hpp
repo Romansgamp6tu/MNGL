@@ -8,6 +8,7 @@
 #include "surface.hpp"
 #include "view.hpp"
 
+#include <atomic>
 #include <cstddef>
 #include <concepts>
 #include <cstdint>
@@ -23,6 +24,7 @@
 namespace mngl
 {
 	class texture;
+	class imgui_context;
 	struct sprite;
 
 	namespace two_d
@@ -372,8 +374,21 @@ namespace mngl
 
 	private:
 		friend class render_window;
+		friend class imgui_context;
 		friend class two_d::renderer;
 
+		static std::uint64_t next_hit_test_identity() noexcept
+		{
+			static std::atomic_uint64_t next{ 1 };
+			std::uint64_t identity = next.fetch_add(1, std::memory_order_relaxed);
+			while (identity == 0)
+			{
+				identity = next.fetch_add(1, std::memory_order_relaxed);
+			}
+			return identity;
+		}
+
+		std::uint64_t m_hit_test_identity = next_hit_test_identity();
 		gpu::texture m_gpu_tex;
 		std::optional<view> m_view;
 		bool m_hit_testing_enabled = false;

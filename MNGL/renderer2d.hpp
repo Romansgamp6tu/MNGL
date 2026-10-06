@@ -939,6 +939,8 @@ namespace mngl::two_d
 				.shape = shape,
 				.corner_radius = corner_radius,
 				.uv_bounds = uv_bounds,
+				.source_identity = source ? source->m_hit_test_identity : 0,
+				.source_size = source ? source->size() : glm::uvec2{},
 				.scissor = scissor,
 				.child_frame = std::move(child_frame),
 				.click_callback = click_callback

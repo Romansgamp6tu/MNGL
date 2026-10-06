@@ -7,6 +7,7 @@
 | Заголовки | Назначение | Руководство |
 |---|---|---|
 | `window.hpp`, `input.hpp` | Окна, дисплеи, ввод | [Окна и ввод](../core/windows-and-input.md) |
+| `imgui_compat.hpp` | Header-only обёртка Dear ImGui, GPU overlay и настройка шрифтов | [Окна и ввод](../core/windows-and-input.md) |
 | `event.hpp` | Типизированная система событий | [События](../core/events.md) |
 | `surface.hpp`, `pixel_format.hpp` | SDL surfaces, изображения и форматы пикселей | [Поверхности и цвета](../core/media-and-colors.md) |
 | `color.hpp` | Цвета, преобразования RGB/HSV/HSL | [Поверхности и цвета](../core/media-and-colors.md) |
