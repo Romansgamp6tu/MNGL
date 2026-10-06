@@ -60,6 +60,7 @@ namespace mngl::gpu
 		}
 
 		[[nodiscard]] SDL_GPUSampler* raw() const noexcept { return m_handle; }
+		[[nodiscard]] SDL_GPUDevice* device_raw() const noexcept { return m_device; }
 		[[nodiscard]] bool valid() const noexcept { return m_handle != nullptr; }
 		explicit operator bool() const noexcept { return valid(); }
 

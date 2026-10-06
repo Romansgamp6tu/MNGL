@@ -8,10 +8,14 @@
 
 #include "event.hpp"
 #include "iupdate.h"
+#include "imgui/backends/imgui_impl_sdl3.h"
+#include "imgui/imgui.h"
 #include <set>
 
 namespace mngl
 {
+	class imgui_context;
+
 	enum class mouse_button : uint8_t
 	{
 		left = 1, // SDL_BUTTON_LEFT
@@ -82,13 +86,24 @@ namespace mngl
 					if (!e.repeat) [[likely]]
 					{
 						std::lock_guard lock(state_mutex);
-						pressed_keys.insert(e.code);
+						if (!gui_wants_keyboard.load(std::memory_order_relaxed))
+						{
+							pressed_keys.insert(e.code);
+						}
 					}
 				});
 				event_manager::on<keyUp>([](const keyUp& e)
 				{
 					std::lock_guard lock(state_mutex);
-					released_keys.insert(e.code);
+					if (!gui_wants_keyboard.load(std::memory_order_relaxed))
+					{
+						released_keys.insert(e.code);
+					}
+					else
+					{
+						released_keys.erase(e.code);
+						pressed_keys.erase(e.code);
+					}
 					holded_keys.erase(e.code);
 				});
 				return true;
@@ -99,24 +114,53 @@ namespace mngl
 				event_manager::on<mouseMotion>([](const mouseMotion& e)
 				{
 					std::lock_guard lock(state_mutex);
-					mdelta += e.position - mpos;
-					mpos = e.position;
+					update_mouse_position(
+						e.position,
+						!gui_wants_mouse.load(std::memory_order_relaxed));
 				});
 				event_manager::on<mouseButtonDown>([](const mouseButtonDown& e)
 				{
 					std::lock_guard lock(state_mutex);
-					mpressed |= 1 << (e.button - 1);
+					const uint32_t mask = 1U << (e.button - 1);
+					update_mouse_position(
+						e.position,
+						!gui_wants_mouse.load(std::memory_order_relaxed));
+					if (!gui_wants_mouse.load(std::memory_order_relaxed))
+					{
+						mpressed |= mask;
+					}
+					else
+					{
+						mpressed &= ~mask;
+						mholded &= ~mask;
+					}
 				});
 				event_manager::on<mouseButtonUp>([](const mouseButtonUp& e)
 				{
 					std::lock_guard lock(state_mutex);
-					mreleased |= 1 << (e.button - 1);
-					mholded &= ~(1 << (e.button - 1));
+					const uint32_t mask = 1U << (e.button - 1);
+					const bool captured = gui_wants_mouse.load(std::memory_order_relaxed);
+					update_mouse_position(e.position, !captured);
+					if (!captured)
+					{
+						mreleased |= mask;
+					}
+					else
+					{
+						mpressed &= ~mask;
+						mreleased &= ~mask;
+					}
+					mholded &= ~mask;
 				});
 				event_manager::on<mouseWheel>([](const mouseWheel& e)
 				{
 					std::lock_guard lock(state_mutex);
-					mscrolldelta += e.scroll;
+					const bool captured = gui_wants_mouse.load(std::memory_order_relaxed);
+					update_mouse_position(e.mousePos, !captured);
+					if (!captured)
+					{
+						mscrolldelta += e.scroll;
+					}
 				});
 				return true;
 			}();
@@ -130,20 +174,78 @@ namespace mngl
 		static inline glm::vec2 mdelta;
 		static inline glm::vec2 mscrolldelta;
 
+		static void update_mouse_position(glm::vec2 position, bool track_delta = true)
+		{
+			if (track_delta)
+			{
+				mdelta += position - mpos;
+			}
+			mpos = position;
+		}
+
 		static inline uint32_t mpressed;
 		static inline uint32_t mholded;
 		static inline uint32_t mreleased;
 		static inline std::mutex state_mutex;
+		static inline std::atomic_bool gui_wants_mouse = false;
+		static inline std::atomic_bool gui_wants_keyboard = false;
+
+		friend class imgui_context;
+
+		static void set_gui_capture(bool mouse, bool keyboard)
+		{
+			gui_wants_mouse.store(mouse, std::memory_order_relaxed);
+			gui_wants_keyboard.store(keyboard, std::memory_order_relaxed);
+
+			if (!mouse && !keyboard)
+			{
+				return;
+			}
+
+			std::lock_guard lock(state_mutex);
+			if (keyboard)
+			{
+				pressed_keys.clear();
+				holded_keys.clear();
+				released_keys.clear();
+			}
+			if (mouse)
+			{
+				mpressed = 0;
+				mholded = 0;
+				mreleased = 0;
+				mdelta = { 0, 0 };
+				mscrolldelta = { 0, 0 };
+			}
+		}
 
 		static void update_info()
 		{
 			std::lock_guard lock(state_mutex);
-			holded_keys.insert(pressed_keys.begin(), pressed_keys.end());
-			pressed_keys.clear();
-			released_keys.clear();
-			mholded |= mpressed;
-			mreleased = 0;
-			mpressed = 0;
+			if (gui_wants_keyboard.load(std::memory_order_relaxed))
+			{
+				pressed_keys.clear();
+				holded_keys.clear();
+				released_keys.clear();
+			}
+			else
+			{
+				holded_keys.insert(pressed_keys.begin(), pressed_keys.end());
+				pressed_keys.clear();
+				released_keys.clear();
+			}
+			if (gui_wants_mouse.load(std::memory_order_relaxed))
+			{
+				mpressed = 0;
+				mholded = 0;
+				mreleased = 0;
+			}
+			else
+			{
+				mholded |= mpressed;
+				mreleased = 0;
+				mpressed = 0;
+			}
 			mdelta = {0, 0};
 			mscrolldelta = {0, 0};
 		}
@@ -152,6 +254,15 @@ namespace mngl
 		{
 			update_info();
 			SDL_PumpEvents();
+			const auto imgui_events = event_manager::take_imgui_input_events();
+			if (ImGui::GetCurrentContext() &&
+				ImGui::GetIO().BackendPlatformUserData != nullptr)
+			{
+				for (const SDL_Event& event : imgui_events)
+				{
+					ImGui_ImplSDL3_ProcessEvent(&event);
+				}
+			}
 #ifndef NO_SDLINPUT_QUEUE_FLUSH
 			SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
 #endif
@@ -199,16 +310,28 @@ namespace mngl
 
 		static bool is_key_pressed(scancode code)
 		{
+			if (gui_wants_keyboard.load(std::memory_order_relaxed))
+			{
+				return false;
+			}
 			std::lock_guard lock(state_mutex);
 			return pressed_keys.find(code) != pressed_keys.end();
 		}
 		static bool is_key_holded(scancode code)
 		{
+			if (gui_wants_keyboard.load(std::memory_order_relaxed))
+			{
+				return false;
+			}
 			std::lock_guard lock(state_mutex);
 			return holded_keys.find(code) != holded_keys.end();
 		}
 		static bool is_key_released(scancode code)
 		{
+			if (gui_wants_keyboard.load(std::memory_order_relaxed))
+			{
+				return false;
+			}
 			std::lock_guard lock(state_mutex);
 			return released_keys.find(code) != released_keys.end();
 		}
@@ -220,27 +343,47 @@ namespace mngl
 		}
 		static glm::vec2 get_mouse_delta()
 		{
+			if (gui_wants_mouse.load(std::memory_order_relaxed))
+			{
+				return { 0, 0 };
+			}
 			std::lock_guard lock(state_mutex);
 			return mdelta;
 		}
 		static glm::vec2 get_mouse_scroll_delta()
 		{
+			if (gui_wants_mouse.load(std::memory_order_relaxed))
+			{
+				return { 0, 0 };
+			}
 			std::lock_guard lock(state_mutex);
 			return mscrolldelta;
 		}
 
 		static bool is_mouse_button_pressed(mouse_button button)
 		{
+			if (gui_wants_mouse.load(std::memory_order_relaxed))
+			{
+				return false;
+			}
 			std::lock_guard lock(state_mutex);
 			return mpressed & (1 << (static_cast<uint8_t>(button) - 1));
 		}
 		static bool is_mouse_button_holded(mouse_button button)
 		{
+			if (gui_wants_mouse.load(std::memory_order_relaxed))
+			{
+				return false;
+			}
 			std::lock_guard lock(state_mutex);
 			return mholded & (1 << (static_cast<uint8_t>(button) - 1));
 		}
 		static bool is_mouse_button_released(mouse_button button)
 		{
+			if (gui_wants_mouse.load(std::memory_order_relaxed))
+			{
+				return false;
+			}
 			std::lock_guard lock(state_mutex);
 			return mreleased & (1 << (static_cast<uint8_t>(button) - 1));
 		}

@@ -4,6 +4,9 @@
 #include "utilities.hpp"
 #include "device.hpp"
 
+#include <limits>
+#include <type_traits>
+
 namespace mngl::gpu
 {
 	enum class vertex_elemetn_fmt : uint8_t
@@ -85,6 +88,22 @@ namespace mngl::gpu
 		{
 			m_buffers.push_back({slot, pitch, input_rate, instance_step_rate});
 			return *this;
+		}
+
+		template<typename Vertex>
+		vertex_layout& add_buffer(
+			uint32_t slot,
+			vertex_input_rate input_rate = vertex_input_rate::vertex,
+			uint32_t instance_step_rate = 0
+		)
+		{
+			static_assert(std::is_trivially_copyable_v<Vertex>, "Vertex type must be trivially copyable");
+			static_assert(sizeof(Vertex) <= std::numeric_limits<uint32_t>::max(), "Vertex type is too large");
+			return add_buffer(
+				slot,
+				static_cast<uint32_t>(sizeof(Vertex)),
+				input_rate,
+				instance_step_rate);
 		}
 
 		vertex_layout& add_attribute(

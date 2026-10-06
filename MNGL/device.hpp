@@ -172,6 +172,12 @@ namespace mngl::gpu
 			shader_formats::dxil |
 			shader_formats::msl;
 
+		[[nodiscard]] static const device& global()
+		{
+			static const device instance(base_formats);
+			return instance;
+		}
+
 		SDL_GPUDevice* raw() const
 		{
 			return handle;
@@ -227,11 +233,11 @@ namespace mngl::gpu
 			return SDL_GetGPUShaderFormats(handle);
 		}
 
-		void claim_window(window& win)
+		void claim_window(window& win) const
 		{
 			TRY_SDL(SDL_ClaimWindowForGPUDevice(handle, win.raw()));
 		}
-		void release_window(window& win)
+		void release_window(window& win) const
 		{
 			SDL_ReleaseWindowFromGPUDevice(handle, win.raw());
 		}
