@@ -246,7 +246,7 @@ int main()
 					output.text("Docked tabs can be rearranged by dragging them.");
 					output.text("F1 hides/shows the UI sprite; hide it to test the red 2D button.");
 					output.text("Resize the window to test offscreen target recreation.");
-					output.text("Transparent pixels still hit the sprite; dragging outside may stop routing.");
+					output.text("Transparent pixels still hit the sprite; dragging continues outside its bounds.");
 					output.text(std::format("Button clicks: {}", imgui_button_clicks));
 					output.text(std::format("2D scene button clicks: {}", scene_button_clicks));
 				}

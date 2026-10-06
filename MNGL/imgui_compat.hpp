@@ -987,8 +987,13 @@ namespace mngl
 		std::array<loaded_font, 5> fonts{};
 		gpu::texture_format color_target_format = gpu::texture_format::invalid;
 		::mngl::texture* requested_render_target = nullptr;
+		std::vector<hit_test_path_entry> captured_hit_test_path;
+		glm::vec2 last_offscreen_mouse_position{};
+		std::uint64_t captured_texture_identity = 0;
 		bool frame_active = false;
 		bool draw_data_ready = false;
+		bool offscreen_mouse_captured = false;
+		bool has_last_offscreen_mouse_position = false;
 	};
 
 	inline imgui_context::imgui_context(
@@ -1030,6 +1035,8 @@ namespace mngl
 			{
 				throw sdl_error("Failed to initialize the Dear ImGui SDL3 backend: ");
 			}
+			ImGui_ImplSDL3_SetMouseCaptureMode(
+				ImGui_ImplSDL3_MouseCaptureMode_EnabledAfterDrag);
 
 			ImGui_ImplSDLGPU3_InitInfo init_info{};
 			init_info.Device = window.gpu_device().raw();
@@ -1160,6 +1167,24 @@ namespace mngl
 		}
 
 		make_current();
+		if (target)
+		{
+			if (captured_texture_identity != target->m_hit_test_identity)
+			{
+				captured_texture_identity = target->m_hit_test_identity;
+				captured_hit_test_path.clear();
+				offscreen_mouse_captured = false;
+				has_last_offscreen_mouse_position = false;
+			}
+		}
+		else
+		{
+			captured_texture_identity = 0;
+			captured_hit_test_path.clear();
+			offscreen_mouse_captured = false;
+			has_last_offscreen_mouse_position = false;
+		}
+
 		ImGui_ImplSDL3_NewFrame();
 		ImGui_ImplSDLGPU3_NewFrame();
 		if (target)
@@ -1172,31 +1197,89 @@ namespace mngl
 			io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
 			const float offscreen_cursor = -std::numeric_limits<float>::max();
 			io.AddMousePosEvent(offscreen_cursor, offscreen_cursor);
+			bool cursor_routed = false;
 
 			if (attached_window->m_hit_test_frame)
 			{
-				if (const auto hit = attached_window->hit_test(Input::get_mouse_position()))
+				const auto& hit_frame = *attached_window->m_hit_test_frame;
+				const auto logical_size = attached_window->size();
+				if (logical_size.x != 0 && logical_size.y != 0)
 				{
-					const auto surface_path = std::find_if(
-						hit->path.begin(),
-						hit->path.end(),
-						[target](const hit_test_path_entry& entry)
-						{
-							return entry.source_identity == target->m_hit_test_identity;
-						});
-					if (surface_path != hit->path.end() &&
-						surface_path->source_size.x != 0 &&
-						surface_path->source_size.y != 0)
+					const glm::vec2 mouse_position = Input::get_mouse_position();
+					const glm::vec2 window_pixel_position{
+						mouse_position.x * static_cast<float>(hit_frame.target_size.x) /
+							static_cast<float>(logical_size.x),
+						(static_cast<float>(logical_size.y) - mouse_position.y) *
+							static_cast<float>(hit_frame.target_size.y) /
+							static_cast<float>(logical_size.y)
+					};
+					auto add_routed_position = [&](const hit_test_path_entry& entry)
 					{
+						if (entry.source_size.x == 0 || entry.source_size.y == 0)
+						{
+							return false;
+						}
+
 						const glm::vec2 routed_position =
-							surface_path->source_pixel_coords *
+							entry.source_pixel_coords *
 							glm::vec2(target_size) /
-							glm::vec2(surface_path->source_size);
-						io.AddMousePosEvent(
+							glm::vec2(entry.source_size);
+						last_offscreen_mouse_position = {
 							routed_position.x,
-							static_cast<float>(target_size.y) - routed_position.y);
+							static_cast<float>(target_size.y) - routed_position.y
+						};
+						has_last_offscreen_mouse_position = true;
+						io.AddMousePosEvent(
+							last_offscreen_mouse_position.x,
+							last_offscreen_mouse_position.y);
+						return true;
+					};
+
+					if (offscreen_mouse_captured &&
+						captured_texture_identity == target->m_hit_test_identity &&
+						!captured_hit_test_path.empty())
+					{
+						if (const auto surface_path =
+							detail::map_hit_test_path_to_source_unbounded(
+								hit_frame,
+								captured_hit_test_path,
+								window_pixel_position,
+								target->m_hit_test_identity))
+						{
+							cursor_routed = add_routed_position(*surface_path);
+						}
+					}
+					else if (const auto hit = attached_window->hit_test(mouse_position))
+					{
+						const auto surface_path = std::find_if(
+							hit->path.begin(),
+							hit->path.end(),
+							[target](const hit_test_path_entry& entry)
+							{
+								return entry.source_identity == target->m_hit_test_identity;
+							});
+						if (surface_path != hit->path.end() &&
+							add_routed_position(*surface_path))
+						{
+							captured_hit_test_path = hit->path;
+							cursor_routed = true;
+						}
 					}
 				}
+			}
+
+			if (!cursor_routed && offscreen_mouse_captured &&
+				has_last_offscreen_mouse_position)
+			{
+				io.AddMousePosEvent(
+					last_offscreen_mouse_position.x,
+					last_offscreen_mouse_position.y);
+				cursor_routed = true;
+			}
+			if (!cursor_routed && !offscreen_mouse_captured)
+			{
+				captured_hit_test_path.clear();
+				has_last_offscreen_mouse_position = false;
 			}
 		}
 		ImGui::NewFrame();
@@ -1219,6 +1302,23 @@ namespace mngl
 
 		const ImGuiIO& io = ImGui::GetIO();
 		Input::set_gui_capture(io.WantCaptureMouse, io.WantCaptureKeyboard);
+		offscreen_mouse_captured = false;
+		if (requested_render_target && !captured_hit_test_path.empty())
+		{
+			for (int button = 0; button < ImGuiMouseButton_COUNT; ++button)
+			{
+				if (io.MouseDown[button])
+				{
+					offscreen_mouse_captured = true;
+					break;
+				}
+			}
+		}
+		if (!offscreen_mouse_captured)
+		{
+			captured_hit_test_path.clear();
+			has_last_offscreen_mouse_position = false;
+		}
 	}
 
 	inline void imgui_context::render(
@@ -1294,6 +1394,10 @@ namespace mngl
 		event_manager::set_imgui_input_enabled(false);
 		Input::set_gui_capture(false, false);
 		requested_render_target = nullptr;
+		captured_hit_test_path.clear();
+		captured_texture_identity = 0;
+		offscreen_mouse_captured = false;
+		has_last_offscreen_mouse_position = false;
 		if (!context)
 		{
 			return;
@@ -1317,6 +1421,8 @@ namespace mngl
 		}
 		if (io.BackendPlatformUserData)
 		{
+			ImGui_ImplSDL3_SetMouseCaptureMode(
+				ImGui_ImplSDL3_MouseCaptureMode_Disabled);
 			ImGui_ImplSDL3_Shutdown();
 		}
 		ImGui::DestroyContext(context);
@@ -1454,7 +1560,7 @@ namespace mngl
 		ImGui::DockSpace(
 			dockspace_id,
 			ImVec2(0.0f, 0.0f),
-			ImGuiDockNodeFlags_NoUndocking);
+			ImGuiDockNodeFlags_None);
 		return dockspace_scope(*owner, dockspace_id);
 	}
 

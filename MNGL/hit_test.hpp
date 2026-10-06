@@ -123,16 +123,13 @@ namespace mngl
 			return true;
 		}
 
-		inline std::optional<glm::vec2> map_pixel_to_world(
+		inline std::optional<glm::vec2> map_pixel_to_world_unbounded(
 			const hit_test_frame& frame,
 			glm::vec2 pixel_position
 		)
 		{
 			if (frame.target_size.x == 0 || frame.target_size.y == 0 ||
-				!finite(pixel_position) ||
-				pixel_position.x < 0.0f || pixel_position.y < 0.0f ||
-				pixel_position.x > static_cast<float>(frame.target_size.x) ||
-				pixel_position.y > static_cast<float>(frame.target_size.y))
+				!finite(pixel_position))
 			{
 				return std::nullopt;
 			}
@@ -154,7 +151,23 @@ namespace mngl
 			return finite(world) ? std::optional<glm::vec2>(world) : std::nullopt;
 		}
 
-		inline std::optional<glm::vec2> local_position(
+		inline std::optional<glm::vec2> map_pixel_to_world(
+			const hit_test_frame& frame,
+			glm::vec2 pixel_position
+		)
+		{
+			if (frame.target_size.x == 0 || frame.target_size.y == 0 ||
+				!finite(pixel_position) ||
+				pixel_position.x < 0.0f || pixel_position.y < 0.0f ||
+				pixel_position.x > static_cast<float>(frame.target_size.x) ||
+				pixel_position.y > static_cast<float>(frame.target_size.y))
+			{
+				return std::nullopt;
+			}
+			return map_pixel_to_world_unbounded(frame, pixel_position);
+		}
+
+		inline std::optional<glm::vec2> local_position_unbounded(
 			const hit_test_item& item,
 			glm::vec2 world_position
 		)
@@ -183,14 +196,29 @@ namespace mngl
 			const glm::vec2 local_unit =
 				glm::vec2(local_homogeneous) / local_homogeneous.w;
 			const glm::vec2 result = local_unit * destination.size;
-			if (!finite(result) ||
-				result.x < 0.0f || result.y < 0.0f ||
-				result.x > destination.size.x || result.y > destination.size.y)
+			if (!finite(result))
 			{
 				return std::nullopt;
 			}
 
-			const glm::vec2 centered = result / destination.size * 2.0f - glm::vec2(1.0f);
+			return result;
+		}
+
+		inline std::optional<glm::vec2> local_position(
+			const hit_test_item& item,
+			glm::vec2 world_position
+		)
+		{
+			const auto result = local_position_unbounded(item, world_position);
+			const auto& destination = item.destination;
+			if (!result ||
+				result->x < 0.0f || result->y < 0.0f ||
+				result->x > destination.size.x || result->y > destination.size.y)
+			{
+				return std::nullopt;
+			}
+
+			const glm::vec2 centered = *result / destination.size * 2.0f - glm::vec2(1.0f);
 			switch (item.shape)
 			{
 			case hit_test_shape::circle:
@@ -209,7 +237,7 @@ namespace mngl
 					std::min(half_size.x, half_size.y));
 				if (radius > 0.0f)
 				{
-					const glm::vec2 from_center = glm::abs(result - half_size);
+					const glm::vec2 from_center = glm::abs(*result - half_size);
 					const glm::vec2 box_distance =
 						from_center - (half_size - glm::vec2(radius));
 					const float distance =
@@ -230,32 +258,44 @@ namespace mngl
 			return result;
 		}
 
+		inline glm::vec2 map_local_to_texture_pixel(
+			const hit_test_item& item,
+			glm::vec2 local_coords,
+			glm::uvec2 texture_size
+		)
+		{
+			if (texture_size.x == 0 || texture_size.y == 0 ||
+				!finite(local_coords) ||
+				!finite(item.destination.size) ||
+				item.destination.size.x <= 0.0f ||
+				item.destination.size.y <= 0.0f)
+			{
+				return {};
+			}
+
+			const glm::vec2 local_uv = local_coords / item.destination.size;
+			const float u = glm::mix(
+				item.uv_bounds.x,
+				item.uv_bounds.z,
+				local_uv.x);
+			const float v = glm::mix(
+				item.uv_bounds.w,
+				item.uv_bounds.y,
+				local_uv.y);
+			return {
+				u * static_cast<float>(texture_size.x),
+				(1.0f - v) * static_cast<float>(texture_size.y)
+			};
+		}
+
 		inline hit_test_path_entry make_hit_test_path_entry(
 			const hit_test_item& item,
 			glm::vec2 local_coords
 		)
 		{
-			glm::vec2 source_pixel_coords{};
-			if (item.source_identity != 0 &&
-				item.source_size.x != 0 &&
-				item.source_size.y != 0 &&
-				item.destination.size.x > 0.0f &&
-				item.destination.size.y > 0.0f)
-			{
-				const glm::vec2 local_uv = local_coords / item.destination.size;
-				const float u = glm::mix(
-					item.uv_bounds.x,
-					item.uv_bounds.z,
-					local_uv.x);
-				const float v = glm::mix(
-					item.uv_bounds.w,
-					item.uv_bounds.y,
-					local_uv.y);
-				source_pixel_coords = {
-					u * static_cast<float>(item.source_size.x),
-					(1.0f - v) * static_cast<float>(item.source_size.y)
-				};
-			}
+			const glm::vec2 source_pixel_coords = item.source_identity != 0
+				? map_local_to_texture_pixel(item, local_coords, item.source_size)
+				: glm::vec2{};
 
 			return {
 				item.draw_index,
@@ -264,6 +304,62 @@ namespace mngl
 				item.source_size,
 				source_pixel_coords
 			};
+		}
+
+		inline std::optional<hit_test_path_entry> map_hit_test_path_to_source_unbounded(
+			const hit_test_frame& root_frame,
+			const std::vector<hit_test_path_entry>& path,
+			glm::vec2 root_pixel_position,
+			std::uint64_t source_identity
+		)
+		{
+			if (path.empty() || source_identity == 0)
+			{
+				return std::nullopt;
+			}
+
+			const hit_test_frame* current_frame = &root_frame;
+			glm::vec2 current_pixel_position = root_pixel_position;
+			for (const auto& path_entry : path)
+			{
+				if (path_entry.draw_index >= current_frame->items.size())
+				{
+					return std::nullopt;
+				}
+
+				const auto& item = current_frame->items[path_entry.draw_index];
+				if (item.source_identity != path_entry.source_identity)
+				{
+					return std::nullopt;
+				}
+				const auto world_position =
+					map_pixel_to_world_unbounded(*current_frame, current_pixel_position);
+				if (!world_position)
+				{
+					return std::nullopt;
+				}
+				const auto local = local_position_unbounded(item, *world_position);
+				if (!local)
+				{
+					return std::nullopt;
+				}
+				if (item.source_identity == source_identity)
+				{
+					return make_hit_test_path_entry(item, *local);
+				}
+				if (!item.child_frame)
+				{
+					return std::nullopt;
+				}
+
+				current_pixel_position = map_local_to_texture_pixel(
+					item,
+					*local,
+					item.child_frame->target_size);
+				current_frame = item.child_frame.get();
+			}
+
+			return std::nullopt;
 		}
 
 		inline std::optional<hit_test_result> hit_test_frame_at_pixel(
@@ -318,19 +414,10 @@ namespace mngl
 
 				if (item.child_frame)
 				{
-					const glm::vec2 local_uv = *local / item.destination.size;
-					const float u = glm::mix(
-						item.uv_bounds.x,
-						item.uv_bounds.z,
-						local_uv.x);
-					const float v = glm::mix(
-						item.uv_bounds.w,
-						item.uv_bounds.y,
-						local_uv.y);
-					const glm::vec2 child_pixel{
-						u * static_cast<float>(item.child_frame->target_size.x),
-						(1.0f - v) * static_cast<float>(item.child_frame->target_size.y)
-					};
+					const glm::vec2 child_pixel = map_local_to_texture_pixel(
+						item,
+						*local,
+						item.child_frame->target_size);
 					if (auto child_result = hit_test_frame_at_pixel(
 						*item.child_frame,
 						child_pixel,
