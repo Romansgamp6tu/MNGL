@@ -12,8 +12,14 @@
 #include <string_view>
 #include <vector>
 
-int main()
+static int run_demo()
 {
+	if (SDL_Runtime.error())
+	{
+		throw std::runtime_error(SDL_Runtime.content());
+	}
+
+	SDL_Log("MNGL startup checkpoint: SDL initialized");
 	mngl::window::flags window_flags;
 	window_flags.resizeable = true;
 	window_flags.high_pixel_density = true;
@@ -29,8 +35,11 @@ int main()
 		static_cast<unsigned int>(std::max(1.0f, std::round(base_size.x * initial_scale))),
 		static_cast<unsigned int>(std::max(1.0f, std::round(base_size.y * initial_scale)))
 	};
+	SDL_Log("MNGL startup checkpoint: creating render window");
 	mngl::render_window window("MNGL — проверка ImGui", initial_size, window_flags);
+	SDL_Log("MNGL startup checkpoint: render window and GPU device ready");
 	auto workspace_texture = window.create_texture(window.pixel_size());
+	SDL_Log("MNGL startup checkpoint: workspace texture ready");
 	auto workspace_size = window.coordinate_size();
 	mngl::sprite workspace_sprite(
 		workspace_texture,
@@ -109,7 +118,9 @@ int main()
 	};
 	mngl::imgui_compat::font_config font_config;
 	font_config.regular.file = demo_font_path();
+	SDL_Log("MNGL startup checkpoint: creating ImGui context");
 	mngl::imgui_context gui(window, font_config);
+	SDL_Log("MNGL startup checkpoint: ImGui context ready");
 	const std::vector<std::string> render_modes{ "Заливка", "Каркас", "Точки" };
 	const std::vector<int> frame_rates{ 30, 60, 120 };
 	const std::vector<mngl::scancode> keys{
@@ -126,6 +137,10 @@ int main()
 		if (target_size.x == 0 || target_size.y == 0)
 		{
 			continue;
+		}
+		if (!has_completed_frame)
+		{
+			SDL_Log("MNGL startup checkpoint: entering first frame");
 		}
 		const auto logical_window_size = window.size();
 		if (workspace_texture.size() != target_size)
@@ -145,6 +160,10 @@ int main()
 
 		{
 			gui.set_user_scale(ui_scale);
+			if (!has_completed_frame)
+			{
+				SDL_Log("MNGL startup checkpoint: beginning ImGui frame");
+			}
 			auto frame = gui.frame(workspace_texture);
 			{
 				auto menu_bar = frame.main_menu_bar();
@@ -327,6 +346,10 @@ int main()
 				}
 			}
 		}
+		if (!has_completed_frame)
+		{
+			SDL_Log("MNGL startup checkpoint: ImGui frame built");
+		}
 
 		glm::vec2 sprite_position{};
 		glm::vec2 sprite_size = workspace_size;
@@ -368,8 +391,16 @@ int main()
 			.rotation(sprite_rotation);
 		workspace_sprite.source.uv_bounds = sprite_uv;
 
+		if (!has_completed_frame)
+		{
+			SDL_Log("MNGL startup checkpoint: rendering workspace texture");
+		}
 		window.clear(workspace_texture, mngl::color{ 0.0f, 0.0f, 0.0f, 0.0f });
 		window.display();
+		if (!has_completed_frame)
+		{
+			SDL_Log("MNGL startup checkpoint: workspace texture rendered");
+		}
 
 		if (has_completed_frame &&
 			mngl::Input::is_mouse_button_pressed(mngl::mouse_button::left))
@@ -397,6 +428,10 @@ int main()
 			fill = { 0.2f, 0.75f, 0.3f, 1.0f };
 		}
 
+		if (!has_completed_frame)
+		{
+			SDL_Log("MNGL startup checkpoint: rendering panel texture");
+		}
 		panel.clear(mngl::color{ 0.08f, 0.09f, 0.12f, 1.0f });
 		panel.draw([&](mngl::two_d::Frame2D& frame)
 		{
@@ -404,7 +439,15 @@ int main()
 			frame.draw(button);
 		});
 		panel.display();
+		if (!has_completed_frame)
+		{
+			SDL_Log("MNGL startup checkpoint: panel texture rendered");
+		}
 
+		if (!has_completed_frame)
+		{
+			SDL_Log("MNGL startup checkpoint: rendering swapchain");
+		}
 		window.clear(mngl::color{ 0.08f, 0.09f, 0.12f, 1.0f });
 		window.draw(panel_sprite);
 		if (show_workspace_surface)
@@ -412,6 +455,29 @@ int main()
 			window.draw(workspace_sprite);
 		}
 		window.display();
+		if (!has_completed_frame)
+		{
+			SDL_Log("MNGL startup checkpoint: first frame presented");
+		}
 		has_completed_frame = true;
+	}
+	return 0;
+}
+
+int main()
+{
+	try
+	{
+		return run_demo();
+	}
+	catch (const std::exception& error)
+	{
+		SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION, "MNGL unhandled exception: %s", error.what());
+		return 1;
+	}
+	catch (...)
+	{
+		SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION, "MNGL unhandled non-standard exception");
+		return 1;
 	}
 }

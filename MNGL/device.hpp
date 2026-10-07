@@ -220,7 +220,11 @@ namespace mngl::gpu
 		device(SDL_GPUShaderFormat allowed_formats = -1)
 		{
 			if (allowed_formats == -1) allowed_formats = base_formats;
+			SDL_Log("MNGL startup checkpoint: creating SDL GPU device");
 			TRY_SDL(handle = SDL_CreateGPUDevice(allowed_formats, debug_mode, nullptr));
+			const char* driver = SDL_GetGPUDeviceDriver(handle);
+			SDL_Log("MNGL startup checkpoint: SDL GPU device created with driver %s",
+				driver ? driver : "<unknown>");
 		}
 
 		~device()
@@ -235,7 +239,9 @@ namespace mngl::gpu
 
 		void claim_window(window& win) const
 		{
+			SDL_Log("MNGL startup checkpoint: claiming window for GPU device");
 			TRY_SDL(SDL_ClaimWindowForGPUDevice(handle, win.raw()));
+			SDL_Log("MNGL startup checkpoint: window claimed for GPU device");
 		}
 		void release_window(window& win) const
 		{
