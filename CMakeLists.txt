@@ -21,18 +21,23 @@ target_include_directories(mngl_demo PRIVATE
 
 if(MSVC)
 	# utilities.hpp uses MSVC linker pragmas for these bundled libraries.
-	target_link_directories(mngl_demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/libs")
+	if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+		set(MNGL_LIBRARY_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/libs")
+	else()
+		set(MNGL_LIBRARY_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/libs/x86")
+	endif()
+	target_link_directories(mngl_demo PRIVATE "${MNGL_LIBRARY_DIRECTORY}")
 
-	if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+	if(WIN32)
 		add_custom_command(TARGET mngl_demo POST_BUILD
 			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-				"${CMAKE_CURRENT_SOURCE_DIR}/libs/SDL3.dll"
+				"${MNGL_LIBRARY_DIRECTORY}/SDL3.dll"
 				"$<TARGET_FILE_DIR:mngl_demo>"
 			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-				"${CMAKE_CURRENT_SOURCE_DIR}/libs/SDL3_image.dll"
+				"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.dll"
 				"$<TARGET_FILE_DIR:mngl_demo>"
 			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-				"${CMAKE_CURRENT_SOURCE_DIR}/libs/freetype.dll"
+				"${MNGL_LIBRARY_DIRECTORY}/freetype.dll"
 				"$<TARGET_FILE_DIR:mngl_demo>"
 			VERBATIM
 		)
