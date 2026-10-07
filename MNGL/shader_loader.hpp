@@ -3,13 +3,17 @@
 #include "graphics_shader.hpp"
 #include "utilities.hpp"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <format>
+#include <iterator>
+#include <regex>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -47,6 +51,8 @@ namespace mngl::gpu
 		shader_source_language source_language = shader_source_language::hlsl;
 		std::filesystem::path shadercross_executable = "shadercross";
 		std::filesystem::path glslang_validator_executable = "glslangValidator";
+		// Reflect the MNGL HLSL fragment layout at b0/space3 and resources at space2.
+		bool reflect_uniforms = false;
 	};
 
 	class shader_loader
@@ -69,6 +75,8 @@ namespace mngl::gpu
 				throw std::invalid_argument("Unsupported shader source language");
 			}
 			validate_source_file(source_path);
+
+			const auto reflected_uniforms = reflect_uniforms_if_requested(options, source_path);
 
 			auto temp_dir = temporary_directory::create();
 			const auto compiled_path = temp_dir.path() /
@@ -116,6 +124,49 @@ namespace mngl::gpu
 			asset.entrypoint = options.entrypoint;
 			asset.resources = options.resources;
 			asset.debug_name = source_path.filename().string();
+			apply_uniform_reflection(asset, options, reflected_uniforms);
+			return asset;
+		}
+
+		static graphics_shader_asset load_binary(
+			const std::filesystem::path& bytecode_path,
+			const std::filesystem::path& reflection_source = {},
+			const shader_compile_options& options = {}
+		)
+		{
+			if (!valid_shader_stage(options.stage) || !valid_shader_format(options.format) ||
+				!valid_entrypoint(options.entrypoint))
+			{
+				throw std::invalid_argument("Cannot load shader bytecode with invalid shader options");
+			}
+			validate_source_file(bytecode_path);
+
+			auto bytes = read_binary_file(bytecode_path);
+			if (bytes.empty())
+			{
+				throw std::invalid_argument(std::format(
+					"Shader bytecode is empty: '{}'",
+					bytecode_path.string()));
+			}
+
+			uniform_reflection reflected_uniforms{};
+			if (options.reflect_uniforms)
+			{
+				if (reflection_source.empty())
+				{
+					throw std::invalid_argument(
+						"Named-uniform reflection requires the matching HLSL source path");
+				}
+				reflected_uniforms = reflect_uniforms_if_requested(options, reflection_source);
+			}
+
+			graphics_shader_asset asset{};
+			asset.stage = options.stage;
+			asset.code.assign(options.format, std::move(bytes));
+			asset.entrypoint = options.entrypoint;
+			asset.resources = options.resources;
+			asset.debug_name = bytecode_path.filename().string();
+			apply_uniform_reflection(asset, options, reflected_uniforms);
 			return asset;
 		}
 
@@ -152,6 +203,14 @@ namespace mngl::gpu
 		}
 
 	private:
+		struct uniform_reflection
+		{
+			uint32_t block_size = 0;
+			std::vector<shader_uniform_field_layout> fields;
+			std::vector<shader_resource_field_layout> resources;
+			shader_resource_layout resource_counts{};
+		};
+
 		struct output_format
 		{
 			std::string_view name;
@@ -296,6 +355,447 @@ namespace mngl::gpu
 					"Shader source is not a regular file: '{}'",
 					source_path.string()));
 			}
+		}
+
+		static uniform_reflection reflect_uniforms_if_requested(
+			const shader_compile_options& options,
+			const std::filesystem::path& source_path
+		)
+		{
+			if (!options.reflect_uniforms)
+			{
+				return {};
+			}
+			if (options.source_language != shader_source_language::hlsl ||
+				options.stage != graphics_shader_stage::fragment)
+			{
+				throw std::invalid_argument(
+					"MNGL named uniform/resource reflection currently supports HLSL fragment shaders only");
+			}
+			validate_source_file(source_path);
+			return reflect_hlsl_uniforms(source_path);
+		}
+
+		static void apply_uniform_reflection(
+			graphics_shader_asset& asset,
+			const shader_compile_options& options,
+			const uniform_reflection& reflected_uniforms
+		)
+		{
+			if (!options.reflect_uniforms)
+			{
+				return;
+			}
+
+			const auto validate_count = [](uint32_t requested, uint32_t reflected, std::string_view name)
+			{
+				if (requested != 0 && requested != reflected)
+				{
+					throw std::invalid_argument(std::format(
+						"Shader {} count does not match the reflected HLSL layout",
+						name));
+				}
+			};
+			validate_count(options.resources.samplers, reflected_uniforms.resource_counts.samplers, "sampler");
+			validate_count(
+				options.resources.storage_textures,
+				reflected_uniforms.resource_counts.storage_textures,
+				"storage texture");
+			validate_count(
+				options.resources.storage_buffers,
+				reflected_uniforms.resource_counts.storage_buffers,
+				"storage buffer");
+			validate_count(
+				options.resources.uniform_buffers,
+				reflected_uniforms.resource_counts.uniform_buffers,
+				"uniform buffer");
+
+			asset.resources = reflected_uniforms.resource_counts;
+			if (reflected_uniforms.block_size != 0)
+			{
+				asset.set_uniform_layout(reflected_uniforms.block_size, reflected_uniforms.fields);
+			}
+			if (!reflected_uniforms.resources.empty())
+			{
+				asset.set_resource_layout(reflected_uniforms.resources);
+			}
+		}
+
+		static uniform_reflection reflect_hlsl_uniforms(const std::filesystem::path& source_path)
+		{
+			std::ifstream source_file(source_path, std::ios::binary);
+			if (!source_file)
+			{
+				throw std::runtime_error(std::format(
+					"Failed to read HLSL source for named-uniform reflection: '{}'",
+					source_path.string()));
+			}
+			std::string source{
+				std::istreambuf_iterator<char>(source_file),
+				std::istreambuf_iterator<char>() };
+			if (source_file.bad())
+			{
+				throw std::runtime_error(std::format(
+					"Failed while reading HLSL source for named-uniform reflection: '{}'",
+					source_path.string()));
+			}
+
+			static const std::regex comments(R"(//[^\r\n]*|/\*[\s\S]*?\*/)");
+			static const std::regex cbuffer_keyword(R"(\bcbuffer\b)");
+			static const std::regex cbuffer(
+				R"(\bcbuffer\s+\w+\s*:\s*register\s*\(\s*b(\d+)\s*,\s*space(\d+)\s*\)\s*\{([^}]*)\})");
+			static const std::regex uniform_field(
+				R"((?:(row_major|column_major)\s+)?(int64_t|uint64_t|float16_t|int16_t|uint16_t|int8_t|uint8_t|min16float|min10float|min16int|min16uint|double|float|half|int|uint|bool|dword)([1-4]?)(?:x([1-4]))?\s+([A-Za-z_]\w*)\s*(?:\[\s*(\d+)\s*\])?\s*;)");
+			static const std::regex texture_resource(
+				R"(\bTexture2D(?:\s*<[^>]+>)?\s+([A-Za-z_]\w*)\s*:\s*register\s*\(\s*t(\d+)\s*,\s*space\s*(\d+)\s*\)\s*;)");
+			static const std::regex buffer_resource(
+				R"(\bStructuredBuffer\s*<[^>]+>\s+([A-Za-z_]\w*)\s*:\s*register\s*\(\s*t(\d+)\s*,\s*space\s*(\d+)\s*\)\s*;)");
+			static const std::regex sampler_resource(
+				R"(\bSamplerState\s+([A-Za-z_]\w*)\s*:\s*register\s*\(\s*s(\d+)\s*,\s*space\s*(\d+)\s*\)\s*;)");
+			static const std::regex resource_register(
+				R"(\bregister\s*\(\s*[ts]\s*\d+)");
+			static const std::regex row_major_default(
+				R"(#\s*pragma\s+pack_matrix\s*\(\s*row_major\s*\))");
+
+			source = std::regex_replace(source, comments, "");
+			const bool default_row_major = std::regex_search(source, row_major_default);
+			std::size_t keyword_count = 0;
+			for (auto it = std::sregex_iterator(source.begin(), source.end(), cbuffer_keyword);
+				it != std::sregex_iterator();
+				++it)
+			{
+				++keyword_count;
+			}
+			if (keyword_count > 1)
+			{
+				throw std::invalid_argument(
+					"MNGL reflection supports at most one fragment cbuffer");
+			}
+
+			uniform_reflection result{};
+			if (keyword_count == 1)
+			{
+				std::smatch block_match;
+				if (!std::regex_search(source, block_match, cbuffer) ||
+					std::stoul(block_match[1].str()) != 0 ||
+					std::stoul(block_match[2].str()) != 3)
+				{
+					throw std::invalid_argument(
+						"MNGL fragment cbuffer must use register(b0, space3)");
+				}
+
+				const std::string body = block_match[3].str();
+				const std::string remaining = std::regex_replace(body, uniform_field, "");
+				if (remaining.find_first_not_of(" \t\r\n") != std::string::npos)
+				{
+					throw std::invalid_argument(
+						"MNGL cbuffer reflection supports scalar, vector, and matrix fields only; arrays and structs are not supported");
+				}
+
+				uint32_t byte_offset = 0;
+				for (auto it = std::sregex_iterator(body.begin(), body.end(), uniform_field);
+					it != std::sregex_iterator();
+					++it)
+				{
+					const std::smatch& field_match = *it;
+					const std::string scalar_type = field_match[2].str();
+					shader_uniform_field_layout field{};
+					field.name = field_match[5].str();
+					if (field_match[6].matched)
+					{
+						const auto array_count = std::stoull(field_match[6].str());
+						if (array_count == 0 || array_count > std::numeric_limits<uint32_t>::max())
+						{
+							throw std::invalid_argument("HLSL uniform array length is outside the supported range");
+						}
+						field.is_array = true;
+						field.array_count = static_cast<uint32_t>(array_count);
+					}
+					field.rows = field_match[3].str().empty()
+						? 1
+						: static_cast<uint8_t>(std::stoul(field_match[3].str()));
+					field.columns = field_match[4].str().empty()
+						? 1
+						: static_cast<uint8_t>(std::stoul(field_match[4].str()));
+					field.is_matrix = !field_match[4].str().empty();
+					field.row_major = field_match[1].matched
+						? field_match[1].str() == "row_major"
+						: default_row_major;
+					if (!field.is_matrix && !field_match[1].str().empty())
+					{
+						throw std::invalid_argument("row_major/column_major only applies to HLSL matrices");
+					}
+
+					if (scalar_type == "bool")
+					{
+						field.scalar_size = 4;
+						field.is_boolean = true;
+					}
+					else if (scalar_type == "int8_t")
+					{
+						field.scalar_size = 1;
+						field.is_signed = true;
+					}
+					else if (scalar_type == "uint8_t")
+					{
+						field.scalar_size = 1;
+					}
+					else if (scalar_type == "int16_t")
+					{
+						field.scalar_size = 2;
+						field.is_signed = true;
+					}
+					else if (scalar_type == "uint16_t")
+					{
+						field.scalar_size = 2;
+					}
+					else if (scalar_type == "int64_t")
+					{
+						field.scalar_size = 8;
+						field.is_signed = true;
+					}
+					else if (scalar_type == "uint64_t" || scalar_type == "dword")
+					{
+						field.scalar_size = scalar_type == "dword" ? 4 : 8;
+					}
+					else if (scalar_type == "int" || scalar_type == "min16int")
+					{
+						field.scalar_size = 4;
+						field.is_signed = true;
+					}
+					else if (scalar_type == "uint" || scalar_type == "min16uint")
+					{
+						field.scalar_size = 4;
+					}
+					else
+					{
+						field.scalar_size = scalar_type == "float16_t"
+							? 2
+							: scalar_type == "double" ? 8 : 4;
+						field.is_floating_point = true;
+					}
+
+					if (field.is_matrix)
+					{
+						byte_offset = (byte_offset + 15) & ~uint32_t(15);
+						const uint32_t vector_components = field.row_major
+							? field.columns
+							: field.rows;
+						const uint32_t vector_count = field.row_major
+							? field.rows
+							: field.columns;
+						const uint32_t stride =
+							(vector_components * field.scalar_size + 15) & ~uint32_t(15);
+						field.byte_offset = byte_offset;
+						field.element_size = vector_count * stride;
+						field.array_stride = field.is_array
+							? field.element_size
+							: 0;
+						if (field.is_array &&
+							field.array_count > std::numeric_limits<uint32_t>::max() / field.array_stride)
+						{
+							throw std::length_error("HLSL matrix array exceeds the supported uniform block size");
+						}
+						field.storage_size = field.is_array
+							? field.array_count * field.array_stride
+							: field.element_size;
+						if (field.storage_size > std::numeric_limits<uint32_t>::max() - byte_offset)
+						{
+							throw std::length_error("HLSL cbuffer exceeds the supported size");
+						}
+						byte_offset += field.storage_size;
+					}
+					else
+					{
+						const uint32_t field_size =
+							static_cast<uint32_t>(field.rows) * field.scalar_size;
+						if (field.is_array)
+						{
+							byte_offset = (byte_offset + 15) & ~uint32_t(15);
+							field.byte_offset = byte_offset;
+							field.element_size = field_size;
+							field.array_stride = (field_size + 15) & ~uint32_t(15);
+							if (field.array_count >
+								std::numeric_limits<uint32_t>::max() / field.array_stride)
+							{
+								throw std::length_error("HLSL uniform array exceeds the supported block size");
+							}
+							field.storage_size = field.array_count * field.array_stride;
+							if (field.storage_size > std::numeric_limits<uint32_t>::max() - byte_offset)
+							{
+								throw std::length_error("HLSL cbuffer exceeds the supported size");
+							}
+							byte_offset += field.storage_size;
+						}
+						else
+						{
+							if (byte_offset % field.scalar_size != 0)
+							{
+								byte_offset =
+									(byte_offset + field.scalar_size - 1) &
+									~static_cast<uint32_t>(field.scalar_size - 1);
+							}
+							if (byte_offset % 16 + field_size > 16)
+							{
+								byte_offset = (byte_offset + 15) & ~uint32_t(15);
+							}
+							field.byte_offset = byte_offset;
+							field.element_size = field_size;
+							field.storage_size = field_size;
+							if (field.storage_size > std::numeric_limits<uint32_t>::max() - byte_offset)
+							{
+								throw std::length_error("HLSL cbuffer exceeds the supported size");
+							}
+							byte_offset += field_size;
+						}
+					}
+					result.fields.push_back(std::move(field));
+				}
+				if (result.fields.empty())
+				{
+					throw std::invalid_argument("MNGL fragment cbuffer must declare at least one uniform field");
+				}
+				result.block_size = (byte_offset + 15) & ~uint32_t(15);
+				result.resource_counts.uniform_buffers = 1;
+			}
+
+			struct resource_declaration
+			{
+				std::string name;
+				uint32_t slot = 0;
+				uint32_t space = 0;
+			};
+			std::vector<resource_declaration> textures;
+			std::vector<resource_declaration> buffers;
+			std::vector<resource_declaration> samplers;
+			auto collect_resources = [](const std::string& text, const std::regex& pattern)
+			{
+				std::vector<resource_declaration> found;
+				for (auto it = std::sregex_iterator(text.begin(), text.end(), pattern);
+					it != std::sregex_iterator();
+					++it)
+				{
+					const std::smatch& match = *it;
+					const auto slot = std::stoull(match[2].str());
+					const auto space = std::stoull(match[3].str());
+					if (slot > std::numeric_limits<uint32_t>::max() ||
+						space > std::numeric_limits<uint32_t>::max())
+					{
+						throw std::out_of_range("HLSL resource register exceeds the supported range");
+					}
+					found.push_back({
+						.name = match[1].str(),
+						.slot = static_cast<uint32_t>(slot),
+						.space = static_cast<uint32_t>(space)
+					});
+				}
+				return found;
+			};
+			textures = collect_resources(source, texture_resource);
+			buffers = collect_resources(source, buffer_resource);
+			samplers = collect_resources(source, sampler_resource);
+
+			std::size_t reflected_resource_registers = 0;
+			for (auto it = std::sregex_iterator(source.begin(), source.end(), resource_register);
+				it != std::sregex_iterator();
+				++it)
+			{
+				++reflected_resource_registers;
+			}
+			if (reflected_resource_registers != textures.size() + buffers.size() + samplers.size())
+			{
+				throw std::invalid_argument(
+					"MNGL resource reflection supports Texture2D, StructuredBuffer, and SamplerState at space2");
+			}
+
+			auto require_space2 = [](const std::vector<resource_declaration>& declarations)
+			{
+				for (const auto& declaration : declarations)
+				{
+					if (declaration.space != 2)
+					{
+						throw std::invalid_argument("MNGL fragment resources must use HLSL register space2");
+					}
+				}
+			};
+			require_space2(textures);
+			require_space2(buffers);
+			require_space2(samplers);
+
+			auto contiguous_slot_count = [](std::vector<uint32_t> slots, std::string_view kind)
+			{
+				std::sort(slots.begin(), slots.end());
+				for (uint32_t index = 0; index < slots.size(); ++index)
+				{
+					if (slots[index] != index)
+					{
+						throw std::invalid_argument(std::format(
+							"MNGL {} resource registers must be contiguous from slot zero",
+							kind));
+					}
+				}
+				return static_cast<uint32_t>(slots.size());
+			};
+
+			std::vector<uint32_t> sampled_texture_slots;
+			std::vector<uint32_t> storage_texture_slots;
+			std::vector<uint32_t> storage_buffer_slots;
+			std::vector<uint32_t> sampler_slots;
+			for (const auto& declaration : buffers)
+			{
+				storage_buffer_slots.push_back(declaration.slot);
+				result.resources.push_back({
+					.name = declaration.name,
+					.kind = shader_resource_kind::storage_buffer,
+					.slot = declaration.slot
+				});
+			}
+			for (const auto& declaration : textures)
+			{
+				const auto matching_sampler = std::find_if(
+					samplers.begin(),
+					samplers.end(),
+					[&](const resource_declaration& sampler) {
+						return sampler.slot == declaration.slot;
+					});
+				const bool sampled = matching_sampler != samplers.end();
+				auto& slots = sampled ? sampled_texture_slots : storage_texture_slots;
+				slots.push_back(declaration.slot);
+				result.resources.push_back({
+					.name = declaration.name,
+					.kind = sampled
+						? shader_resource_kind::sampled_texture
+						: shader_resource_kind::storage_texture,
+					.slot = declaration.slot
+				});
+			}
+			for (const auto& declaration : samplers)
+			{
+				if (std::none_of(
+					textures.begin(),
+					textures.end(),
+					[&](const resource_declaration& texture) {
+						return texture.slot == declaration.slot;
+					}))
+				{
+					throw std::invalid_argument(
+						"Each MNGL SamplerState must pair with a Texture2D at the same register index");
+				}
+				sampler_slots.push_back(declaration.slot);
+			}
+
+			result.resource_counts.samplers =
+				contiguous_slot_count(std::move(sampled_texture_slots), "sampled texture");
+			if (contiguous_slot_count(std::move(sampler_slots), "sampler") !=
+				result.resource_counts.samplers)
+			{
+				throw std::invalid_argument("MNGL sampled textures and samplers must use matching register indices");
+			}
+			result.resource_counts.storage_textures =
+				contiguous_slot_count(std::move(storage_texture_slots), "storage texture");
+			result.resource_counts.storage_buffers =
+				contiguous_slot_count(std::move(storage_buffer_slots), "storage buffer");
+			return result;
 		}
 
 		static std::filesystem::path argument(std::string_view value)

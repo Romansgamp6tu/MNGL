@@ -9,6 +9,7 @@
 #include <functional>
 #include <concepts>
 #include <glm/glm.hpp>
+#include <new>
 
 namespace mngl
 {
@@ -755,9 +756,78 @@ namespace mngl
             }
         }
 
+        static std::vector<SDL_Event> take_imgui_input_events()
+        {
+            std::lock_guard lock(imgui_input_events_mutex);
+            std::vector<SDL_Event> events;
+            events.swap(imgui_input_events);
+            return events;
+        }
+
+        static void set_imgui_input_enabled(bool enabled)
+        {
+            std::lock_guard lock(imgui_input_events_mutex);
+            imgui_input_enabled.store(enabled, std::memory_order_relaxed);
+            if (!enabled)
+            {
+                imgui_input_events.clear();
+            }
+        }
+
     private:
         // SDL event watches may run on posting threads; serialize callbacks while allowing nested emits.
         static inline std::recursive_mutex dispatch_mutex;
+        static inline std::mutex imgui_input_events_mutex;
+        static inline std::vector<SDL_Event> imgui_input_events;
+        static inline std::atomic_bool imgui_input_enabled = false;
+
+        static bool is_imgui_input_event(Uint32 type) noexcept
+        {
+            switch (type)
+            {
+            case SDL_EVENT_MOUSE_MOTION:
+            case SDL_EVENT_MOUSE_WHEEL:
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            case SDL_EVENT_MOUSE_BUTTON_UP:
+            case SDL_EVENT_TEXT_INPUT:
+            case SDL_EVENT_KEY_DOWN:
+            case SDL_EVENT_KEY_UP:
+            case SDL_EVENT_WINDOW_MOUSE_ENTER:
+            case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+            case SDL_EVENT_WINDOW_FOCUS_GAINED:
+            case SDL_EVENT_WINDOW_FOCUS_LOST:
+            case SDL_EVENT_GAMEPAD_ADDED:
+            case SDL_EVENT_GAMEPAD_REMOVED:
+                return true;
+            default:
+                return false;
+            }
+        }
+
+        static void queue_imgui_input_event(const SDL_Event& event)
+        {
+            if (!imgui_input_enabled.load(std::memory_order_relaxed) ||
+                !is_imgui_input_event(event.type))
+            {
+                return;
+            }
+
+            try
+            {
+                std::lock_guard lock(imgui_input_events_mutex);
+                if (!imgui_input_enabled.load(std::memory_order_relaxed))
+                {
+                    return;
+                }
+                imgui_input_events.push_back(event);
+            }
+            catch (const std::bad_alloc&)
+            {
+                SDL_LogError(
+                    SDL_LOG_CATEGORY_APPLICATION,
+                    "Unable to queue an SDL input event for Dear ImGui.");
+            }
+        }
 
         event_manager()
         {
@@ -772,6 +842,7 @@ namespace mngl
         static bool SDLCALL sdlEventWatcher(void* userData, SDL_Event* event)
         {
             auto* manager = static_cast<event_manager*>(userData);
+            queue_imgui_input_event(*event);
             manager->dispatchEvent(*event);
             return true;
         }

@@ -3,11 +3,12 @@
 #include "utilities.hpp"
 #include "color.hpp"
 #include "command_buffer.hpp"
+#include "gpu_buffer.hpp"
 #include "gpu_texture.hpp"
 #include "graphics_pipeline.hpp"
 
+#include <array>
 #include <span>
-#include <vector>
 #include <stdexcept>
 
 namespace mngl::gpu
@@ -75,8 +76,8 @@ namespace mngl::gpu
 				throw std::invalid_argument("Render pass supports at most four color targets");
 			}
 
-			std::vector<SDL_GPUColorTargetInfo> sdl_color_targets;
-			sdl_color_targets.reserve(color_targets.size());
+			std::array<SDL_GPUColorTargetInfo, 4> sdl_color_targets{};
+			uint32_t color_target_count = 0;
 
 			for (const auto& attachment : color_targets)
 			{
@@ -91,7 +92,7 @@ namespace mngl::gpu
 				info.load_op = static_cast<SDL_GPULoadOp>(attachment.load);
 				info.store_op = static_cast<SDL_GPUStoreOp>(attachment.store);
 
-				sdl_color_targets.push_back(info);
+				sdl_color_targets[color_target_count++] = info;
 			}
 
 			SDL_GPUDepthStencilTargetInfo sdl_depth_info{};
@@ -116,12 +117,8 @@ namespace mngl::gpu
 				depth_ptr = &sdl_depth_info;
 			}
 
-			handle = SDL_BeginGPURenderPass(
-				cmd.raw(),
-				sdl_color_targets.data(),
-				static_cast<uint32_t>(sdl_color_targets.size()),
-				depth_ptr
-			);
+			const auto* color_target_data = color_target_count ? sdl_color_targets.data() : nullptr;
+			handle = SDL_BeginGPURenderPass(cmd.raw(), color_target_data, color_target_count, depth_ptr);
 
 			if (!handle)
 			{
@@ -221,6 +218,25 @@ namespace mngl::gpu
 		{
 			const SDL_GPUBufferBinding binding{.buffer = buffer, .offset = offset};
 			SDL_BindGPUVertexBuffers(handle, slot, &binding, 1);
+		}
+
+		void bind_vertex_buffer(uint32_t slot, const buffer& buffer, uint32_t offset = 0) const
+		{
+			if (!buffer.valid() || buffer.usage() != buffer_usage::vertex)
+			{
+				throw std::invalid_argument("Vertex binding requires a valid vertex-usage GPU buffer");
+			}
+			bind_vertex_buffer(slot, buffer.raw(), offset);
+		}
+
+		template<typename T>
+		void bind_vertex_buffer(
+			uint32_t slot,
+			const vertex_buffer<T>& buffer,
+			uint32_t offset = 0
+		) const
+		{
+			bind_vertex_buffer(slot, buffer.gpu_buffer(), offset);
 		}
 
 		// Связывание индексного буфера (16-bit или 32-bit)

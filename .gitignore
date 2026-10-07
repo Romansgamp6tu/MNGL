@@ -9,6 +9,7 @@
 *.user
 *.userosscache
 *.sln.docstates
+MNGL_imgui.ini
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
@@ -362,3 +363,6 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Generated documentation site
+site/

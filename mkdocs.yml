@@ -1,0 +1,35 @@
+site_name: MNGL
+site_description: Руководство по библиотеке MNGL
+docs_dir: docs
+site_dir: site
+use_directory_urls: true
+strict: true
+
+theme:
+  name: mkdocs
+
+nav:
+  - Главная: index.md
+  - Сборка: getting-started/building.md
+  - 2D:
+      - Обзор: 2d/index.md
+      - Быстрый старт: 2d/quick-start.md
+      - Рендер в текстуру: 2d/render-to-texture.md
+      - Координаты и view: 2d/coordinates-and-view.md
+      - Трансформации: 2d/transforms.md
+      - Hit testing: 2d/hit-testing.md
+      - Расширенный рендеринг: 2d/advanced-rendering.md
+  - Основы:
+      - Обзор: core/index.md
+      - Окна и ввод: core/windows-and-input.md
+      - События: core/events.md
+      - Поверхности и цвета: core/media-and-colors.md
+      - Геометрия: core/geometry.md
+      - Runtime и утилиты: core/runtime-and-utilities.md
+  - GPU:
+      - Обзор: gpu/index.md
+      - Устройство и команды: gpu/device-and-commands.md
+      - GPU-ресурсы: gpu/resources.md
+      - Шейдеры: gpu/shaders.md
+      - Pipeline и render pass: gpu/pipelines-and-passes.md
+  - Справочник по модулям: reference/index.md
