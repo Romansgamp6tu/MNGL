@@ -40,3 +40,4 @@ window.display();
 - [Координаты и view](coordinates-and-view.md)
 - [Трансформации](transforms.md)
 - [Попадания и локальные координаты мыши](hit-testing.md)
+- [Рендер текста и большие документы](text-rendering.md)

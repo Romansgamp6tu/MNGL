@@ -143,6 +143,9 @@
     <ClInclude Include="renderer2d.hpp">
       <Filter>Файлы заголовков\2d</Filter>
     </ClInclude>
+    <ClInclude Include="text.hpp">
+      <Filter>Файлы заголовков\2d</Filter>
+    </ClInclude>
     <ClInclude Include="render_window.hpp">
       <Filter>Файлы заголовков\window</Filter>
     </ClInclude>

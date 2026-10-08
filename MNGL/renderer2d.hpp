@@ -2,6 +2,7 @@
 
 #include "batcher2d.hpp"
 #include "hit_test.hpp"
+#include "text.hpp"
 #include "view.hpp"
 
 #include <algorithm>
@@ -362,6 +363,17 @@ namespace mngl::two_d
 			const color& tint = color(1.0f, 1.0f, 1.0f, 1.0f),
 			const gpu::quad_draw_state& state = {}
 		);
+		// The font must outlive submission of the command buffer that records this frame.
+		void draw_text(
+			font& typeface,
+			std::string_view text,
+			glm::vec2 top_left,
+			const text_draw_options& options = {});
+		void draw_text(
+			font& typeface,
+			const text_document& document,
+			glm::vec2 top_left,
+			const text_draw_options& options);
 		template<typename DrawFunction>
 			requires std::invocable<DrawFunction, Frame2D&>
 		void draw(DrawFunction&& draw_function)
@@ -510,6 +522,7 @@ namespace mngl::two_d
 			m_batcher.begin_frame(clear_color);
 			m_active_target = target;
 			m_hit_test_items.clear();
+			m_used_fonts.clear();
 			if (++m_next_frame_token == 0)
 			{
 				++m_next_frame_token;
@@ -947,9 +960,391 @@ namespace mngl::two_d
 			});
 		}
 
+		void remember_font(font& typeface)
+		{
+			if (typeface.device_raw() != m_device.raw())
+			{
+				throw std::invalid_argument("Font and 2D renderer must use the same GPU device");
+			}
+			if (std::find(m_used_fonts.begin(), m_used_fonts.end(), &typeface) == m_used_fonts.end())
+			{
+				m_used_fonts.push_back(&typeface);
+			}
+		}
+
+		static void validate_text_options(
+			glm::vec2 top_left,
+			const text_draw_options& options
+		)
+		{
+			if (!::mngl::detail::finite(top_left) ||
+				!std::isfinite(options.height) ||
+				options.height <= 0.0f)
+			{
+				throw std::invalid_argument(
+					"Text position must be finite and text height must be finite and positive");
+			}
+
+			const glm::vec4 tint = options.tint.rgba_glsl();
+			if (!std::isfinite(tint.x) || !std::isfinite(tint.y) ||
+				!std::isfinite(tint.z) || !std::isfinite(tint.w))
+			{
+				throw std::invalid_argument("Text tint channels must be finite");
+			}
+
+			if (options.clip_bounds)
+			{
+				const auto& clip = *options.clip_bounds;
+				if (!::mngl::detail::finite(clip.pos) ||
+					!::mngl::detail::finite(clip.size) ||
+					clip.size.x < 0.0f || clip.size.y < 0.0f ||
+					!std::isfinite(clip.pos.x + clip.size.x) ||
+					!std::isfinite(clip.pos.y + clip.size.y))
+				{
+					throw std::invalid_argument(
+						"Text clip bounds must be finite with non-negative dimensions");
+				}
+			}
+
+			if (options.scissor && (options.scissor->w < 0 || options.scissor->h < 0))
+			{
+				throw std::invalid_argument("Text scissor dimensions must be non-negative");
+			}
+		}
+
+		[[nodiscard]] float submit_text_line(
+			font& typeface,
+			std::string_view text,
+			glm::vec2 baseline,
+			float scale,
+			const text_draw_options& options
+		)
+		{
+			if (!::mngl::detail::finite(baseline))
+			{
+				throw std::length_error("Text line exceeds the renderer's coordinate range");
+			}
+
+			float pen_x = baseline.x;
+			uint32_t previous_codepoint = 0;
+			const auto space = typeface.glyph(' ', false);
+			const float tab_width = space.advance * scale * 4.0f;
+			gpu::quad_draw_state state{};
+			state.scissor = options.scissor;
+			const bool scissor_empty =
+				options.scissor && (options.scissor->w == 0 || options.scissor->h == 0);
+
+			for (std::size_t offset = 0; offset < text.size();)
+			{
+				uint32_t codepoint = 0;
+				(void)::mngl::two_d::detail::next_utf8_codepoint(
+					text,
+					offset,
+					codepoint);
+				if (codepoint == '\t')
+				{
+					if (tab_width > 0.0f)
+					{
+						const float relative_x = pen_x - baseline.x;
+						pen_x = baseline.x +
+							(std::floor(relative_x / tab_width) + 1.0f) * tab_width;
+					}
+					if (!std::isfinite(pen_x))
+					{
+						throw std::length_error(
+							"Text line exceeds the renderer's coordinate range");
+					}
+					previous_codepoint = 0;
+					continue;
+				}
+
+				const auto metrics = typeface.glyph(codepoint, false);
+				if (previous_codepoint != 0)
+				{
+					pen_x += typeface.kerning(
+						previous_codepoint,
+						metrics.codepoint) * scale;
+				}
+				if (!std::isfinite(pen_x))
+				{
+					throw std::length_error("Text line exceeds the renderer's coordinate range");
+				}
+
+				if (metrics.width > 0 && metrics.height > 0)
+				{
+					const rectangle glyph_bounds{
+						pen_x + static_cast<float>(metrics.x_offset) * scale,
+						baseline.y -
+							(static_cast<float>(metrics.y_offset) +
+								static_cast<float>(metrics.height)) * scale,
+						static_cast<float>(metrics.width) * scale,
+						static_cast<float>(metrics.height) * scale
+					};
+					if (!::mngl::detail::finite(glyph_bounds.pos) ||
+						!::mngl::detail::finite(glyph_bounds.size) ||
+						!std::isfinite(glyph_bounds.pos.x + glyph_bounds.size.x) ||
+						!std::isfinite(glyph_bounds.pos.y + glyph_bounds.size.y))
+					{
+						throw std::length_error(
+							"Text glyph exceeds the renderer's coordinate range");
+					}
+					const bool in_clip = !options.clip_bounds ||
+						glyph_bounds.intersects(*options.clip_bounds);
+					if (!scissor_empty && in_clip)
+					{
+						const auto glyph = typeface.glyph(codepoint, true);
+						if (!glyph.atlas_page)
+						{
+							throw std::logic_error("Rasterized text glyph has no atlas page");
+						}
+
+						gpu::quad_transform transform{};
+						transform.destination = glyph_bounds;
+						m_batcher.draw_quad(
+							gpu::texture_region_view{
+								&glyph.atlas_page->raw_gpu_texture(),
+								glyph.uv_bounds
+							},
+							transform,
+							options.tint,
+							state);
+					}
+				}
+
+				pen_x += metrics.advance * scale;
+				if (!std::isfinite(pen_x))
+				{
+					throw std::length_error("Text line exceeds the renderer's coordinate range");
+				}
+				previous_codepoint = metrics.codepoint;
+			}
+
+			const float width = pen_x - baseline.x;
+			if (!std::isfinite(width))
+			{
+				throw std::length_error("Text line exceeds the renderer's coordinate range");
+			}
+			return width;
+		}
+
+		void record_text_hit(
+			const rectangle& bounds,
+			const text_draw_options& options
+		)
+		{
+			if (bounds.size.x <= 0.0f || bounds.size.y <= 0.0f)
+			{
+				return;
+			}
+
+			gpu::quad_transform transform{};
+			transform.destination = bounds;
+			gpu::quad_draw_state state{};
+			state.scissor = options.scissor;
+			record_hit_item(
+				transform,
+				glm::vec4(0.0f, 0.0f, 1.0f, 1.0f),
+				nullptr,
+				state,
+				::mngl::detail::hit_test_shape::quad,
+				0.0f,
+				{});
+		}
+
+		void submit_text(
+			uint64_t token,
+			font& typeface,
+			std::string_view text,
+			glm::vec2 top_left,
+			const text_draw_options& options
+		)
+		{
+			ensure_frame(token);
+			validate_text_options(top_left, options);
+			if (text.empty() ||
+				(options.clip_bounds &&
+					(options.clip_bounds->size.x == 0.0f ||
+						options.clip_bounds->size.y == 0.0f)) ||
+				(options.scissor &&
+					(options.scissor->w == 0 || options.scissor->h == 0)))
+			{
+				return;
+			}
+
+			remember_font(typeface);
+			const float scale = options.height / typeface.raster_height_pixels();
+			const float line_height = typeface.line_height() * scale;
+			const float ascent = typeface.ascent() * scale;
+			if (!std::isfinite(scale) || scale <= 0.0f ||
+				!std::isfinite(line_height) || line_height <= 0.0f ||
+				!std::isfinite(ascent))
+			{
+				throw std::invalid_argument("Font metrics cannot be scaled to the requested text height");
+			}
+
+			std::size_t line_index = 0;
+			std::size_t line_begin = 0;
+			float max_width = 0.0f;
+			while (line_begin <= text.size())
+			{
+				const std::size_t line_end = text.find('\n', line_begin);
+				std::string_view line_text = text.substr(
+					line_begin,
+					line_end == std::string_view::npos
+						? line_end
+						: line_end - line_begin);
+				if (!line_text.empty() && line_text.back() == '\r')
+				{
+					line_text.remove_suffix(1);
+				}
+
+				const float top = top_left.y -
+					static_cast<float>(line_index) * line_height;
+				if (!std::isfinite(top))
+				{
+					throw std::length_error("Text block exceeds the renderer's coordinate range");
+				}
+				const bool line_visible = !options.clip_bounds ||
+					(top > options.clip_bounds->pos.y &&
+						top - line_height <
+							options.clip_bounds->pos.y + options.clip_bounds->size.y);
+				if (line_visible)
+				{
+					const float width = submit_text_line(
+						typeface,
+						line_text,
+						{ top_left.x, top - ascent },
+						scale,
+						options);
+					max_width = std::max(max_width, width);
+				}
+				++line_index;
+				if (line_end == std::string_view::npos)
+				{
+					break;
+				}
+				line_begin = line_end + 1;
+			}
+
+			const float block_height = static_cast<float>(line_index) * line_height;
+			rectangle bounds{
+				top_left.x,
+				top_left.y - block_height,
+				max_width,
+				block_height
+			};
+			if (!::mngl::detail::finite(bounds.pos) ||
+				!::mngl::detail::finite(bounds.size) ||
+				!std::isfinite(bounds.pos.x + bounds.size.x) ||
+				!std::isfinite(bounds.pos.y + bounds.size.y))
+			{
+				throw std::length_error("Text block exceeds the renderer's coordinate range");
+			}
+			if (options.clip_bounds)
+			{
+				bounds = bounds.intersection(*options.clip_bounds);
+			}
+			record_text_hit(bounds, options);
+		}
+
+		void submit_text_document(
+			uint64_t token,
+			font& typeface,
+			const text_document& document,
+			glm::vec2 top_left,
+			const text_draw_options& options
+		)
+		{
+			ensure_frame(token);
+			validate_text_options(top_left, options);
+			if (!options.clip_bounds)
+			{
+				throw std::invalid_argument(
+					"Drawing a text document requires clip_bounds for line virtualization");
+			}
+			const auto& viewport = *options.clip_bounds;
+			if (viewport.size.x == 0.0f || viewport.size.y == 0.0f ||
+				document.line_count() == 0 ||
+				(options.scissor &&
+					(options.scissor->w == 0 || options.scissor->h == 0)))
+			{
+				return;
+			}
+
+			remember_font(typeface);
+			const float scale = options.height / typeface.raster_height_pixels();
+			const float line_height = typeface.line_height() * scale;
+			const float ascent = typeface.ascent() * scale;
+			if (!std::isfinite(scale) || scale <= 0.0f ||
+				!std::isfinite(line_height) || line_height <= 0.0f ||
+				!std::isfinite(ascent))
+			{
+				throw std::invalid_argument("Font metrics cannot be scaled to the requested text height");
+			}
+
+			const double first_offset =
+				(static_cast<double>(top_left.y) -
+					(static_cast<double>(viewport.pos.y) + viewport.size.y)) /
+				line_height;
+			const double end_offset =
+				(static_cast<double>(top_left.y) - viewport.pos.y) / line_height;
+			const std::size_t first_line = first_offset <= 0.0
+				? 0
+				: static_cast<std::size_t>(std::min(
+					std::floor(first_offset),
+					static_cast<double>(document.line_count())));
+			const std::size_t end_line = end_offset <= 0.0
+				? 0
+				: static_cast<std::size_t>(std::min(
+					std::ceil(end_offset),
+					static_cast<double>(document.line_count())));
+			if (first_line >= end_line)
+			{
+				return;
+			}
+
+			float max_width = 0.0f;
+			for (std::size_t index = first_line; index < end_line; ++index)
+			{
+				const float line_top = top_left.y -
+					static_cast<float>(index) * line_height;
+				if (!std::isfinite(line_top))
+				{
+					throw std::length_error("Text document exceeds the renderer's coordinate range");
+				}
+				max_width = std::max(
+					max_width,
+					submit_text_line(
+						typeface,
+						document.line(index),
+						{ top_left.x, line_top - ascent },
+						scale,
+						options));
+			}
+
+			const float block_height =
+				static_cast<float>(end_line - first_line) * line_height;
+			rectangle bounds{
+				top_left.x,
+				top_left.y - static_cast<float>(end_line) * line_height,
+				max_width,
+				block_height
+			};
+			if (!::mngl::detail::finite(bounds.pos) ||
+				!::mngl::detail::finite(bounds.size) ||
+				!std::isfinite(bounds.pos.x + bounds.size.x) ||
+				!std::isfinite(bounds.pos.y + bounds.size.y))
+			{
+				throw std::length_error("Text document exceeds the renderer's coordinate range");
+			}
+			bounds = bounds.intersection(viewport);
+			record_text_hit(bounds, options);
+		}
+
 		void finish_frame(Frame2D& frame, gpu::command_buffer* external_command_buffer = nullptr)
 		{
 			ensure_frame(frame.m_token);
+			bool font_uploads_started = false;
 			try
 			{
 				std::shared_ptr<::mngl::detail::hit_test_frame> hit_frame;
@@ -975,6 +1370,16 @@ namespace mngl::two_d
 					if (!cmd.valid() || cmd.device_raw() != m_device.raw())
 					{
 						throw std::invalid_argument("2D frame command buffer must belong to the renderer's GPU device");
+					}
+
+					font_uploads_started = true;
+					for (font* typeface : m_used_fonts)
+					{
+						if (!typeface)
+						{
+							throw std::logic_error("2D frame contains a null font reference");
+						}
+						typeface->upload_pending(cmd);
 					}
 
 					auto flush_target = [&](gpu::texture& target)
@@ -1018,11 +1423,22 @@ namespace mngl::two_d
 			}
 			catch (...)
 			{
+				if (font_uploads_started)
+				{
+					for (font* typeface : m_used_fonts)
+					{
+						if (typeface)
+						{
+							typeface->mark_uploads_dirty();
+						}
+					}
+				}
 				m_batcher.cancel_frame();
 				m_frame_active = false;
 				m_active_frame_token = 0;
 				m_active_target = nullptr;
 				m_hit_test_items.clear();
+				m_used_fonts.clear();
 				frame.detach();
 				throw;
 			}
@@ -1031,6 +1447,7 @@ namespace mngl::two_d
 			m_active_frame_token = 0;
 			m_active_target = nullptr;
 			m_hit_test_items.clear();
+			m_used_fonts.clear();
 			frame.detach();
 		}
 
@@ -1043,6 +1460,7 @@ namespace mngl::two_d
 				m_active_frame_token = 0;
 				m_active_target = nullptr;
 				m_hit_test_items.clear();
+				m_used_fonts.clear();
 			}
 		}
 
@@ -1097,6 +1515,7 @@ namespace mngl::two_d
 		std::shared_ptr<detail::renderer_frame_control> m_frame_control;
 		::mngl::texture* m_active_target = nullptr;
 		std::vector<::mngl::detail::hit_test_item> m_hit_test_items;
+		std::vector<font*> m_used_fonts;
 		bool m_custom_materials_allowed = false;
 		uint64_t m_next_frame_token = 0;
 		uint64_t m_active_frame_token = 0;
@@ -1451,6 +1870,31 @@ namespace mngl::two_d
 	{
 		ensure_active();
 		m_control->owner->submit_rounded_rectangle(m_token, value);
+	}
+
+	inline void Frame2D::draw_text(
+		font& typeface,
+		std::string_view text,
+		glm::vec2 top_left,
+		const text_draw_options& options)
+	{
+		ensure_active();
+		m_control->owner->submit_text(m_token, typeface, text, top_left, options);
+	}
+
+	inline void Frame2D::draw_text(
+		font& typeface,
+		const text_document& document,
+		glm::vec2 top_left,
+		const text_draw_options& options)
+	{
+		ensure_active();
+		m_control->owner->submit_text_document(
+			m_token,
+			typeface,
+			document,
+			top_left,
+			options);
 	}
 
 	inline void Frame2D::draw(const ::mngl::rectangle& bounds, const color& tint)
