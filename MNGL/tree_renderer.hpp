@@ -120,6 +120,7 @@ namespace mngl::two_d
 		color leaf_link_color{ 0.29f, 0.82f, 0.75f, 1.0f };
 		const tree_draw_visibility* visibility = nullptr;
 		std::span<const std::size_t> highlighted_nodes{};
+		bool show_node_text = true;
 	};
 
 	using binary_tree_draw_options = tree_draw_options;
@@ -2303,22 +2304,27 @@ namespace mngl::two_d
 				}
 			}
 
-			const float raster_height = value_font.raster_height_pixels();
-			const float line_height = value_font.line_height();
-			if (!std::isfinite(raster_height) ||
-				raster_height <= 0.0f ||
-				!std::isfinite(line_height) ||
-				line_height <= 0.0f)
+			float line_height_factor = 0.0f;
+			if (options.show_node_text)
 			{
-				throw std::logic_error(
-					"Tree drawing requires a valid font");
-			}
-			const float line_height_factor = line_height / raster_height;
-			if (!std::isfinite(line_height_factor) ||
-				line_height_factor <= 0.0f)
-			{
-				throw std::logic_error(
-					"Tree drawing font metrics cannot be scaled");
+				const float raster_height =
+					value_font.raster_height_pixels();
+				const float line_height = value_font.line_height();
+				if (!std::isfinite(raster_height) ||
+					raster_height <= 0.0f ||
+					!std::isfinite(line_height) ||
+					line_height <= 0.0f)
+				{
+					throw std::logic_error(
+						"Tree drawing requires a valid font");
+				}
+				line_height_factor = line_height / raster_height;
+				if (!std::isfinite(line_height_factor) ||
+					line_height_factor <= 0.0f)
+				{
+					throw std::logic_error(
+						"Tree drawing font metrics cannot be scaled");
+				}
 			}
 			const auto draw_node = [&](std::size_t index)
 			{
@@ -2403,6 +2409,11 @@ namespace mngl::two_d
 							transform{});
 					}
 					cell_left += layout_node.cell_widths[i];
+				}
+
+				if (!options.show_node_text)
+				{
+					return;
 				}
 
 				const float vertical_padding =

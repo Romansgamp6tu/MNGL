@@ -175,6 +175,39 @@ namespace tree_practicum
 			bool showing_animation = false;
 		};
 
+		struct tree_canvas_view_state
+		{
+			std::optional<mngl::texture> texture;
+			int tree_index = -1;
+			float zoom = 1.0f;
+			ImVec2 pan{};
+			bool view_initialized = false;
+			bool fit_requested = true;
+		};
+
+		struct tree_comparison_pane
+		{
+			std::string archive_member_path;
+			std::optional<visual_tree> tree;
+			std::size_t tree_index = 0;
+			tree_canvas_view_state canvas;
+		};
+
+		struct tree_preview_cache_state
+		{
+			std::shared_ptr<const tree_preview_geometry> geometry;
+			std::shared_ptr<const tree_preview_geometry>
+				visibility_geometry;
+			std::shared_ptr<const mngl::two_d::tree_draw_visibility>
+				visibility;
+			mngl::rectangle visibility_bounds{};
+			std::shared_ptr<const tree_preview_geometry>
+				visibility_request_geometry;
+			std::uint64_t visibility_request_id = 0;
+			mngl::rectangle visibility_request_bounds{};
+			mngl::two_d::tree_draw_culler culler;
+		};
+
 		struct tree_visual_event
 		{
 			enum class kind
@@ -1553,6 +1586,7 @@ namespace tree_practicum
 		void restore_tree_history_state(
 			const tree_history_snapshot& state)
 		{
+			sync_comparison_pane_with_active_tree(true);
 			cancel_tree_animation();
 			clear_tree_find_result();
 			if (state.archive_entry_delta)
@@ -2970,6 +3004,7 @@ namespace tree_practicum
 
 		void create_new_tree()
 		{
+			sync_comparison_pane_with_active_tree(true);
 			if (m_active_tree < 0 ||
 				static_cast<std::size_t>(m_active_tree) >=
 					tree_file_stems.size())
@@ -3182,6 +3217,7 @@ namespace tree_practicum
 		void reset_workspace()
 		{
 			cancel_tree_animation();
+			reset_tree_comparison();
 			invalidate_tree_preview_cache();
 			clear_tree_find_result();
 			reset_history();
@@ -3269,6 +3305,7 @@ namespace tree_practicum
 			reset_history();
 			m_key_input_edit_start.reset();
 			m_random_count_edit_start.reset();
+			reset_tree_comparison();
 			m_session_entries = std::move(entries);
 			m_session_path = path;
 			m_session_name = manifest.name.empty()
@@ -3520,6 +3557,477 @@ namespace tree_practicum
 		{
 			return can_insert_into_selected_search_tree() &&
 				selected_merge_source() != nullptr;
+		}
+
+		void draw_workspace_tree_selector()
+		{
+			const char* preview = m_current_archive_member_path.empty()
+				? "Нет открытого дерева"
+				: m_current_archive_member_path.c_str();
+			ImGui::SetNextItemWidth(320.0f);
+			if (!ImGui::BeginCombo("Дерево рабочей области", preview))
+			{
+				return;
+			}
+
+			bool found_tree = false;
+			for (std::size_t i = 0; i < m_session_entries.size(); ++i)
+			{
+				const auto& entry = m_session_entries[i];
+				if (archive_extension(entry.path) != ".tree")
+				{
+					continue;
+				}
+
+				found_tree = true;
+				const bool selected =
+					entry.path == m_current_archive_member_path;
+				ImGui::PushID(entry.path.c_str());
+				const bool clicked = ImGui::Selectable(
+					entry.path.c_str(),
+					selected);
+				ImGui::PopID();
+
+				if (selected)
+				{
+					ImGui::SetItemDefaultFocus();
+				}
+				if (clicked &&
+					!selected &&
+					perform_io([&]
+					{
+						open_archive_entry(i);
+					}))
+				{
+					m_selected_archive_entry =
+						i <= static_cast<std::size_t>(
+							std::numeric_limits<int>::max())
+						? static_cast<int>(i)
+						: -1;
+					m_selected_local_path.reset();
+				}
+			}
+			if (!found_tree)
+			{
+				ImGui::TextDisabled(
+					"В рабочей области пока нет деревьев.");
+			}
+			ImGui::EndCombo();
+		}
+
+		[[nodiscard]] std::size_t workspace_tree_count() const
+		{
+			return static_cast<std::size_t>(std::count_if(
+				m_session_entries.begin(),
+				m_session_entries.end(),
+				[](const auto& entry)
+				{
+					return archive_extension(entry.path) == ".tree";
+				}));
+		}
+
+		void select_archive_entry_in_explorer(std::string_view path)
+		{
+			for (std::size_t i = 0; i < m_session_entries.size(); ++i)
+			{
+				if (m_session_entries[i].path != path)
+				{
+					continue;
+				}
+				m_selected_archive_entry =
+					i <= static_cast<std::size_t>(
+						std::numeric_limits<int>::max())
+					? static_cast<int>(i)
+					: -1;
+				m_selected_local_path.reset();
+				return;
+			}
+		}
+
+		void reset_tree_comparison()
+		{
+			m_tree_comparison_mode = false;
+			m_active_comparison_pane = 0;
+			for (auto& pane : m_tree_comparison_panes)
+			{
+				pane.archive_member_path.clear();
+				pane.tree.reset();
+				pane.tree_index = 0;
+				pane.canvas.tree_index = -1;
+				pane.canvas.zoom = 1.0f;
+				pane.canvas.pan = {};
+				pane.canvas.view_initialized = false;
+				pane.canvas.fit_requested = true;
+			}
+		}
+
+		void sync_comparison_pane_with_active_tree(
+			bool snapshot_active_tree = false)
+		{
+			if (!m_tree_comparison_mode ||
+				m_current_archive_member_path.empty())
+			{
+				return;
+			}
+
+			for (std::size_t i = 0;
+				i < m_tree_comparison_panes.size();
+				++i)
+			{
+				auto& pane = m_tree_comparison_panes[i];
+				if (pane.archive_member_path !=
+					m_current_archive_member_path)
+				{
+					continue;
+				}
+
+				m_active_comparison_pane = static_cast<int>(i);
+				if (m_selected_archive_entry < 0 ||
+					static_cast<std::size_t>(
+						m_selected_archive_entry) >=
+						m_session_entries.size() ||
+					m_session_entries[
+						static_cast<std::size_t>(
+							m_selected_archive_entry)].path !=
+						m_current_archive_member_path)
+				{
+					select_archive_entry_in_explorer(
+						m_current_archive_member_path);
+				}
+				if (snapshot_active_tree && m_loaded_visual_tree)
+				{
+					pane.tree = *m_loaded_visual_tree;
+					pane.tree_index =
+						static_cast<std::size_t>(m_active_tree);
+				}
+				return;
+			}
+
+			if (!m_loaded_visual_tree)
+			{
+				return;
+			}
+
+			auto& pane = m_tree_comparison_panes[
+				static_cast<std::size_t>(std::clamp(
+					m_active_comparison_pane,
+					0,
+					static_cast<int>(
+						m_tree_comparison_panes.size() - 1)))];
+			pane.archive_member_path = m_current_archive_member_path;
+			pane.tree = *m_loaded_visual_tree;
+			pane.tree_index = static_cast<std::size_t>(m_active_tree);
+			pane.canvas.tree_index = -1;
+			pane.canvas.view_initialized = false;
+			pane.canvas.fit_requested = true;
+			select_archive_entry_in_explorer(
+				m_current_archive_member_path);
+			invalidate_tree_preview_cache();
+		}
+
+		void begin_tree_comparison()
+		{
+			const tree_practicum::archive_entry* primary = nullptr;
+			for (const auto& entry : m_session_entries)
+			{
+				if (entry.path == m_current_archive_member_path &&
+					archive_extension(entry.path) == ".tree")
+				{
+					primary = std::addressof(entry);
+					break;
+				}
+			}
+			if (!primary)
+			{
+				const auto found = std::find_if(
+					m_session_entries.begin(),
+					m_session_entries.end(),
+					[](const auto& entry)
+					{
+						return archive_extension(entry.path) == ".tree";
+					});
+				if (found != m_session_entries.end())
+				{
+					primary = std::addressof(*found);
+				}
+			}
+
+			if (!primary)
+			{
+				throw std::logic_error(
+					"Добавьте два дерева .tree в рабочую область для сравнения.");
+			}
+
+			const auto secondary = std::find_if(
+				m_session_entries.begin(),
+				m_session_entries.end(),
+				[&](const auto& entry)
+				{
+					return archive_extension(entry.path) == ".tree" &&
+						entry.path != primary->path;
+				});
+			if (secondary == m_session_entries.end())
+			{
+				throw std::logic_error(
+					"Добавьте второе дерево .tree в рабочую область для сравнения.");
+			}
+
+			std::size_t primary_tree_index = 0;
+			auto primary_tree = parse_tree_serialization(
+				primary->contents,
+				primary_tree_index);
+			std::size_t secondary_tree_index = 0;
+			auto secondary_tree = parse_tree_serialization(
+				secondary->contents,
+				secondary_tree_index);
+			if (primary_tree_index >= tree_names.size() ||
+				secondary_tree_index >= tree_names.size())
+			{
+				throw std::logic_error(
+					"У рабочего дерева неизвестный тип.");
+			}
+
+			const std::string primary_path = primary->path;
+			const std::string secondary_path = secondary->path;
+			if (m_current_archive_member_path != primary_path)
+			{
+				open_archive_tree(*primary);
+			}
+
+			reset_tree_comparison();
+			auto& primary_pane = m_tree_comparison_panes[0];
+			primary_pane.archive_member_path = primary_path;
+			primary_pane.tree = std::move(primary_tree);
+			primary_pane.tree_index = primary_tree_index;
+			primary_pane.canvas.fit_requested = true;
+
+			auto& secondary_pane = m_tree_comparison_panes[1];
+			secondary_pane.archive_member_path = secondary_path;
+			secondary_pane.tree = std::move(secondary_tree);
+			secondary_pane.tree_index = secondary_tree_index;
+			secondary_pane.canvas.fit_requested = true;
+
+			m_tree_comparison_mode = true;
+			m_active_comparison_pane = 0;
+			select_archive_entry_in_explorer(primary_path);
+			invalidate_tree_preview_cache();
+		}
+
+		void select_comparison_tree(
+			std::size_t pane_index,
+			std::string_view archive_path)
+		{
+			if (pane_index >= m_tree_comparison_panes.size())
+			{
+				throw std::out_of_range(
+					"Индекс панели дерева вне диапазона.");
+			}
+			const auto* entry = find_archive_entry(
+				m_session_entries,
+				archive_path);
+			if (!entry || archive_extension(entry->path) != ".tree")
+			{
+				throw std::invalid_argument(
+					"Выбранная запись дерева больше недоступна.");
+			}
+
+			const std::string selected_path = entry->path;
+			const std::size_t other_pane_index = 1 - pane_index;
+			if (m_tree_comparison_panes[other_pane_index]
+					.archive_member_path == selected_path)
+			{
+				throw std::invalid_argument(
+					"Одно дерево нельзя открыть в обеих панелях.");
+			}
+
+			auto& pane = m_tree_comparison_panes[pane_index];
+			const bool tree_changed =
+				pane.archive_member_path != selected_path;
+			std::optional<visual_tree> parsed_tree;
+			std::size_t parsed_tree_index = pane.tree_index;
+			if (tree_changed)
+			{
+				parsed_tree = parse_tree_serialization(
+					entry->contents,
+					parsed_tree_index);
+				if (parsed_tree_index >= tree_names.size())
+				{
+					throw std::logic_error(
+						"У рабочего дерева неизвестный тип.");
+				}
+			}
+
+			if (m_current_archive_member_path != selected_path)
+			{
+				open_archive_tree(*entry);
+			}
+
+			if (tree_changed)
+			{
+				pane.archive_member_path = selected_path;
+				pane.tree = std::move(parsed_tree);
+				pane.tree_index = parsed_tree_index;
+				pane.canvas.tree_index = -1;
+				pane.canvas.view_initialized = false;
+				pane.canvas.fit_requested = true;
+				invalidate_tree_preview_cache();
+			}
+
+			m_active_comparison_pane =
+				static_cast<int>(pane_index);
+			select_archive_entry_in_explorer(selected_path);
+		}
+
+		void focus_comparison_pane(std::size_t pane_index)
+		{
+			if (pane_index >= m_tree_comparison_panes.size())
+			{
+				throw std::out_of_range(
+					"Индекс панели дерева вне диапазона.");
+			}
+			const auto path =
+				m_tree_comparison_panes[pane_index].archive_member_path;
+			if (path.empty())
+			{
+				throw std::logic_error(
+					"В этой панели не выбрано дерево.");
+			}
+			select_comparison_tree(pane_index, path);
+		}
+
+		void draw_comparison_tree_selector(std::size_t pane_index)
+		{
+			const auto& pane = m_tree_comparison_panes[pane_index];
+			const char* preview = pane.archive_member_path.empty()
+				? "Выберите дерево"
+				: pane.archive_member_path.c_str();
+			const std::string combo_label = std::format(
+				"Дерево##ComparisonPane{}",
+				pane_index);
+			ImGui::SetNextItemWidth(-1.0f);
+			if (!ImGui::BeginCombo(combo_label.c_str(), preview))
+			{
+				return;
+			}
+
+			bool found_tree = false;
+			for (std::size_t i = 0; i < m_session_entries.size(); ++i)
+			{
+				const auto& entry = m_session_entries[i];
+				if (archive_extension(entry.path) != ".tree" ||
+					entry.path ==
+						m_tree_comparison_panes[1 - pane_index]
+							.archive_member_path)
+				{
+					continue;
+				}
+
+				found_tree = true;
+				const bool selected =
+					entry.path == pane.archive_member_path;
+				ImGui::PushID(entry.path.c_str());
+				const bool clicked = ImGui::Selectable(
+					entry.path.c_str(),
+					selected);
+				ImGui::PopID();
+				if (selected)
+				{
+					ImGui::SetItemDefaultFocus();
+				}
+				if (clicked)
+				{
+					(void)perform_io([&]
+					{
+						select_comparison_tree(
+							pane_index,
+							entry.path);
+					});
+				}
+			}
+			if (!found_tree)
+			{
+				ImGui::TextDisabled(
+					"Нет доступных деревьев для этой панели.");
+			}
+			ImGui::EndCombo();
+		}
+
+		void draw_comparison_tree_panels()
+		{
+			sync_comparison_pane_with_active_tree();
+			const ImVec2 available = ImGui::GetContentRegionAvail();
+			const float spacing = ImGui::GetStyle().ItemSpacing.x;
+			const float pane_width =
+				std::max(1.0f, (available.x - spacing) * 0.5f);
+
+			for (std::size_t i = 0;
+				i < m_tree_comparison_panes.size();
+				++i)
+			{
+				if (i != 0)
+				{
+					ImGui::SameLine();
+				}
+
+				const char* pane_id = i == 0
+					? "TreeComparisonPaneLeft"
+					: "TreeComparisonPaneRight";
+				if (ImGui::BeginChild(
+					pane_id,
+					ImVec2(pane_width, 0.0f),
+					ImGuiChildFlags_Borders))
+				{
+					auto& pane = m_tree_comparison_panes[i];
+					if (m_active_comparison_pane ==
+						static_cast<int>(i))
+					{
+						ImGui::TextColored(
+							{ 0.45f, 0.82f, 1.0f, 1.0f },
+							"Активная панель · операции применяются сюда");
+					}
+					else
+					{
+						ImGui::TextDisabled("Нажмите на дерево, чтобы выбрать панель");
+					}
+					draw_comparison_tree_selector(i);
+					if (pane.tree)
+					{
+						const visual_tree* tree_to_draw =
+							std::addressof(*pane.tree);
+						if (pane.archive_member_path ==
+								m_current_archive_member_path &&
+							m_loaded_visual_tree)
+						{
+							tree_to_draw =
+								std::addressof(*m_loaded_visual_tree);
+						}
+						bool canvas_clicked = false;
+						draw_tree_preview(
+							pane.tree_index,
+							&pane.canvas,
+							tree_to_draw,
+							pane.archive_member_path,
+							i,
+							i == 0
+								? "ComparisonTreeCanvasLeft"
+								: "ComparisonTreeCanvasRight",
+							&canvas_clicked);
+						if (canvas_clicked)
+						{
+							(void)perform_io([&]
+							{
+								focus_comparison_pane(i);
+							});
+						}
+					}
+					else
+					{
+						ImGui::TextDisabled(
+							"Выберите дерево для отображения.");
+					}
+				}
+				ImGui::EndChild();
+			}
 		}
 
 		void draw_merge_source_selector()
@@ -4363,6 +4871,7 @@ namespace tree_practicum
 					"Workspace entry is not a .tree file");
 			}
 
+			sync_comparison_pane_with_active_tree(true);
 			m_current_tree_path.clear();
 			m_current_archive_member_path = entry.path;
 			const auto separator = entry.path.find_last_of('/');
@@ -5267,6 +5776,49 @@ namespace tree_practicum
 			ImGui::SameLine();
 			ImGui::TextDisabled("или перетащите файл в это окно");
 
+			ImGui::NewLine();
+			if (m_tree_comparison_mode)
+			{
+				ImGui::TextDisabled(
+					"Два дерева рядом · операции применяются к активной панели");
+			}
+			else
+			{
+				draw_workspace_tree_selector();
+			}
+			ImGui::SameLine();
+			ImGui::BeginDisabled(
+				!m_tree_comparison_mode &&
+				workspace_tree_count() < 2);
+			const bool comparison_mode_clicked = ImGui::Button(
+				m_tree_comparison_mode
+					? "Одинарный вид"
+					: "Два дерева рядом");
+			ImGui::EndDisabled();
+			if (comparison_mode_clicked)
+			{
+				if (m_tree_comparison_mode)
+				{
+					m_tree_comparison_mode = false;
+					m_tree_canvas_fit_requested = true;
+				}
+				else
+				{
+					(void)perform_io([&]
+					{
+						begin_tree_comparison();
+					});
+				}
+			}
+			if (!m_tree_comparison_mode &&
+				workspace_tree_count() < 2)
+			{
+				ImGui::SameLine();
+				ImGui::TextDisabled(
+					"Добавьте ещё один .tree для сравнения.");
+			}
+			ImGui::NewLine();
+
 			ImGui::SetNextItemWidth(130.0f);
 			const auto key_state_before_widget = current_interface_state();
 			const bool insert_on_enter = ImGui::InputTextWithHint(
@@ -5369,42 +5921,65 @@ namespace tree_practicum
 			ImGui::Separator();
 			if (ImGui::Button("Вписать дерево"))
 			{
-				m_tree_canvas_fit_requested = true;
+				if (m_tree_comparison_mode)
+				{
+					m_tree_comparison_panes[
+						static_cast<std::size_t>(std::clamp(
+							m_active_comparison_pane,
+							0,
+							static_cast<int>(
+								m_tree_comparison_panes.size() - 1)))]
+						.canvas.fit_requested = true;
+				}
+				else
+				{
+					m_tree_canvas_fit_requested = true;
+				}
 			}
 			ImGui::SameLine();
 			ImGui::TextDisabled("Колесо: масштаб · средняя кнопка: сдвиг");
 			ImGui::Separator();
-			// Keep programmatic selection changes from being replaced by the old active tab.
-			const int tree_type_to_sync =
-				m_tree_tab_selection_index == m_active_tree
-				? -1
-				: m_active_tree;
-			bool synchronized_tree_tab_open = false;
-			if (ImGui::BeginTabBar("TreeTypeTabs"))
+			if (m_tree_comparison_mode)
 			{
-				for (std::size_t i = 0; i < tree_names.size(); ++i)
+				draw_comparison_tree_panels();
+			}
+			else
+			{
+				// Keep programmatic selection changes from being replaced by the old active tab.
+				const int tree_type_to_sync =
+					m_tree_tab_selection_index == m_active_tree
+					? -1
+					: m_active_tree;
+				bool synchronized_tree_tab_open = false;
+				if (ImGui::BeginTabBar("TreeTypeTabs"))
 				{
-					const auto flags =
-						tree_type_to_sync == static_cast<int>(i)
-						? ImGuiTabItemFlags_SetSelected
-						: ImGuiTabItemFlags_None;
-					if (ImGui::BeginTabItem(tree_names[i].data(), nullptr, flags))
+					for (std::size_t i = 0; i < tree_names.size(); ++i)
 					{
-						if (tree_type_to_sync < 0 ||
-							tree_type_to_sync == static_cast<int>(i))
+						const auto flags =
+							tree_type_to_sync == static_cast<int>(i)
+							? ImGuiTabItemFlags_SetSelected
+							: ImGuiTabItemFlags_None;
+						if (ImGui::BeginTabItem(
+							tree_names[i].data(),
+							nullptr,
+							flags))
 						{
-							select_tree(static_cast<int>(i));
-							draw_tree_preview(i);
-							synchronized_tree_tab_open = true;
+							if (tree_type_to_sync < 0 ||
+								tree_type_to_sync == static_cast<int>(i))
+							{
+								select_tree(static_cast<int>(i));
+								draw_tree_preview(i);
+								synchronized_tree_tab_open = true;
+							}
+							ImGui::EndTabItem();
 						}
-						ImGui::EndTabItem();
 					}
-				}
-				ImGui::EndTabBar();
-				if (tree_type_to_sync < 0 ||
-					synchronized_tree_tab_open)
-				{
-					m_tree_tab_selection_index = m_active_tree;
+					ImGui::EndTabBar();
+					if (tree_type_to_sync < 0 ||
+						synchronized_tree_tab_open)
+					{
+						m_tree_tab_selection_index = m_active_tree;
+					}
 				}
 			}
 			draw_split_result_tabs();
@@ -8989,13 +9564,16 @@ namespace tree_practicum
 			{
 				++m_tree_preview_revision;
 			}
-			m_tree_preview_geometry.reset();
-			m_tree_preview_visibility.reset();
-			m_tree_preview_visibility_geometry.reset();
-			m_tree_preview_visibility_bounds = {};
-			m_tree_preview_visibility_request_geometry.reset();
-			m_tree_preview_visibility_request_id = 0;
-			m_tree_preview_visibility_request_bounds = {};
+			for (auto& cache : m_tree_preview_caches)
+			{
+				cache.geometry.reset();
+				cache.visibility.reset();
+				cache.visibility_geometry.reset();
+				cache.visibility_bounds = {};
+				cache.visibility_request_geometry.reset();
+				cache.visibility_request_id = 0;
+				cache.visibility_request_bounds = {};
+			}
 		}
 
 		[[nodiscard]] std::shared_ptr<const tree_preview_geometry>
@@ -9003,24 +9581,26 @@ namespace tree_practicum
 				const visual_tree& tree,
 				std::size_t tree_index,
 				bool current_tree_loaded,
-				bool showing_animation)
+				bool showing_animation,
+				std::size_t cache_index)
 		{
+			auto& cache = m_tree_preview_caches.at(cache_index);
 			const std::size_t animation_step =
 				showing_animation && m_tree_animation.has_value()
 				? m_tree_animation->next_event
 				: 0;
-			if (m_tree_preview_geometry &&
-				m_tree_preview_geometry->revision ==
+			if (cache.geometry &&
+				cache.geometry->revision ==
 					m_tree_preview_revision &&
-				m_tree_preview_geometry->tree_index ==
+				cache.geometry->tree_index ==
 					static_cast<int>(tree_index) &&
-				m_tree_preview_geometry->current_tree_loaded ==
+				cache.geometry->current_tree_loaded ==
 					current_tree_loaded &&
-				m_tree_preview_geometry->showing_animation ==
+				cache.geometry->showing_animation ==
 					showing_animation &&
-				m_tree_preview_geometry->animation_step == animation_step)
+				cache.geometry->animation_step == animation_step)
 			{
-				return m_tree_preview_geometry;
+				return cache.geometry;
 			}
 
 			auto geometry = std::make_shared<tree_preview_geometry>();
@@ -9160,10 +9740,10 @@ namespace tree_practicum
 				48.0f * 2.0f +
 				geometry->leaf_link_space;
 
-			m_tree_preview_geometry = geometry;
-			m_tree_preview_visibility.reset();
-			m_tree_preview_visibility_geometry.reset();
-			m_tree_preview_visibility_bounds = {};
+			cache.geometry = geometry;
+			cache.visibility.reset();
+			cache.visibility_geometry.reset();
+			cache.visibility_bounds = {};
 			return geometry;
 		}
 
@@ -9187,26 +9767,39 @@ namespace tree_practicum
 
 		[[nodiscard]] std::shared_ptr<const mngl::two_d::tree_draw_visibility>
 			get_tree_preview_visibility(
+				std::size_t cache_index,
 				const std::shared_ptr<const tree_preview_geometry>& geometry,
 				const mngl::rectangle& area,
-				const mngl::rectangle& viewport)
+				const mngl::rectangle& viewport,
+				const mngl::two_d::tree_draw_options& draw_options)
 		{
-			auto completed =
-				m_tree_draw_culler.take_completed_result();
+			auto& cache = m_tree_preview_caches.at(cache_index);
+			const float arrow_size = std::max(
+				draw_options.node_size.y * 0.08f,
+				draw_options.edge_width * 2.5f);
+			const float visibility_padding = std::max(
+				draw_options.border_width * 0.5f,
+				draw_options.edge_width * 0.5f + arrow_size);
+			const glm::vec2 viewport_padding(visibility_padding);
+			const mngl::rectangle padded_viewport{
+				viewport.pos - viewport_padding,
+				viewport.size + viewport_padding * 2.0f
+			};
+			auto completed = cache.culler.take_completed_result();
 			if (completed &&
 				completed->request_id ==
-					m_tree_preview_visibility_request_id &&
-				m_tree_preview_visibility_request_geometry &&
+					cache.visibility_request_id &&
+				cache.visibility_request_geometry &&
 				completed->source.get() ==
-					m_tree_preview_visibility_request_geometry.get())
+					cache.visibility_request_geometry.get())
 			{
 				const auto requested_geometry =
-					m_tree_preview_visibility_request_geometry;
+					cache.visibility_request_geometry;
 				const auto requested_bounds =
-					m_tree_preview_visibility_request_bounds;
-				m_tree_preview_visibility_request_geometry.reset();
-				m_tree_preview_visibility_request_id = 0;
-				m_tree_preview_visibility_request_bounds = {};
+					cache.visibility_request_bounds;
+				cache.visibility_request_geometry.reset();
+				cache.visibility_request_id = 0;
+				cache.visibility_request_bounds = {};
 
 				if (requested_geometry == geometry)
 				{
@@ -9216,37 +9809,46 @@ namespace tree_practicum
 					}
 
 					const bool cached_visibility_covers_view =
-						m_tree_preview_visibility &&
-						m_tree_preview_visibility_geometry == geometry &&
+						cache.visibility &&
+						cache.visibility_geometry == geometry &&
 						rectangle_contains(
-							m_tree_preview_visibility_bounds,
-							viewport);
+							cache.visibility_bounds,
+							padded_viewport);
 					if (!cached_visibility_covers_view &&
-						rectangle_contains(requested_bounds, viewport))
+						rectangle_contains(
+							requested_bounds,
+							padded_viewport))
 					{
-						m_tree_preview_visibility =
+						cache.visibility =
 							std::make_shared<const
 								mngl::two_d::tree_draw_visibility>(
 									std::move(completed->visibility));
-						m_tree_preview_visibility_geometry = geometry;
-						m_tree_preview_visibility_bounds =
+						cache.visibility_geometry = geometry;
+						cache.visibility_bounds =
 							requested_bounds;
 					}
 				}
 			}
 
 			const bool has_current_visibility =
-				m_tree_preview_visibility &&
-				m_tree_preview_visibility_geometry == geometry;
+				cache.visibility &&
+				cache.visibility_geometry == geometry;
 			if (has_current_visibility &&
 				rectangle_contains(
-					m_tree_preview_visibility_bounds,
-					viewport))
+					cache.visibility_bounds,
+					padded_viewport))
 			{
-				return m_tree_preview_visibility;
+				return cache.visibility;
 			}
 
-			const glm::vec2 overscan = viewport.size * 0.25f;
+			const glm::vec2 overscan{
+				std::max(
+					viewport.size.x * 0.25f,
+					visibility_padding),
+				std::max(
+					viewport.size.y * 0.25f,
+					visibility_padding)
+			};
 			const mngl::rectangle cull_view{
 				viewport.pos - overscan,
 				viewport.size + overscan * 2.0f
@@ -9254,50 +9856,79 @@ namespace tree_practicum
 
 			if (!has_current_visibility)
 			{
-				m_tree_preview_visibility_request_geometry.reset();
-				m_tree_preview_visibility_request_id = 0;
-				m_tree_preview_visibility_request_bounds = {};
-				auto visibility = m_tree_draw_culler.cull(
+				cache.visibility_request_geometry.reset();
+				cache.visibility_request_id = 0;
+				cache.visibility_request_bounds = {};
+				auto visibility = cache.culler.cull(
 					geometry->model,
 					geometry->layout,
 					area,
 					cull_view,
-					geometry->draw_options);
-				m_tree_preview_visibility =
+					draw_options);
+				cache.visibility =
 					std::make_shared<const
 						mngl::two_d::tree_draw_visibility>(
 							std::move(visibility));
-				m_tree_preview_visibility_geometry = geometry;
-				m_tree_preview_visibility_bounds = cull_view;
-				return m_tree_preview_visibility;
+				cache.visibility_geometry = geometry;
+				cache.visibility_bounds = cull_view;
+				return cache.visibility;
 			}
 
 			const bool pending_request_covers_view =
-				m_tree_preview_visibility_request_geometry == geometry &&
-				m_tree_preview_visibility_request_id != 0 &&
+				cache.visibility_request_geometry == geometry &&
+				cache.visibility_request_id != 0 &&
 				rectangle_contains(
-					m_tree_preview_visibility_request_bounds,
-					viewport);
+					cache.visibility_request_bounds,
+					padded_viewport);
 			if (!pending_request_covers_view)
 			{
-				m_tree_preview_visibility_request_id =
-					m_tree_draw_culler.request_async(
+				cache.visibility_request_id =
+					cache.culler.request_async(
 						geometry,
 						geometry->model,
 						geometry->layout,
 						area,
 						cull_view,
-						geometry->draw_options);
-				m_tree_preview_visibility_request_geometry = geometry;
-				m_tree_preview_visibility_request_bounds = cull_view;
+						draw_options);
+				cache.visibility_request_geometry = geometry;
+				cache.visibility_request_bounds = cull_view;
 			}
-			return m_tree_preview_visibility;
+			return cache.visibility;
 		}
 
-		void draw_tree_preview(std::size_t tree_index)
+		void draw_tree_preview(
+			std::size_t tree_index,
+			tree_canvas_view_state* canvas_state = nullptr,
+			const visual_tree* tree_override = nullptr,
+			std::string_view archive_path = {},
+			std::size_t cache_index = 0,
+			const char* child_id = "TreePreview",
+			bool* canvas_clicked = nullptr)
 		{
+			if (canvas_clicked)
+			{
+				*canvas_clicked = false;
+			}
+			auto& canvas_texture = canvas_state
+				? canvas_state->texture
+				: m_tree_canvas_texture;
+			auto& canvas_tree_index = canvas_state
+				? canvas_state->tree_index
+				: m_tree_canvas_tree_index;
+			auto& canvas_zoom = canvas_state
+				? canvas_state->zoom
+				: m_tree_canvas_zoom;
+			auto& canvas_pan = canvas_state
+				? canvas_state->pan
+				: m_tree_canvas_pan;
+			auto& canvas_view_initialized = canvas_state
+				? canvas_state->view_initialized
+				: m_tree_canvas_view_initialized;
+			auto& canvas_fit_requested = canvas_state
+				? canvas_state->fit_requested
+				: m_tree_canvas_fit_requested;
 			if (!ImGui::BeginChild(
-				"TreePreview",
+				child_id,
 				ImVec2(0.0f, 0.0f),
 				ImGuiChildFlags_Borders))
 			{
@@ -9305,7 +9936,9 @@ namespace tree_practicum
 				return;
 			}
 
-			if (m_current_tree_name.empty() && !m_show_demo_trees)
+			if (!tree_override &&
+				m_current_tree_name.empty() &&
+				!m_show_demo_trees)
 			{
 				ImGui::TextDisabled(
 					"Рабочая область пуста. Создайте новое дерево или загрузите .tree.");
@@ -9313,19 +9946,29 @@ namespace tree_practicum
 				return;
 			}
 
-			const bool current_tree_loaded =
-				m_loaded_visual_tree.has_value() &&
-				m_loaded_tree_index == static_cast<int>(tree_index);
-			advance_tree_animation(
-				static_cast<int>(tree_index),
-				ImGui::GetIO().DeltaTime);
+			const bool current_tree_loaded = tree_override
+				? true
+				: m_loaded_visual_tree.has_value() &&
+					m_loaded_tree_index == static_cast<int>(tree_index);
+			const bool preview_tree_is_active =
+				!tree_override ||
+				archive_path == m_current_archive_member_path;
+			if (preview_tree_is_active)
+			{
+				advance_tree_animation(
+					static_cast<int>(tree_index),
+					ImGui::GetIO().DeltaTime);
+			}
 			const bool showing_animation =
+				preview_tree_is_active &&
 				current_tree_loaded &&
 				m_tree_animation.has_value() &&
 				m_tree_animation->tree_index ==
 					static_cast<int>(tree_index);
 			const auto& tree = showing_animation
 				? m_tree_animation->tree
+				: tree_override
+					? *tree_override
 				: current_tree_loaded
 					? *m_loaded_visual_tree
 					: demo_trees()[tree_index];
@@ -9335,6 +9978,21 @@ namespace tree_practicum
 					current_tree_loaded
 						? "Загруженное дерево пустое."
 						: "В демо-дереве пока нет узлов.");
+				const ImVec2 empty_canvas_size =
+					ImGui::GetContentRegionAvail();
+				if (empty_canvas_size.x > 0.0f &&
+					empty_canvas_size.y > 0.0f)
+				{
+					ImGui::InvisibleButton(
+						"EmptyTreeCanvas",
+						empty_canvas_size,
+						ImGuiButtonFlags_MouseButtonLeft);
+					if (canvas_clicked)
+					{
+						*canvas_clicked = ImGui::IsItemClicked(
+							ImGuiMouseButton_Left);
+					}
+				}
 				ImGui::EndChild();
 				return;
 			}
@@ -9356,7 +10014,8 @@ namespace tree_practicum
 				tree,
 				tree_index,
 				current_tree_loaded,
-				showing_animation);
+				showing_animation,
+				cache_index);
 			const auto& render_model = geometry->model;
 			const auto& layout = geometry->layout;
 			const float tree_width = geometry->tree_width;
@@ -9382,62 +10041,13 @@ namespace tree_practicum
 						ImGuiButtonFlags_MouseButtonMiddle);
 				const bool canvas_hovered = ImGui::IsItemHovered();
 				const bool canvas_active = ImGui::IsItemActive();
+				if (canvas_clicked)
+				{
+					*canvas_clicked =
+						ImGui::IsItemClicked(ImGuiMouseButton_Left) ||
+						ImGui::IsItemClicked(ImGuiMouseButton_Middle);
+				}
 				const ImGuiIO& io = ImGui::GetIO();
-				const int current_tree_index = static_cast<int>(tree_index);
-				if (m_tree_canvas_tree_index != current_tree_index)
-				{
-					m_tree_canvas_tree_index = current_tree_index;
-					m_tree_canvas_view_initialized = false;
-				}
-
-				if (!m_tree_canvas_view_initialized ||
-					m_tree_canvas_fit_requested)
-				{
-					const float available_width =
-						std::max(1.0f, canvas_size.x - 32.0f);
-					const float available_height =
-						std::max(1.0f, canvas_size.y - 32.0f);
-					m_tree_canvas_zoom = std::clamp(
-						std::min(
-							available_width / tree_width,
-							available_height / tree_height),
-						0.12f,
-						2.0f);
-					m_tree_canvas_pan = {};
-					m_tree_canvas_fit_requested = false;
-					m_tree_canvas_view_initialized = true;
-				}
-
-				const ImVec2 canvas_center{
-					canvas_min.x + canvas_size.x * 0.5f,
-					canvas_min.y + canvas_size.y * 0.5f
-				};
-				if (canvas_hovered && io.MouseWheel != 0.0f)
-				{
-					const float previous_zoom = m_tree_canvas_zoom;
-					const float next_zoom = std::clamp(
-						previous_zoom * std::pow(1.15f, io.MouseWheel),
-						0.12f,
-						3.0f);
-					const float screen_offset_x =
-						(io.MousePos.x - canvas_center.x - m_tree_canvas_pan.x) /
-							previous_zoom;
-					const float screen_offset_y =
-						(io.MousePos.y - canvas_center.y - m_tree_canvas_pan.y) /
-							previous_zoom;
-					m_tree_canvas_zoom = next_zoom;
-					m_tree_canvas_pan.x = io.MousePos.x - canvas_center.x -
-						screen_offset_x * next_zoom;
-					m_tree_canvas_pan.y = io.MousePos.y - canvas_center.y -
-						screen_offset_y * next_zoom;
-				}
-				if (canvas_active &&
-					ImGui::IsMouseDragging(ImGuiMouseButton_Middle))
-				{
-					m_tree_canvas_pan.x += io.MouseDelta.x;
-					m_tree_canvas_pan.y += io.MouseDelta.y;
-				}
-
 				const float scale_x =
 					std::isfinite(io.DisplayFramebufferScale.x) &&
 						io.DisplayFramebufferScale.x > 0.0f
@@ -9448,6 +10058,146 @@ namespace tree_practicum
 						io.DisplayFramebufferScale.y > 0.0f
 					? io.DisplayFramebufferScale.y
 					: 1.0f;
+				const double minimum_framebuffer_scale =
+					std::min(scale_x, scale_y);
+				const auto minimum_safe_zoom =
+					[&](const ImVec2& pan, float maximum_zoom)
+				{
+					const double safe_world =
+						static_cast<double>(
+							std::numeric_limits<float>::max()) /
+						64.0;
+					const double room_x =
+						safe_world -
+						static_cast<double>(tree_width) * 0.5;
+					const double room_y =
+						safe_world -
+						static_cast<double>(tree_height) * 0.5;
+					if (!std::isfinite(room_x) ||
+						!std::isfinite(room_y) ||
+						room_x <= 0.0 ||
+						room_y <= 0.0 ||
+						!std::isfinite(pan.x) ||
+						!std::isfinite(pan.y))
+					{
+						throw std::length_error(
+							"Tree canvas exceeds the supported coordinate range");
+					}
+					const double zoom_for_view = std::max(
+						(static_cast<double>(canvas_size.x) * 0.5 +
+							std::abs(static_cast<double>(pan.x))) /
+							room_x,
+						(static_cast<double>(canvas_size.y) * 0.5 +
+							std::abs(static_cast<double>(pan.y))) /
+							room_y);
+					const double zoom_for_edges =
+						4.0 / (safe_world * minimum_framebuffer_scale);
+					const double zoom = std::max(
+						zoom_for_view,
+						zoom_for_edges);
+					if (!std::isfinite(zoom) ||
+						zoom <= 0.0 ||
+						zoom > maximum_zoom)
+					{
+						throw std::length_error(
+							"Tree canvas zoom exceeds the supported numeric range");
+					}
+					return static_cast<float>(zoom);
+				};
+				const int current_tree_index = static_cast<int>(tree_index);
+				if (canvas_tree_index != current_tree_index)
+				{
+					canvas_tree_index = current_tree_index;
+					canvas_view_initialized = false;
+				}
+
+				if (!canvas_view_initialized ||
+					canvas_fit_requested)
+				{
+					const float available_width =
+						std::max(1.0f, canvas_size.x - 32.0f);
+					const float available_height =
+						std::max(1.0f, canvas_size.y - 32.0f);
+					const float minimum_zoom =
+						minimum_safe_zoom({}, 2.0f);
+					canvas_zoom = std::clamp(
+						std::min(
+							available_width / tree_width,
+							available_height / tree_height),
+						minimum_zoom,
+						2.0f);
+					canvas_pan = {};
+					canvas_fit_requested = false;
+					canvas_view_initialized = true;
+				}
+
+				const ImVec2 canvas_center{
+					canvas_min.x + canvas_size.x * 0.5f,
+					canvas_min.y + canvas_size.y * 0.5f
+				};
+				if (canvas_hovered && io.MouseWheel != 0.0f)
+				{
+					const float previous_zoom = canvas_zoom;
+					const float minimum_zoom =
+						minimum_safe_zoom(canvas_pan, 3.0f);
+					const double requested_zoom =
+						static_cast<double>(previous_zoom) *
+						std::pow(1.15, static_cast<double>(io.MouseWheel));
+					const float next_zoom = static_cast<float>(
+						std::clamp(
+							requested_zoom,
+							static_cast<double>(minimum_zoom),
+							3.0));
+					const double screen_offset_x =
+						(static_cast<double>(io.MousePos.x) -
+							canvas_center.x - canvas_pan.x) /
+						previous_zoom;
+					const double screen_offset_y =
+						(static_cast<double>(io.MousePos.y) -
+							canvas_center.y - canvas_pan.y) /
+						previous_zoom;
+					canvas_zoom = next_zoom;
+					canvas_pan.x = static_cast<float>(
+						static_cast<double>(io.MousePos.x) -
+						canvas_center.x - screen_offset_x * next_zoom);
+					canvas_pan.y = static_cast<float>(
+						static_cast<double>(io.MousePos.y) -
+						canvas_center.y - screen_offset_y * next_zoom);
+				}
+				if (canvas_active &&
+					ImGui::IsMouseDragging(ImGuiMouseButton_Middle))
+				{
+					canvas_pan.x += io.MouseDelta.x;
+					canvas_pan.y += io.MouseDelta.y;
+				}
+				canvas_zoom = std::max(
+					canvas_zoom,
+					minimum_safe_zoom(canvas_pan, 3.0f));
+
+				const double screen_scale =
+					static_cast<double>(canvas_zoom) *
+					minimum_framebuffer_scale;
+				const double edge_width = std::max(
+					static_cast<double>(
+						geometry->draw_options.edge_width),
+					1.0 / screen_scale);
+				if (!std::isfinite(screen_scale) ||
+					screen_scale <= 0.0 ||
+					!std::isfinite(edge_width) ||
+					edge_width >
+						std::numeric_limits<float>::max())
+				{
+					throw std::length_error(
+						"Tree canvas render scale exceeds the supported range");
+				}
+				render_options.edge_width =
+					static_cast<float>(edge_width);
+				render_options.show_node_text =
+					static_cast<double>(
+						render_options.value_text_height) *
+						screen_scale >=
+					4.0;
+
 				const auto target_dimension = [](float logical, float scale)
 				{
 					const double dimension = std::round(
@@ -9465,21 +10215,23 @@ namespace tree_practicum
 					target_dimension(canvas_size.x, scale_x),
 					target_dimension(canvas_size.y, scale_y)
 				};
-				if (!ensure_tree_canvas_texture(target_size))
+				if (!ensure_tree_canvas_texture(
+					canvas_texture,
+					target_size))
 				{
 					ImGui::EndChild();
 					return;
 				}
 
 				const glm::vec2 view_size{
-					canvas_size.x / m_tree_canvas_zoom,
-					canvas_size.y / m_tree_canvas_zoom
+					canvas_size.x / canvas_zoom,
+					canvas_size.y / canvas_zoom
 				};
 				const glm::vec2 view_center{
 					tree_width * 0.5f -
-						m_tree_canvas_pan.x / m_tree_canvas_zoom,
+						canvas_pan.x / canvas_zoom,
 					tree_height * 0.5f +
-						m_tree_canvas_pan.y / m_tree_canvas_zoom
+						canvas_pan.y / canvas_zoom
 				};
 				const mngl::view canvas_view{
 					mngl::rectangle{
@@ -9496,9 +10248,11 @@ namespace tree_practicum
 					layout.size.y
 				};
 				const auto visibility = get_tree_preview_visibility(
+					cache_index,
 					geometry,
 					tree_area,
-					visible_area);
+					visible_area,
+					render_options);
 
 				int hovered_node = -1;
 				if (canvas_hovered)
@@ -9512,17 +10266,17 @@ namespace tree_practicum
 							vertical_margin + leaf_link_space +
 							node_layout.center.y;
 						const ImVec2 center{
-							canvas_center.x + m_tree_canvas_pan.x +
+							canvas_center.x + canvas_pan.x +
 								(content_x - tree_width * 0.5f) *
-									m_tree_canvas_zoom,
-							canvas_center.y + m_tree_canvas_pan.y +
+									canvas_zoom,
+							canvas_center.y + canvas_pan.y +
 								(tree_height * 0.5f - content_y) *
-									m_tree_canvas_zoom
+									canvas_zoom
 						};
 						const float width =
-							node_layout.size.x * m_tree_canvas_zoom;
+							node_layout.size.x * canvas_zoom;
 						const float height =
-							node_layout.size.y * m_tree_canvas_zoom;
+							node_layout.size.y * canvas_zoom;
 						if (io.MousePos.x >= center.x - width * 0.5f &&
 							io.MousePos.x <= center.x + width * 0.5f &&
 							io.MousePos.y >= center.y - height * 0.5f &&
@@ -9535,6 +10289,7 @@ namespace tree_practicum
 				}
 				std::vector<std::size_t> highlighted_nodes;
 				if (current_tree_loaded &&
+					preview_tree_is_active &&
 					m_tree_find_result_valid &&
 					m_tree_find_tree_index ==
 						static_cast<int>(tree_index))
@@ -9583,25 +10338,29 @@ namespace tree_practicum
 					34.0f / 255.0f,
 					1.0f
 				};
-				m_tree_canvas_texture->set_view(canvas_view);
-				m_tree_canvas_texture->clear(background);
-				m_tree_canvas_texture->draw(
+				canvas_texture->set_view(canvas_view);
+				canvas_texture->clear(background);
+				canvas_texture->draw(
 					[&](mngl::two_d::Frame2D& frame)
 					{
 						frame.set_view(canvas_view);
 						const mngl::rectangle visible =
 							canvas_view.visible_area(target_size);
+						const double grid_spacing = std::max(
+							32.0,
+							32.0 / screen_scale);
 						const float grid_width =
-							std::max(0.5f, 0.7f / m_tree_canvas_zoom);
+							static_cast<float>(0.7 / screen_scale);
 						const mngl::color grid_color{
 							1.0f, 1.0f, 1.0f, 0.035f
 						};
+						const double grid_end_x =
+							static_cast<double>(visible.pos.x) +
+							visible.size.x;
 						for (double x = std::floor(
-								static_cast<double>(visible.pos.x) / 32.0) *
-								32.0;
-							x < static_cast<double>(
-								visible.pos.x + visible.size.x);
-							x += 32.0)
+								static_cast<double>(visible.pos.x) /
+								grid_spacing) * grid_spacing;
+							x < grid_end_x;)
 						{
 							frame.draw(
 								mngl::rectangle{
@@ -9611,13 +10370,20 @@ namespace tree_practicum
 									visible.size.y
 								},
 								grid_color);
+							const double next_x = x + grid_spacing;
+							if (next_x <= x)
+							{
+								break;
+							}
+							x = next_x;
 						}
+						const double grid_end_y =
+							static_cast<double>(visible.pos.y) +
+							visible.size.y;
 						for (double y = std::floor(
-								static_cast<double>(visible.pos.y) / 32.0) *
-								32.0;
-							y < static_cast<double>(
-								visible.pos.y + visible.size.y);
-							y += 32.0)
+								static_cast<double>(visible.pos.y) /
+								grid_spacing) * grid_spacing;
+							y < grid_end_y;)
 						{
 							frame.draw(
 								mngl::rectangle{
@@ -9627,6 +10393,12 @@ namespace tree_practicum
 									grid_width
 								},
 								grid_color);
+							const double next_y = y + grid_spacing;
+							if (next_y <= y)
+							{
+								break;
+							}
+							y = next_y;
 						}
 
 						auto drawable =
@@ -9639,7 +10411,7 @@ namespace tree_practicum
 							tree_area,
 							render_options);
 					});
-				m_tree_canvas_texture->display();
+				canvas_texture->display();
 
 				const ImVec2 canvas_max{
 					canvas_min.x + canvas_size.x,
@@ -9648,7 +10420,7 @@ namespace tree_practicum
 				ImDrawList* draw_list = ImGui::GetWindowDrawList();
 				draw_list->PushClipRect(canvas_min, canvas_max, true);
 				const auto& gpu_texture =
-					m_tree_canvas_texture->raw_gpu_texture();
+					canvas_texture->raw_gpu_texture();
 				draw_list->AddImage(
 					ImTextureRef(
 						reinterpret_cast<ImTextureID>(gpu_texture.raw())),
@@ -9671,7 +10443,9 @@ namespace tree_practicum
 							? "Внутренний узел B+ — ключи-разделители"
 							: tree.b_plus
 								? "Лист B+"
-								: "Узел демонстрационного дерева");
+								: current_tree_loaded
+									? "Узел загруженного дерева"
+									: "Узел демонстрационного дерева");
 					for (const auto& key : node.keys)
 					{
 						const std::string full_value =
@@ -9703,7 +10477,9 @@ namespace tree_practicum
 			ImGui::EndChild();
 		}
 
-		[[nodiscard]] bool ensure_tree_canvas_texture(glm::uvec2 size)
+		[[nodiscard]] bool ensure_tree_canvas_texture(
+			std::optional<mngl::texture>& canvas_texture,
+			glm::uvec2 size)
 		{
 			if (size.x == 0 || size.y == 0)
 			{
@@ -9718,16 +10494,15 @@ namespace tree_practicum
 				return false;
 			}
 			const auto* device_handle = device.raw();
-			if (m_tree_canvas_texture &&
-				m_tree_canvas_texture->valid())
+			if (canvas_texture && canvas_texture->valid())
 			{
 				const bool compatible =
-					m_tree_canvas_texture->can_render_to() &&
-					m_tree_canvas_texture->format() == format &&
-					m_tree_canvas_texture->raw_gpu_texture().device_raw() ==
+					canvas_texture->can_render_to() &&
+					canvas_texture->format() == format &&
+					canvas_texture->raw_gpu_texture().device_raw() ==
 						device_handle;
 				const glm::uvec2 current_size =
-					m_tree_canvas_texture->size();
+					canvas_texture->size();
 				if (compatible &&
 					current_size.x == size.x &&
 					current_size.y == size.y)
@@ -9745,7 +10520,7 @@ namespace tree_practicum
 			{
 				return false;
 			}
-			m_tree_canvas_texture.emplace(std::move(replacement));
+			canvas_texture.emplace(std::move(replacement));
 			return true;
 		}
 
@@ -12130,6 +12905,8 @@ namespace tree_practicum
 		std::optional<search_tree_key_kind> m_split_result_key_kind;
 		std::string m_split_pivot_label;
 		std::optional<visual_tree> m_loaded_visual_tree;
+		std::array<tree_comparison_pane, 2> m_tree_comparison_panes;
+		std::array<tree_preview_cache_state, 2> m_tree_preview_caches;
 		std::optional<search_tree_key_kind> m_loaded_search_tree_key_kind;
 		std::vector<std::size_t> m_tree_find_path;
 		std::string m_tree_find_status;
@@ -12148,6 +12925,7 @@ namespace tree_practicum
 		int m_tree_find_tree_index = -1;
 		int m_loaded_tree_index = -1;
 		int m_tree_filter = -1;
+		int m_active_comparison_pane = 0;
 		int m_tree_canvas_tree_index = -1;
 		float m_tree_canvas_zoom = 1.0f;
 		ImVec2 m_tree_canvas_pan{};
@@ -12167,6 +12945,7 @@ namespace tree_practicum
 		bool m_waiting_for_save_before_workspace_action = false;
 		bool m_tree_dirty = false;
 		bool m_show_demo_trees = false;
+		bool m_tree_comparison_mode = false;
 		bool m_loaded_search_tree_valid = false;
 		bool m_tree_find_result_valid = false;
 		bool m_tree_find_found = false;
@@ -12180,17 +12959,5 @@ namespace tree_practicum
 		std::uint64_t m_saved_document_state_id = 0;
 		std::uint64_t m_next_document_state_id = 1;
 		std::uint64_t m_tree_preview_revision = 0;
-		std::shared_ptr<const tree_preview_geometry>
-			m_tree_preview_geometry;
-		std::shared_ptr<const tree_preview_geometry>
-			m_tree_preview_visibility_geometry;
-		std::shared_ptr<const mngl::two_d::tree_draw_visibility>
-			m_tree_preview_visibility;
-		mngl::rectangle m_tree_preview_visibility_bounds{};
-		std::shared_ptr<const tree_preview_geometry>
-			m_tree_preview_visibility_request_geometry;
-		std::uint64_t m_tree_preview_visibility_request_id = 0;
-		mngl::rectangle m_tree_preview_visibility_request_bounds{};
-		mngl::two_d::tree_draw_culler m_tree_draw_culler;
 	};
 }
