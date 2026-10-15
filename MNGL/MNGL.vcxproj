@@ -199,7 +199,11 @@
     <ClInclude Include="gpu_buffer.hpp" />
     <ClInclude Include="batcher2d.hpp" />
     <ClInclude Include="renderer2d.hpp" />
+    <ClInclude Include="tree_renderer.hpp" />
     <ClInclude Include="text.hpp" />
+    <ClInclude Include="tree_practicum_ui.hpp" />
+    <ClInclude Include="tree_practicum_storage.hpp" />
+    <ClInclude Include="undo_redo_stack.hpp" />
     <ClInclude Include="render_window.hpp" />
     <ClInclude Include="color.hpp" />
     <ClInclude Include="command_buffer.hpp" />

@@ -1,8 +1,10 @@
 #include "input.hpp"
 #include "imgui_compat.hpp"
 #include "render_window.hpp"
+#include "tree_practicum_ui.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <format>
@@ -464,11 +466,91 @@ static int run_demo()
 	return 0;
 }
 
-int main()
+static std::filesystem::path find_font_file(std::string_view file_name)
+{
+	const std::array<std::filesystem::path, 3> directories{
+		"imgui/misc/fonts",
+		"MNGL/imgui/misc/fonts",
+		"../../MNGL/imgui/misc/fonts"
+	};
+	for (const auto& directory : directories)
+	{
+		const auto candidate =
+			directory / std::filesystem::path(std::string(file_name));
+		if (std::filesystem::is_regular_file(candidate))
+		{
+			return candidate;
+		}
+	}
+	return {};
+}
+
+static int run_tree_practicum()
+{
+	if (SDL_Runtime.error())
+	{
+		throw std::runtime_error(SDL_Runtime.content());
+	}
+
+	mngl::window::flags window_flags;
+	window_flags.resizeable = true;
+	window_flags.high_pixel_density = true;
+
+	float initial_scale = 1.0f;
+	if (auto display = SDL_GetPrimaryDisplay())
+	{
+		const float display_scale = SDL_GetDisplayContentScale(display);
+		if (display_scale > 0.0f && std::isfinite(display_scale))
+		{
+			initial_scale = display_scale;
+		}
+	}
+
+	const glm::uvec2 base_size{ 1440, 900 };
+	const glm::uvec2 initial_size{
+		static_cast<unsigned int>(
+			std::max(1.0f, std::round(base_size.x * initial_scale))),
+		static_cast<unsigned int>(
+			std::max(1.0f, std::round(base_size.y * initial_scale)))
+	};
+	mngl::render_window window(
+		"Планировщик деревьев",
+		initial_size,
+		window_flags);
+
+	mngl::imgui_compat::font_config font_config;
+	font_config.regular.file = find_font_file("Roboto-Medium.ttf");
+	font_config.monospace.file = find_font_file("Cousine-Regular.ttf");
+	mngl::imgui_context gui(window, font_config);
+	mngl::two_d::font tree_font(
+		window.gpu_device(),
+		find_font_file("Cousine-Regular.ttf"));
+	tree_practicum::tree_practicum_ui ui(
+		window,
+		tree_font,
+		window.raw());
+
+	while (mngl::Input::continue_work())
+	{
+		{
+			auto frame = gui.frame();
+			ui.draw(frame);
+		}
+		window.clear(mngl::color{ 0.08f, 0.09f, 0.12f, 1.0f });
+		window.display();
+	}
+	return 0;
+}
+
+int main(int argc, char* argv[])
 {
 	try
 	{
-		return run_demo();
+		if (argc > 1 && std::string_view(argv[1]) == "--mngl-demo")
+		{
+			return run_demo();
+		}
+		return run_tree_practicum();
 	}
 	catch (const std::exception& error)
 	{
