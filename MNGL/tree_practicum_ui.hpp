@@ -312,7 +312,7 @@ namespace tree_practicum
 			}
 		};
 
-		struct split_history_delta
+		struct archive_entry_history_delta
 		{
 			std::vector<tree_practicum::archive_entry> added_entries;
 		};
@@ -328,12 +328,12 @@ namespace tree_practicum
 			std::string split_pivot_label;
 			std::optional<search_tree_key_kind> loaded_search_tree_key_kind;
 			std::optional<search_tree_key_kind> split_result_key_kind;
-			std::shared_ptr<const split_history_delta> split_delta;
+			std::shared_ptr<const archive_entry_history_delta> archive_entry_delta;
 			std::uint64_t document_state_id = 0;
 			int active_tree = 0;
 			int loaded_tree_index = -1;
 			bool loaded_search_tree_valid = false;
-			bool split_entries_present = false;
+			bool archive_entries_present = false;
 
 			[[nodiscard]] std::size_t history_bytes() const noexcept
 			{
@@ -357,9 +357,9 @@ namespace tree_practicum
 				{
 					add(path.size());
 				}
-				if (split_delta)
+				if (archive_entry_delta)
 				{
-					for (const auto& entry : split_delta->added_entries)
+					for (const auto& entry : archive_entry_delta->added_entries)
 					{
 						add(sizeof(entry));
 						add(entry.path.size());
@@ -616,6 +616,14 @@ namespace tree_practicum
 			"Декартово (Treap)",
 			"B+ tree"
 		};
+		inline static constexpr std::array<std::string_view, 6> tree_file_stems{
+			"bst",
+			"avl",
+			"red-black",
+			"splay",
+			"treap",
+			"b-plus"
+		};
 
 		inline static constexpr std::array<workspace_entry, 4> workspace_entries{ {
 			{ "Черновик", "Текущая рабочая область", false },
@@ -687,6 +695,7 @@ namespace tree_practicum
 			set_path_buffer(m_explorer_path, path_to_utf8(m_explorer_directory));
 			set_path_buffer(m_key_input, "42");
 			begin_new_workspace();
+			m_show_demo_trees = true;
 			refresh_explorer();
 			if (!initial_directory_error.empty())
 			{
@@ -885,7 +894,8 @@ namespace tree_practicum
 					static_cast<int>(tree_names.size()) ||
 				(state.loaded_search_tree_valid &&
 					state.loaded_tree_index < 0) ||
-				(state.split_entries_present && !state.split_delta))
+				(state.archive_entries_present &&
+					!state.archive_entry_delta))
 			{
 				throw std::invalid_argument(
 					"Undo history contains an invalid tree state");
@@ -902,14 +912,15 @@ namespace tree_practicum
 				throw std::invalid_argument(
 					"Undo history tree state is missing its archive member path");
 			}
-			if (state.split_delta)
+			if (state.archive_entry_delta)
 			{
-				if (state.split_delta->added_entries.size() > 2)
+				if (state.archive_entry_delta->added_entries.size() > 2)
 				{
 					throw std::invalid_argument(
-						"Undo history contains too many split entries");
+						"Undo history contains too many added archive entries");
 				}
-				for (const auto& entry : state.split_delta->added_entries)
+				for (const auto& entry :
+					state.archive_entry_delta->added_entries)
 				{
 					validate_tree_member_path(entry.path);
 					if (entry.path.empty() ||
@@ -917,7 +928,7 @@ namespace tree_practicum
 							tree_practicum::detail::max_archive_entry_size)
 					{
 						throw std::invalid_argument(
-							"Undo history contains an invalid split entry");
+							"Undo history contains an invalid added archive entry");
 					}
 				}
 			}
@@ -944,14 +955,15 @@ namespace tree_practicum
 			writer.write_signed(state.active_tree);
 			writer.write_signed(state.loaded_tree_index);
 			writer.write_bool(state.loaded_search_tree_valid);
-			writer.write_bool(state.split_entries_present);
-			writer.write_bool(static_cast<bool>(state.split_delta));
-			if (state.split_delta)
+			writer.write_bool(state.archive_entries_present);
+			writer.write_bool(static_cast<bool>(state.archive_entry_delta));
+			if (state.archive_entry_delta)
 			{
 				writer.write_unsigned<std::uint32_t>(
 					static_cast<std::uint32_t>(
-						state.split_delta->added_entries.size()));
-				for (const auto& entry : state.split_delta->added_entries)
+						state.archive_entry_delta->added_entries.size()));
+				for (const auto& entry :
+					state.archive_entry_delta->added_entries)
 				{
 					writer.write_string(entry.path);
 					writer.write_string(entry.contents);
@@ -980,7 +992,7 @@ namespace tree_practicum
 			state.active_tree = reader.read_signed();
 			state.loaded_tree_index = reader.read_signed();
 			state.loaded_search_tree_valid = reader.read_bool();
-			state.split_entries_present = reader.read_bool();
+			state.archive_entries_present = reader.read_bool();
 			if (reader.read_bool())
 			{
 				const auto count =
@@ -988,9 +1000,10 @@ namespace tree_practicum
 				if (count > 2)
 				{
 					throw std::invalid_argument(
-						"Undo history contains too many split entries");
+						"Undo history contains too many added archive entries");
 				}
-				auto delta = std::make_shared<split_history_delta>();
+				auto delta =
+					std::make_shared<archive_entry_history_delta>();
 				delta->added_entries.reserve(count);
 				for (std::uint32_t i = 0; i < count; ++i)
 				{
@@ -999,7 +1012,7 @@ namespace tree_practicum
 						reader.read_string()
 					});
 				}
-				state.split_delta = std::move(delta);
+				state.archive_entry_delta = std::move(delta);
 			}
 			validate_tree_history_snapshot(state);
 			return state;
@@ -1467,8 +1480,8 @@ namespace tree_practicum
 			return state;
 		}
 
-		[[nodiscard]] bool split_history_entries_present(
-			const split_history_delta& delta) const
+		[[nodiscard]] bool archive_history_entries_present(
+			const archive_entry_history_delta& delta) const
 		{
 			return std::all_of(
 				delta.added_entries.begin(),
@@ -1527,12 +1540,12 @@ namespace tree_practicum
 		{
 			cancel_tree_animation();
 			clear_tree_find_result();
-			if (state.split_delta)
+			if (state.archive_entry_delta)
 			{
 				for (const auto& entry :
-					state.split_delta->added_entries)
+					state.archive_entry_delta->added_entries)
 				{
-					if (state.split_entries_present)
+					if (state.archive_entries_present)
 					{
 						set_archive_entry(entry.path, entry.contents);
 					}
@@ -1558,21 +1571,25 @@ namespace tree_practicum
 					state.current_archive_member_path,
 					state.current_tree_serialization);
 			}
+			if (state.current_archive_member_path.empty())
+			{
+				clear_current_tree_state(false);
+			}
+			else
+			{
+				create_window_tree(
+					state.current_tree_name,
+					state.current_tree_serialization);
+			}
+			m_current_tree_path = state.current_tree_path;
 			m_current_archive_member_path =
 				state.current_archive_member_path;
-			m_current_tree_path = state.current_tree_path;
 			m_merge_source_archive_path =
 				state.merge_source_archive_path;
 			m_split_result_member_paths =
 				state.split_result_member_paths;
 			m_split_result_key_kind = state.split_result_key_kind;
 			m_split_pivot_label = state.split_pivot_label;
-			create_window_tree(
-				state.current_tree_name,
-				state.current_tree_serialization);
-			m_current_tree_path = state.current_tree_path;
-			m_current_archive_member_path =
-				state.current_archive_member_path;
 			m_active_tree = state.active_tree;
 			m_loaded_tree_index = state.loaded_tree_index;
 			m_loaded_search_tree_key_kind =
@@ -1641,25 +1658,28 @@ namespace tree_practicum
 
 		void record_tree_history_change(
 			tree_history_snapshot previous,
-			std::shared_ptr<const split_history_delta> split_delta = {})
+			std::shared_ptr<const archive_entry_history_delta>
+				archive_entry_delta = {})
 		{
 			previous.document_state_id = m_current_document_state_id;
-			previous.split_delta = split_delta;
-			previous.split_entries_present = false;
+			previous.archive_entry_delta = archive_entry_delta;
+			previous.archive_entries_present = false;
 			m_current_document_state_id = m_next_document_state_id++;
 			m_tree_dirty = m_current_document_state_id !=
 				m_saved_document_state_id;
 
 			auto current = capture_tree_history_state();
 			current.document_state_id = m_current_document_state_id;
-			current.split_delta = std::move(split_delta);
-			current.split_entries_present = current.split_delta &&
-				split_history_entries_present(*current.split_delta);
-			if (current.split_delta &&
-				!current.split_entries_present)
+			current.archive_entry_delta = std::move(archive_entry_delta);
+			current.archive_entries_present =
+				current.archive_entry_delta &&
+				archive_history_entries_present(
+					*current.archive_entry_delta);
+			if (current.archive_entry_delta &&
+				!current.archive_entries_present)
 			{
 				throw std::logic_error(
-					"Не удалось сохранить результаты split в истории отмены.");
+					"Не удалось сохранить новые записи архива в истории отмены.");
 			}
 
 			auto transition =
@@ -1925,6 +1945,13 @@ namespace tree_practicum
 				if (ImGui::MenuItem("Новая рабочая область"))
 				{
 					begin_new_workspace();
+				}
+				if (ImGui::MenuItem("Новое дерево"))
+				{
+					(void)perform_io([&]
+					{
+						create_new_tree();
+					});
 				}
 				if (ImGui::MenuItem("Открыть..."))
 				{
@@ -2925,6 +2952,98 @@ namespace tree_practicum
 			return path;
 		}
 
+		void create_new_tree()
+		{
+			if (m_active_tree < 0 ||
+				static_cast<std::size_t>(m_active_tree) >=
+					tree_file_stems.size())
+			{
+				throw std::logic_error(
+					"Нельзя создать дерево неизвестного типа.");
+			}
+			const auto* algorithm =
+				search_tree_algorithm_for(m_active_tree);
+			if (!algorithm)
+			{
+				throw std::logic_error(
+					"Для выбранного типа дерева не найден алгоритм.");
+			}
+
+			visual_tree empty_tree;
+			empty_tree.root = no_visual_node;
+			if (m_active_tree == 5)
+			{
+				empty_tree.b_plus = true;
+				empty_tree.fanout =
+					b_plus_tree<std::int64_t>::default_max_children;
+			}
+			const std::string serialization =
+				algorithm->serialize(empty_tree);
+			auto previous_state = capture_tree_history_state();
+			const auto archive_member_path = add_tree_to_session(
+				tree_file_stems[static_cast<std::size_t>(m_active_tree)],
+				serialization);
+
+			const auto separator = archive_member_path.find_last_of('/');
+			const auto file_name = std::string_view(archive_member_path).substr(
+				separator == std::string::npos ? 0 : separator + 1);
+			const auto extension = file_name.find_last_of('.');
+			const std::string tree_name(
+				file_name.substr(
+					0,
+					extension == std::string_view::npos
+						? file_name.size()
+						: extension));
+			m_current_tree_path.clear();
+			m_current_archive_member_path = archive_member_path;
+			m_merge_source_archive_path.clear();
+			m_selected_local_path.reset();
+			m_split_result_member_paths = {};
+			m_split_result_key_kind.reset();
+			m_split_pivot_label.clear();
+			create_window_tree(tree_name, serialization);
+			m_current_tree_path.clear();
+			m_current_archive_member_path = archive_member_path;
+			update_session_metadata();
+
+			const auto entry = std::find_if(
+				m_session_entries.begin(),
+				m_session_entries.end(),
+				[&](const auto& candidate)
+				{
+					return candidate.path == archive_member_path;
+				});
+			if (entry == m_session_entries.end())
+			{
+				throw std::logic_error(
+					"Созданное дерево отсутствует в рабочей области.");
+			}
+			const auto entry_index = static_cast<std::size_t>(
+				std::distance(m_session_entries.begin(), entry));
+			m_selected_archive_entry =
+				entry_index <= static_cast<std::size_t>(
+					std::numeric_limits<int>::max())
+				? static_cast<int>(entry_index)
+				: -1;
+
+			auto archive_delta =
+				std::make_shared<archive_entry_history_delta>();
+			archive_delta->added_entries.push_back(*entry);
+			record_tree_history_change(
+				std::move(previous_state),
+				std::move(archive_delta));
+			m_last_action = std::format(
+				"Создано пустое дерево «{}» типа {}. Добавьте ключ через поле «Ключ»; Ctrl+S сохранит рабочую область.",
+				tree_name,
+				algorithm->name());
+			logger.success(
+				"Created empty ",
+				algorithm->name(),
+				" tree '",
+				tree_name,
+				"' in the current workspace.");
+		}
+
 		void begin_new_workspace()
 		{
 			request_workspace_action(
@@ -3054,8 +3173,11 @@ namespace tree_practicum
 			m_session_entries.clear();
 			m_session_path.clear();
 			m_session_name = "Новая рабочая область";
+			m_selected_workspace = 0;
+			m_selected_local_path.reset();
 			m_tree_operation_error.clear();
 			m_tree_dirty = false;
+			m_show_demo_trees = false;
 			m_current_tree_path.clear();
 			m_current_archive_member_path.clear();
 			m_merge_source_archive_path.clear();
@@ -3068,6 +3190,9 @@ namespace tree_practicum
 			m_loaded_search_tree_key_kind.reset();
 			m_loaded_search_tree_valid = false;
 			m_loaded_tree_index = -1;
+			m_tree_canvas_tree_index = -1;
+			m_tree_canvas_view_initialized = false;
+			m_tree_canvas_fit_requested = true;
 			m_tree_parse_error.clear();
 			m_selected_archive_entry = -1;
 			update_session_metadata();
@@ -3134,6 +3259,7 @@ namespace tree_practicum
 				: manifest.name;
 			m_tree_operation_error.clear();
 			m_tree_dirty = false;
+			m_show_demo_trees = false;
 			clear_current_tree_state(false);
 
 			if (history)
@@ -4024,7 +4150,7 @@ namespace tree_practicum
 				}
 				m_tree_dirty = true;
 				auto split_delta =
-					std::make_shared<split_history_delta>();
+					std::make_shared<archive_entry_history_delta>();
 				for (const auto& path : { left_path, right_path })
 				{
 					const auto entry = std::find_if(
@@ -4107,11 +4233,11 @@ namespace tree_practicum
 			const std::vector<tree_practicum::archive_entry>& entries)
 		{
 			auto& current_tree = document.current_tree;
-			if (current_tree.split_delta ||
-				current_tree.split_entries_present)
+			if (current_tree.archive_entry_delta ||
+				current_tree.archive_entries_present)
 			{
 				throw std::invalid_argument(
-					"Undo history current state contains an invalid split delta");
+					"Undo history current state contains an invalid archive-entry delta");
 			}
 			if (current_tree.current_archive_member_path.empty())
 			{
@@ -5071,11 +5197,9 @@ namespace tree_practicum
 				return;
 			}
 
-			const auto& workspace = workspace_entries[
-				static_cast<std::size_t>(m_selected_workspace)];
 			ImGui::Text(
-				"Сценарий: %s",
-				workspace.name.data());
+				"Рабочая область: %s",
+				m_session_name.c_str());
 			ImGui::SameLine();
 			ImGui::TextDisabled(
 				m_tree_dirty
@@ -5085,6 +5209,9 @@ namespace tree_practicum
 					? can_insert_into_selected_search_tree()
 						? "Загруженное дерево · операции int64_t/double доступны"
 					: "Операции доступны только для int64_t и double"
+						: m_current_tree_name.empty() &&
+							!m_show_demo_trees
+						? "Пустая рабочая область · создайте дерево или откройте .tree"
 						: "Демо-отрисовка · откройте .tree для операций");
 			if (!m_tree_parse_error.empty())
 			{
@@ -5101,6 +5228,19 @@ namespace tree_practicum
 					m_tree_operation_error.c_str());
 			}
 
+			if (ImGui::Button("Новая рабочая область"))
+			{
+				begin_new_workspace();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Новое дерево"))
+			{
+				(void)perform_io([&]
+				{
+					create_new_tree();
+				});
+			}
+			ImGui::SameLine();
 			if (ImGui::Button("Загрузить .tree..."))
 			{
 				request_tree_file_picker();
@@ -5215,21 +5355,38 @@ namespace tree_practicum
 			ImGui::SameLine();
 			ImGui::TextDisabled("Колесо: масштаб · средняя кнопка: сдвиг");
 			ImGui::Separator();
+			// Keep programmatic selection changes from being replaced by the old active tab.
+			const int tree_type_to_sync =
+				m_tree_tab_selection_index == m_active_tree
+				? -1
+				: m_active_tree;
+			bool synchronized_tree_tab_open = false;
 			if (ImGui::BeginTabBar("TreeTypeTabs"))
 			{
 				for (std::size_t i = 0; i < tree_names.size(); ++i)
 				{
-					const auto flags = m_active_tree == static_cast<int>(i)
+					const auto flags =
+						tree_type_to_sync == static_cast<int>(i)
 						? ImGuiTabItemFlags_SetSelected
 						: ImGuiTabItemFlags_None;
 					if (ImGui::BeginTabItem(tree_names[i].data(), nullptr, flags))
 					{
-						select_tree(static_cast<int>(i));
-						draw_tree_preview(panel, i);
+						if (tree_type_to_sync < 0 ||
+							tree_type_to_sync == static_cast<int>(i))
+						{
+							select_tree(static_cast<int>(i));
+							draw_tree_preview(i);
+							synchronized_tree_tab_open = true;
+						}
 						ImGui::EndTabItem();
 					}
 				}
 				ImGui::EndTabBar();
+				if (tree_type_to_sync < 0 ||
+					synchronized_tree_tab_open)
+				{
+					m_tree_tab_selection_index = m_active_tree;
+				}
 			}
 			draw_split_result_tabs();
 		}
@@ -8802,17 +8959,21 @@ namespace tree_practicum
 			}
 		}
 
-		void draw_tree_preview(
-			const mngl::imgui_context::window_scope& panel,
-			std::size_t tree_index)
+		void draw_tree_preview(std::size_t tree_index)
 		{
-			[[maybe_unused]] const auto monospace =
-				panel.use_font(mngl::imgui_compat::font_role::monospace);
 			if (!ImGui::BeginChild(
 				"TreePreview",
 				ImVec2(0.0f, 0.0f),
 				ImGuiChildFlags_Borders))
 			{
+				ImGui::EndChild();
+				return;
+			}
+
+			if (m_current_tree_name.empty() && !m_show_demo_trees)
+			{
+				ImGui::TextDisabled(
+					"Рабочая область пуста. Создайте новое дерево или загрузите .tree.");
 				ImGui::EndChild();
 				return;
 			}
@@ -8843,10 +9004,11 @@ namespace tree_practicum
 				return;
 			}
 
-			ImGui::TextDisabled(
-				tree.b_plus
-					? "B+: синие узлы — индексы, зелёные — листья, стрелки — next."
-					: "Frame2D. Колесо меняет масштаб, средняя кнопка двигает поле.");
+			if (tree.b_plus)
+			{
+				ImGui::TextDisabled(
+					"B+: синие узлы — индексы, зелёные — листья, стрелки — next.");
+			}
 			if (showing_animation)
 			{
 				ImGui::TextDisabled(
@@ -9002,10 +9164,10 @@ namespace tree_practicum
 				leaf_link_space;
 
 			const std::string_view banner = current_tree_loaded
-				? "LOADED .TREE"
+				? "LOADED TREE"
 				: m_tree_parse_error.empty()
-					? "DEMO DATA - Frame2D renderer"
-					: "PARSE ERROR - showing demo";
+					? "DEMO DATA"
+					: "PARSE ERROR";
 			const ImVec2 canvas_min = ImGui::GetCursorScreenPos();
 			const ImVec2 canvas_size = ImGui::GetContentRegionAvail();
 			if (canvas_size.x > 0.0f && canvas_size.y > 0.0f)
@@ -10041,28 +10203,39 @@ namespace tree_practicum
 			{
 				if (ImGui::BeginTabItem("Сведения"))
 				{
-					const auto& workspace = workspace_entries[
-						static_cast<std::size_t>(m_selected_workspace)];
-					ImGui::Text("Сценарий: %s", workspace.name.data());
+					ImGui::Text(
+						"Рабочая область: %s",
+						m_session_name.c_str());
 					ImGui::SameLine();
 					ImGui::Text("Дерево: %s", tree_names[
 						static_cast<std::size_t>(m_active_tree)].data());
+					const bool empty_workspace =
+						m_current_tree_name.empty() &&
+						!m_show_demo_trees;
 					const bool current_tree_loaded =
 						m_loaded_visual_tree.has_value() &&
 						m_loaded_tree_index == m_active_tree;
-					const auto& displayed_tree = current_tree_loaded
-						? *m_loaded_visual_tree
-						: demo_trees()[
-							static_cast<std::size_t>(m_active_tree)];
-					ImGui::Text(
-						"%s: %zu узлов · ключей: %zu",
-						current_tree_loaded ? "Загружено" : "Демо",
-						displayed_tree.nodes.size(),
-						count_visual_keys(displayed_tree));
-					if (displayed_tree.b_plus)
+					if (empty_workspace)
 					{
 						ImGui::TextDisabled(
-							"B+: внутренние узлы содержат разделители, листья связаны next-ссылками.");
+							"Рабочая область пуста. Создайте дерево или загрузите .tree.");
+					}
+					else
+					{
+						const auto& displayed_tree = current_tree_loaded
+							? *m_loaded_visual_tree
+							: demo_trees()[
+								static_cast<std::size_t>(m_active_tree)];
+						ImGui::Text(
+							"%s: %zu узлов · ключей: %zu",
+							current_tree_loaded ? "Загружено" : "Демо",
+							displayed_tree.nodes.size(),
+							count_visual_keys(displayed_tree));
+						if (displayed_tree.b_plus)
+						{
+							ImGui::TextDisabled(
+								"B+: внутренние узлы содержат разделители, листья связаны next-ссылками.");
+						}
 					}
 					ImGui::Separator();
 					if (!m_session_path.empty())
@@ -10123,9 +10296,11 @@ namespace tree_practicum
 					else
 					{
 						ImGui::TextDisabled(
-							current_tree_loaded
-								? "Показано загруженное дерево."
-								: "Показана демонстрационная структура.");
+							empty_workspace
+								? "Предпросмотр дерева отсутствует."
+								: current_tree_loaded
+									? "Показано загруженное дерево."
+									: "Показана демонстрационная структура.");
 					}
 					ImGui::EndTabItem();
 				}
@@ -11675,6 +11850,7 @@ namespace tree_practicum
 		int m_selected_function = 0;
 		int m_selected_archive_entry = -1;
 		int m_active_tree = 0;
+		int m_tree_tab_selection_index = 0;
 		int m_tree_find_tree_index = -1;
 		int m_loaded_tree_index = -1;
 		int m_tree_filter = -1;
@@ -11696,6 +11872,7 @@ namespace tree_practicum
 		bool m_unsaved_changes_dialog_requested = false;
 		bool m_waiting_for_save_before_workspace_action = false;
 		bool m_tree_dirty = false;
+		bool m_show_demo_trees = false;
 		bool m_loaded_search_tree_valid = false;
 		bool m_tree_find_result_valid = false;
 		bool m_tree_find_found = false;
