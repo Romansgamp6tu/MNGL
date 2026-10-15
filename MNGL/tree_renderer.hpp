@@ -26,6 +26,10 @@
 #include <utility>
 #include <vector>
 
+#if defined(_OPENMP)
+#include <omp.h>
+#endif
+
 namespace mngl::two_d
 {
 	inline constexpr std::size_t no_tree_draw_node =
@@ -2563,6 +2567,41 @@ namespace mngl::two_d
 				return {};
 			}
 
+#if defined(_OPENMP)
+			if (model.nodes.size() >= openmp_minimum_chunk_size * 2 &&
+				omp_get_max_threads() > 1)
+			{
+				{
+					std::unique_lock lock(m_mutex);
+					m_work_complete.wait(
+						lock,
+						[this]
+						{
+							return m_stopping ||
+								(!m_worker_active &&
+									!m_pending.has_value());
+						});
+					if (m_stopping)
+					{
+						throw std::logic_error(
+							"Tree culling worker is shutting down");
+					}
+				}
+
+				tree_draw_visibility result;
+				collect_visible_range(
+					model,
+					layout,
+					area,
+					viewport,
+					options,
+					0,
+					model.nodes.size(),
+					result);
+				return result;
+			}
+#endif
+
 			const std::size_t middle = model.nodes.size() / 2;
 			if (middle == 0)
 			{
@@ -2728,6 +2767,9 @@ namespace mngl::two_d
 		}
 
 	private:
+		static constexpr std::size_t openmp_minimum_chunk_size =
+			16'384;
+
 		struct cull_request
 		{
 			std::uint64_t id = 0;
@@ -2811,7 +2853,8 @@ namespace mngl::two_d
 				options.node_size.y * 0.08f,
 				options.edge_width * 2.5f);
 
-			for (std::size_t index = begin; index < end; ++index)
+			const auto collect_node =
+				[&](std::size_t index, tree_draw_visibility& output)
 			{
 				const auto& node = model.nodes[index];
 				const glm::vec2 center = center_at(index);
@@ -2822,12 +2865,12 @@ namespace mngl::two_d
 					viewport,
 					node_padding))
 				{
-					result.nodes.push_back(index);
+					output.nodes.push_back(index);
 				}
 
 				if (options.edge_width <= 0.0f)
 				{
-					continue;
+					return;
 				}
 				const float node_left = center.x - size.x * 0.5f;
 				for (std::size_t child_slot = 0;
@@ -2863,7 +2906,7 @@ namespace mngl::two_d
 						viewport,
 						edge_padding))
 					{
-						result.edges.push_back(
+						output.edges.push_back(
 							{ index, child_slot, child });
 					}
 				}
@@ -2871,7 +2914,7 @@ namespace mngl::two_d
 				if (!options.show_leaf_links ||
 					node.next_leaf == tree_draw_model::no_node)
 				{
-					continue;
+					return;
 				}
 				const std::size_t next = node.next_leaf;
 				if (next >= count)
@@ -2908,8 +2951,116 @@ namespace mngl::two_d
 					viewport,
 					edge_padding + arrow_size))
 				{
-					result.leaf_link_sources.push_back(index);
+					output.leaf_link_sources.push_back(index);
 				}
+			};
+
+#if defined(_OPENMP)
+			const std::size_t range_size = end - begin;
+			const int maximum_threads = omp_get_max_threads();
+			if (range_size >= openmp_minimum_chunk_size * 2 &&
+				maximum_threads > 1 &&
+				end <= static_cast<std::size_t>(
+					std::numeric_limits<std::int64_t>::max()))
+			{
+				const std::size_t requested_threads =
+					1 + (range_size - 1) /
+						openmp_minimum_chunk_size;
+				const int thread_count = static_cast<int>(
+					std::min(
+						static_cast<std::size_t>(maximum_threads),
+						requested_threads));
+				std::vector<tree_draw_visibility> thread_results(
+					static_cast<std::size_t>(thread_count));
+				std::vector<std::exception_ptr> thread_errors(
+					static_cast<std::size_t>(thread_count));
+
+#pragma omp parallel num_threads(thread_count)
+				{
+					const int thread_index = omp_get_thread_num();
+					auto& thread_error = thread_errors[
+						static_cast<std::size_t>(thread_index)];
+					auto& thread_result = thread_results[
+						static_cast<std::size_t>(thread_index)];
+
+#pragma omp for schedule(static)
+					for (std::int64_t raw_index =
+							static_cast<std::int64_t>(begin);
+						raw_index < static_cast<std::int64_t>(end);
+						++raw_index)
+					{
+						if (thread_error)
+						{
+							continue;
+						}
+						try
+						{
+							collect_node(
+								static_cast<std::size_t>(raw_index),
+								thread_result);
+						}
+						catch (...)
+						{
+							thread_error = std::current_exception();
+						}
+					}
+				}
+
+				for (const auto& thread_error : thread_errors)
+				{
+					if (thread_error)
+					{
+						std::rethrow_exception(thread_error);
+					}
+				}
+
+				std::size_t total_nodes = result.nodes.size();
+				std::size_t total_edges = result.edges.size();
+				std::size_t total_leaf_links =
+					result.leaf_link_sources.size();
+				for (const auto& thread_result : thread_results)
+				{
+					if (thread_result.nodes.size() >
+							result.nodes.max_size() - total_nodes ||
+						thread_result.edges.size() >
+							result.edges.max_size() - total_edges ||
+						thread_result.leaf_link_sources.size() >
+							result.leaf_link_sources.max_size() -
+								total_leaf_links)
+					{
+						throw std::length_error(
+							"Tree visibility exceeds the supported range");
+					}
+					total_nodes += thread_result.nodes.size();
+					total_edges += thread_result.edges.size();
+					total_leaf_links +=
+						thread_result.leaf_link_sources.size();
+				}
+				result.nodes.reserve(total_nodes);
+				result.edges.reserve(total_edges);
+				result.leaf_link_sources.reserve(total_leaf_links);
+				for (auto& thread_result : thread_results)
+				{
+					result.nodes.insert(
+						result.nodes.end(),
+						thread_result.nodes.begin(),
+						thread_result.nodes.end());
+					result.edges.insert(
+						result.edges.end(),
+						thread_result.edges.begin(),
+						thread_result.edges.end());
+					result.leaf_link_sources.insert(
+						result.leaf_link_sources.end(),
+						thread_result.leaf_link_sources.begin(),
+						thread_result.leaf_link_sources.end());
+				}
+				return;
+			}
+#endif
+
+			for (std::size_t index = begin; index < end; ++index)
+			{
+				collect_node(index, result);
 			}
 		}
 

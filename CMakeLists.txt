@@ -13,6 +13,11 @@ add_executable(mngl_demo
 )
 
 target_compile_features(mngl_demo PRIVATE cxx_std_23)
+find_package(OpenMP QUIET COMPONENTS CXX)
+if(OpenMP_CXX_FOUND)
+	target_link_libraries(mngl_demo PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
 target_include_directories(mngl_demo PRIVATE
 	"${CMAKE_CURRENT_SOURCE_DIR}/include"
 	"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
