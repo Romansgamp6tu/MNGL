@@ -160,6 +160,21 @@ namespace tree_practicum
 			bool b_plus = false;
 		};
 
+		struct tree_preview_geometry
+		{
+			mngl::two_d::tree_draw_model model;
+			mngl::two_d::tree_layout layout;
+			mngl::two_d::tree_draw_options draw_options;
+			std::uint64_t revision = 0;
+			std::size_t animation_step = 0;
+			int tree_index = -1;
+			float tree_width = 0.0f;
+			float tree_height = 0.0f;
+			float leaf_link_space = 0.0f;
+			bool current_tree_loaded = false;
+			bool showing_animation = false;
+		};
+
 		struct tree_visual_event
 		{
 			enum class kind
@@ -1661,6 +1676,7 @@ namespace tree_practicum
 			std::shared_ptr<const archive_entry_history_delta>
 				archive_entry_delta = {})
 		{
+			invalidate_tree_preview_cache();
 			previous.document_state_id = m_current_document_state_id;
 			previous.archive_entry_delta = archive_entry_delta;
 			previous.archive_entries_present = false;
@@ -3166,6 +3182,7 @@ namespace tree_practicum
 		void reset_workspace()
 		{
 			cancel_tree_animation();
+			invalidate_tree_preview_cache();
 			clear_tree_find_result();
 			reset_history();
 			m_key_input_edit_start.reset();
@@ -3374,6 +3391,7 @@ namespace tree_practicum
 			std::string_view serialization)
 		{
 			cancel_tree_animation();
+			invalidate_tree_preview_cache();
 			clear_tree_find_result();
 			m_current_tree_name = tree_name;
 			m_current_tree_serialization = serialization;
@@ -4362,6 +4380,7 @@ namespace tree_practicum
 		void clear_current_tree_state(bool update_metadata = true)
 		{
 			cancel_tree_animation();
+			invalidate_tree_preview_cache();
 			clear_tree_find_result();
 			m_current_tree_name.clear();
 			m_current_tree_serialization.clear();
@@ -8959,6 +8978,322 @@ namespace tree_practicum
 			}
 		}
 
+		void invalidate_tree_preview_cache() noexcept
+		{
+			if (m_tree_preview_revision ==
+				std::numeric_limits<std::uint64_t>::max())
+			{
+				m_tree_preview_revision = 1;
+			}
+			else
+			{
+				++m_tree_preview_revision;
+			}
+			m_tree_preview_geometry.reset();
+			m_tree_preview_visibility.reset();
+			m_tree_preview_visibility_geometry.reset();
+			m_tree_preview_visibility_bounds = {};
+			m_tree_preview_visibility_request_geometry.reset();
+			m_tree_preview_visibility_request_id = 0;
+			m_tree_preview_visibility_request_bounds = {};
+		}
+
+		[[nodiscard]] std::shared_ptr<const tree_preview_geometry>
+			get_tree_preview_geometry(
+				const visual_tree& tree,
+				std::size_t tree_index,
+				bool current_tree_loaded,
+				bool showing_animation)
+		{
+			const std::size_t animation_step =
+				showing_animation && m_tree_animation.has_value()
+				? m_tree_animation->next_event
+				: 0;
+			if (m_tree_preview_geometry &&
+				m_tree_preview_geometry->revision ==
+					m_tree_preview_revision &&
+				m_tree_preview_geometry->tree_index ==
+					static_cast<int>(tree_index) &&
+				m_tree_preview_geometry->current_tree_loaded ==
+					current_tree_loaded &&
+				m_tree_preview_geometry->showing_animation ==
+					showing_animation &&
+				m_tree_preview_geometry->animation_step == animation_step)
+			{
+				return m_tree_preview_geometry;
+			}
+
+			auto geometry = std::make_shared<tree_preview_geometry>();
+			geometry->revision = m_tree_preview_revision;
+			geometry->tree_index = static_cast<int>(tree_index);
+			geometry->current_tree_loaded = current_tree_loaded;
+			geometry->showing_animation = showing_animation;
+			geometry->animation_step = animation_step;
+			geometry->leaf_link_space = tree.b_plus ? 24.0f : 0.0f;
+			geometry->model.root = tree.root;
+			geometry->model.nodes.resize(tree.nodes.size());
+
+			for (std::size_t i = 0; i < tree.nodes.size(); ++i)
+			{
+				const auto& source = tree.nodes[i];
+				auto& target = geometry->model.nodes[i];
+				target.width = visual_node_width;
+				if (tree.b_plus)
+				{
+					target.style = source.leaf
+						? mngl::two_d::tree_node_style::b_plus_leaf
+						: mngl::two_d::tree_node_style::b_plus_internal;
+					target.annotation = source.leaf ? "leaf" : "index";
+					target.children = source.children;
+				}
+				else if (tree_index == 2)
+				{
+					target.style = source.red
+						? mngl::two_d::tree_node_style::red
+						: mngl::two_d::tree_node_style::black;
+					target.annotation = source.red ? "red" : "black";
+				}
+
+				if (!tree.b_plus)
+				{
+					const std::size_t left = source.binary_children[0];
+					const std::size_t right = source.binary_children[1];
+					if (left != no_visual_node || right != no_visual_node)
+					{
+						target.children = { left, right };
+					}
+					else
+					{
+						target.children = source.children;
+					}
+				}
+				target.next_leaf = source.next_leaf;
+
+				const float cell_width = source.keys.empty()
+					? visual_node_width
+					: visual_node_width /
+						static_cast<float>(source.keys.size());
+				const float inner_width = std::max(1.0f, cell_width - 12.0f);
+				if (!source.keys.empty())
+				{
+					target.cell_widths.assign(
+						source.keys.size(),
+						cell_width);
+					target.cell_widths.back() =
+						visual_node_width -
+						cell_width * static_cast<float>(
+							source.keys.size() - 1);
+				}
+				target.key_metadata.resize(source.keys.size());
+				for (std::size_t key_index = 0;
+					key_index < source.keys.size();
+					++key_index)
+				{
+					const auto& key = source.keys[key_index];
+					target.keys.push_back(
+						format_visual_value(key.value, inner_width));
+					if (key.detail.empty() ||
+						(tree_index == 2 && !tree.b_plus))
+					{
+						continue;
+					}
+
+					std::string metadata = key.detail;
+					if (tree_index == 1 && !metadata.starts_with("h="))
+					{
+						metadata.insert(0, "h=");
+					}
+					else if (tree_index == 4 &&
+						!metadata.starts_with("p="))
+					{
+						metadata.insert(0, "p=");
+					}
+					target.key_metadata[key_index] =
+						clip_text_to_width(metadata, inner_width);
+				}
+			}
+
+			auto& options = geometry->draw_options;
+			options.node_size = {
+				visual_node_width,
+				visual_node_height
+			};
+			options.horizontal_gap = 36.0f;
+			options.vertical_gap = 42.0f;
+			options.edge_width = 2.0f;
+			options.corner_radius = 7.0f;
+			options.border_width = 1.5f;
+			options.value_text_height = 16.0f;
+			options.metadata_text_height = 10.5f;
+			options.show_leaf_links = tree.b_plus;
+			const auto rgb = [](float red, float green, float blue)
+			{
+				return mngl::color{
+					red / 255.0f,
+					green / 255.0f,
+					blue / 255.0f,
+					1.0f
+				};
+			};
+			options.edge_color = rgb(114.0f, 128.0f, 148.0f);
+			options.node_border = rgb(111.0f, 174.0f, 215.0f);
+			options.node_fill = tree_index == 3
+				? rgb(53.0f, 49.0f, 94.0f)
+				: tree_index == 4
+					? rgb(62.0f, 48.0f, 87.0f)
+					: rgb(35.0f, 57.0f, 77.0f);
+			options.red_node_fill = rgb(147.0f, 47.0f, 57.0f);
+			options.black_node_fill = rgb(31.0f, 36.0f, 46.0f);
+			options.b_plus_leaf_fill = rgb(34.0f, 83.0f, 76.0f);
+			options.b_plus_internal_fill = rgb(39.0f, 57.0f, 91.0f);
+			options.value_color = rgb(240.0f, 245.0f, 250.0f);
+			options.metadata_color = rgb(220.0f, 202.0f, 255.0f);
+			options.highlight_border = rgb(255.0f, 223.0f, 128.0f);
+			options.leaf_link_color = rgb(74.0f, 210.0f, 190.0f);
+			geometry->layout = mngl::two_d::measure_tree_layout(
+				geometry->model,
+				options);
+			geometry->tree_width =
+				geometry->layout.size.x + 32.0f * 2.0f;
+			geometry->tree_height =
+				geometry->layout.size.y +
+				48.0f * 2.0f +
+				geometry->leaf_link_space;
+
+			m_tree_preview_geometry = geometry;
+			m_tree_preview_visibility.reset();
+			m_tree_preview_visibility_geometry.reset();
+			m_tree_preview_visibility_bounds = {};
+			return geometry;
+		}
+
+		[[nodiscard]] static bool rectangle_contains(
+			const mngl::rectangle& outer,
+			const mngl::rectangle& inner) noexcept
+		{
+			const double outer_left = outer.pos.x;
+			const double outer_bottom = outer.pos.y;
+			const double outer_right = outer_left + outer.size.x;
+			const double outer_top = outer_bottom + outer.size.y;
+			const double inner_left = inner.pos.x;
+			const double inner_bottom = inner.pos.y;
+			const double inner_right = inner_left + inner.size.x;
+			const double inner_top = inner_bottom + inner.size.y;
+			return inner_left >= outer_left &&
+				inner_bottom >= outer_bottom &&
+				inner_right <= outer_right &&
+				inner_top <= outer_top;
+		}
+
+		[[nodiscard]] std::shared_ptr<const mngl::two_d::tree_draw_visibility>
+			get_tree_preview_visibility(
+				const std::shared_ptr<const tree_preview_geometry>& geometry,
+				const mngl::rectangle& area,
+				const mngl::rectangle& viewport)
+		{
+			auto completed =
+				m_tree_draw_culler.take_completed_result();
+			if (completed &&
+				completed->request_id ==
+					m_tree_preview_visibility_request_id &&
+				m_tree_preview_visibility_request_geometry &&
+				completed->source.get() ==
+					m_tree_preview_visibility_request_geometry.get())
+			{
+				const auto requested_geometry =
+					m_tree_preview_visibility_request_geometry;
+				const auto requested_bounds =
+					m_tree_preview_visibility_request_bounds;
+				m_tree_preview_visibility_request_geometry.reset();
+				m_tree_preview_visibility_request_id = 0;
+				m_tree_preview_visibility_request_bounds = {};
+
+				if (requested_geometry == geometry)
+				{
+					if (completed->error)
+					{
+						std::rethrow_exception(completed->error);
+					}
+
+					const bool cached_visibility_covers_view =
+						m_tree_preview_visibility &&
+						m_tree_preview_visibility_geometry == geometry &&
+						rectangle_contains(
+							m_tree_preview_visibility_bounds,
+							viewport);
+					if (!cached_visibility_covers_view &&
+						rectangle_contains(requested_bounds, viewport))
+					{
+						m_tree_preview_visibility =
+							std::make_shared<const
+								mngl::two_d::tree_draw_visibility>(
+									std::move(completed->visibility));
+						m_tree_preview_visibility_geometry = geometry;
+						m_tree_preview_visibility_bounds =
+							requested_bounds;
+					}
+				}
+			}
+
+			const bool has_current_visibility =
+				m_tree_preview_visibility &&
+				m_tree_preview_visibility_geometry == geometry;
+			if (has_current_visibility &&
+				rectangle_contains(
+					m_tree_preview_visibility_bounds,
+					viewport))
+			{
+				return m_tree_preview_visibility;
+			}
+
+			const glm::vec2 overscan = viewport.size * 0.25f;
+			const mngl::rectangle cull_view{
+				viewport.pos - overscan,
+				viewport.size + overscan * 2.0f
+			};
+
+			if (!has_current_visibility)
+			{
+				m_tree_preview_visibility_request_geometry.reset();
+				m_tree_preview_visibility_request_id = 0;
+				m_tree_preview_visibility_request_bounds = {};
+				auto visibility = m_tree_draw_culler.cull(
+					geometry->model,
+					geometry->layout,
+					area,
+					cull_view,
+					geometry->draw_options);
+				m_tree_preview_visibility =
+					std::make_shared<const
+						mngl::two_d::tree_draw_visibility>(
+							std::move(visibility));
+				m_tree_preview_visibility_geometry = geometry;
+				m_tree_preview_visibility_bounds = cull_view;
+				return m_tree_preview_visibility;
+			}
+
+			const bool pending_request_covers_view =
+				m_tree_preview_visibility_request_geometry == geometry &&
+				m_tree_preview_visibility_request_id != 0 &&
+				rectangle_contains(
+					m_tree_preview_visibility_request_bounds,
+					viewport);
+			if (!pending_request_covers_view)
+			{
+				m_tree_preview_visibility_request_id =
+					m_tree_draw_culler.request_async(
+						geometry,
+						geometry->model,
+						geometry->layout,
+						area,
+						cull_view,
+						geometry->draw_options);
+				m_tree_preview_visibility_request_geometry = geometry;
+				m_tree_preview_visibility_request_bounds = cull_view;
+			}
+			return m_tree_preview_visibility;
+		}
+
 		void draw_tree_preview(std::size_t tree_index)
 		{
 			if (!ImGui::BeginChild(
@@ -9017,151 +9352,19 @@ namespace tree_practicum
 					m_tree_animation->events.size());
 			}
 
+			const auto geometry = get_tree_preview_geometry(
+				tree,
+				tree_index,
+				current_tree_loaded,
+				showing_animation);
+			const auto& render_model = geometry->model;
+			const auto& layout = geometry->layout;
+			const float tree_width = geometry->tree_width;
+			const float tree_height = geometry->tree_height;
+			const float leaf_link_space = geometry->leaf_link_space;
+			auto render_options = geometry->draw_options;
 			constexpr float horizontal_margin = 32.0f;
 			constexpr float vertical_margin = 48.0f;
-			const float leaf_link_space = tree.b_plus ? 24.0f : 0.0f;
-			mngl::two_d::tree_draw_model render_model;
-			render_model.root = tree.root;
-			render_model.nodes.resize(tree.nodes.size());
-			std::vector<std::uint8_t> find_path_highlights;
-			if (current_tree_loaded &&
-				m_tree_find_result_valid &&
-				m_tree_find_tree_index == static_cast<int>(tree_index))
-			{
-				find_path_highlights.resize(tree.nodes.size(), 0);
-				for (const auto node_index : m_tree_find_path)
-				{
-					if (node_index < find_path_highlights.size())
-					{
-						find_path_highlights[node_index] = 1;
-					}
-				}
-			}
-			for (std::size_t i = 0; i < tree.nodes.size(); ++i)
-			{
-				const auto& source = tree.nodes[i];
-				auto& target = render_model.nodes[i];
-				target.width = visual_node_width;
-				if (tree.b_plus)
-				{
-					target.style = source.leaf
-						? mngl::two_d::tree_node_style::b_plus_leaf
-						: mngl::two_d::tree_node_style::b_plus_internal;
-					target.annotation = source.leaf ? "leaf" : "index";
-					target.children = source.children;
-				}
-				else if (tree_index == 2)
-				{
-					target.style = source.red
-						? mngl::two_d::tree_node_style::red
-						: mngl::two_d::tree_node_style::black;
-					target.annotation = source.red ? "red" : "black";
-				}
-
-				if (!tree.b_plus)
-				{
-					const std::size_t left = source.binary_children[0];
-					const std::size_t right = source.binary_children[1];
-					if (left != no_visual_node || right != no_visual_node)
-					{
-						target.children = { left, right };
-					}
-					else
-					{
-						target.children = source.children;
-					}
-				}
-				target.next_leaf = source.next_leaf;
-
-				const float cell_width = source.keys.empty()
-					? visual_node_width
-					: visual_node_width /
-						static_cast<float>(source.keys.size());
-				const float inner_width = std::max(1.0f, cell_width - 12.0f);
-				if (!source.keys.empty())
-				{
-					target.cell_widths.assign(
-						source.keys.size(),
-						cell_width);
-					target.cell_widths.back() =
-						visual_node_width -
-						cell_width * static_cast<float>(source.keys.size() - 1);
-				}
-				target.key_metadata.resize(source.keys.size());
-				for (std::size_t key_index = 0;
-					key_index < source.keys.size();
-					++key_index)
-				{
-					const auto& key = source.keys[key_index];
-					target.keys.push_back(
-						format_visual_value(key.value, inner_width));
-					if (key.detail.empty() ||
-						(tree_index == 2 && !tree.b_plus))
-					{
-						continue;
-					}
-
-					std::string metadata = key.detail;
-					if (tree_index == 1 && !metadata.starts_with("h="))
-					{
-						metadata.insert(0, "h=");
-					}
-					else if (tree_index == 4 &&
-						!metadata.starts_with("p="))
-					{
-						metadata.insert(0, "p=");
-					}
-					target.key_metadata[key_index] =
-						clip_text_to_width(metadata, inner_width);
-				}
-			}
-
-			mngl::two_d::tree_draw_options render_options;
-			render_options.node_size = {
-				visual_node_width,
-				visual_node_height
-			};
-			render_options.horizontal_gap = 36.0f;
-			render_options.vertical_gap = 42.0f;
-			render_options.edge_width = 2.0f;
-			render_options.corner_radius = 7.0f;
-			render_options.border_width = 1.5f;
-			render_options.value_text_height = 16.0f;
-			render_options.metadata_text_height = 10.5f;
-			render_options.show_leaf_links = tree.b_plus;
-			const auto rgb = [](float red, float green, float blue)
-			{
-				return mngl::color{
-					red / 255.0f,
-					green / 255.0f,
-					blue / 255.0f,
-					1.0f
-				};
-			};
-			render_options.edge_color = rgb(114.0f, 128.0f, 148.0f);
-			render_options.node_border = rgb(111.0f, 174.0f, 215.0f);
-			render_options.node_fill = tree_index == 3
-				? rgb(53.0f, 49.0f, 94.0f)
-				: tree_index == 4
-					? rgb(62.0f, 48.0f, 87.0f)
-					: rgb(35.0f, 57.0f, 77.0f);
-			render_options.red_node_fill = rgb(147.0f, 47.0f, 57.0f);
-			render_options.black_node_fill = rgb(31.0f, 36.0f, 46.0f);
-			render_options.b_plus_leaf_fill = rgb(34.0f, 83.0f, 76.0f);
-			render_options.b_plus_internal_fill = rgb(39.0f, 57.0f, 91.0f);
-			render_options.value_color = rgb(240.0f, 245.0f, 250.0f);
-			render_options.metadata_color = rgb(220.0f, 202.0f, 255.0f);
-			render_options.highlight_border = rgb(255.0f, 223.0f, 128.0f);
-			render_options.leaf_link_color = rgb(74.0f, 210.0f, 190.0f);
-			const auto layout = mngl::two_d::measure_tree_layout(
-				render_model,
-				render_options);
-			const float tree_width =
-				layout.size.x + horizontal_margin * 2.0f;
-			const float tree_height =
-				layout.size.y +
-				vertical_margin * 2.0f +
-				leaf_link_space;
 
 			const std::string_view banner = current_tree_loaded
 				? "LOADED TREE"
@@ -9235,10 +9438,72 @@ namespace tree_practicum
 					m_tree_canvas_pan.y += io.MouseDelta.y;
 				}
 
+				const float scale_x =
+					std::isfinite(io.DisplayFramebufferScale.x) &&
+						io.DisplayFramebufferScale.x > 0.0f
+					? io.DisplayFramebufferScale.x
+					: 1.0f;
+				const float scale_y =
+					std::isfinite(io.DisplayFramebufferScale.y) &&
+						io.DisplayFramebufferScale.y > 0.0f
+					? io.DisplayFramebufferScale.y
+					: 1.0f;
+				const auto target_dimension = [](float logical, float scale)
+				{
+					const double dimension = std::round(
+						static_cast<double>(logical) * scale);
+					if (!std::isfinite(dimension) ||
+						dimension > std::numeric_limits<std::uint32_t>::max())
+					{
+						throw std::length_error(
+							"Tree canvas exceeds the supported texture size");
+					}
+					return static_cast<std::uint32_t>(
+						std::max(1.0, dimension));
+				};
+				const glm::uvec2 target_size{
+					target_dimension(canvas_size.x, scale_x),
+					target_dimension(canvas_size.y, scale_y)
+				};
+				if (!ensure_tree_canvas_texture(target_size))
+				{
+					ImGui::EndChild();
+					return;
+				}
+
+				const glm::vec2 view_size{
+					canvas_size.x / m_tree_canvas_zoom,
+					canvas_size.y / m_tree_canvas_zoom
+				};
+				const glm::vec2 view_center{
+					tree_width * 0.5f -
+						m_tree_canvas_pan.x / m_tree_canvas_zoom,
+					tree_height * 0.5f +
+						m_tree_canvas_pan.y / m_tree_canvas_zoom
+				};
+				const mngl::view canvas_view{
+					mngl::rectangle{
+						view_center - view_size * 0.5f,
+						view_size
+					}
+				};
+				const mngl::rectangle visible_area =
+					canvas_view.visible_area(target_size);
+				const mngl::rectangle tree_area{
+					horizontal_margin,
+					vertical_margin + leaf_link_space,
+					layout.size.x,
+					layout.size.y
+				};
+				const auto visibility = get_tree_preview_visibility(
+					geometry,
+					tree_area,
+					visible_area);
+
 				int hovered_node = -1;
 				if (canvas_hovered)
 				{
-					for (std::size_t i = 0; i < layout.nodes.size(); ++i)
+					for (const std::size_t i : visibility->nodes)
 					{
 						const auto& node_layout = layout.nodes[i];
 						const float content_x =
@@ -9268,67 +9533,50 @@ namespace tree_practicum
 						}
 					}
 				}
-				for (std::size_t i = 0; i < render_model.nodes.size(); ++i)
+				std::vector<std::size_t> highlighted_nodes;
+				if (current_tree_loaded &&
+					m_tree_find_result_valid &&
+					m_tree_find_tree_index ==
+						static_cast<int>(tree_index))
 				{
-					const bool animation_node =
-						showing_animation &&
-						m_tree_animation->active_event.has_value() &&
-						(m_tree_animation->active_event->node_index == i ||
-							m_tree_animation->active_event->parent_index == i);
-					const bool search_path_node =
-						!find_path_highlights.empty() &&
-						find_path_highlights[i] != 0;
-					render_model.nodes[i].highlighted =
-						hovered_node == static_cast<int>(i) ||
-						animation_node ||
-						search_path_node;
-				}
-
-				const float scale_x =
-					std::isfinite(io.DisplayFramebufferScale.x) &&
-						io.DisplayFramebufferScale.x > 0.0f
-					? io.DisplayFramebufferScale.x
-					: 1.0f;
-				const float scale_y =
-					std::isfinite(io.DisplayFramebufferScale.y) &&
-						io.DisplayFramebufferScale.y > 0.0f
-					? io.DisplayFramebufferScale.y
-					: 1.0f;
-				const auto target_dimension = [](float logical, float scale)
-				{
-					const double dimension = std::round(
-						static_cast<double>(logical) * scale);
-					if (!std::isfinite(dimension) ||
-						dimension > std::numeric_limits<std::uint32_t>::max())
+					for (const std::size_t node_index : m_tree_find_path)
 					{
-						throw std::length_error(
-							"Tree canvas exceeds the supported texture size");
+						if (node_index < render_model.nodes.size())
+						{
+							highlighted_nodes.push_back(node_index);
+						}
 					}
-					return static_cast<std::uint32_t>(
-						std::max(1.0, dimension));
-				};
-				const glm::uvec2 target_size{
-					target_dimension(canvas_size.x, scale_x),
-					target_dimension(canvas_size.y, scale_y)
-				};
-				ensure_tree_canvas_texture(target_size);
+				}
+				if (showing_animation &&
+					m_tree_animation->active_event.has_value())
+				{
+					const auto& event =
+						m_tree_animation->active_event.value();
+					if (event.node_index < render_model.nodes.size())
+					{
+						highlighted_nodes.push_back(event.node_index);
+					}
+					if (event.parent_index < render_model.nodes.size())
+					{
+						highlighted_nodes.push_back(event.parent_index);
+					}
+				}
+				if (hovered_node >= 0)
+				{
+					highlighted_nodes.push_back(
+						static_cast<std::size_t>(hovered_node));
+				}
+				std::sort(
+					highlighted_nodes.begin(),
+					highlighted_nodes.end());
+				highlighted_nodes.erase(
+					std::unique(
+						highlighted_nodes.begin(),
+						highlighted_nodes.end()),
+					highlighted_nodes.end());
+				render_options.visibility = visibility.get();
+				render_options.highlighted_nodes = highlighted_nodes;
 
-				const glm::vec2 view_size{
-					canvas_size.x / m_tree_canvas_zoom,
-					canvas_size.y / m_tree_canvas_zoom
-				};
-				const glm::vec2 view_center{
-					tree_width * 0.5f -
-						m_tree_canvas_pan.x / m_tree_canvas_zoom,
-					tree_height * 0.5f +
-						m_tree_canvas_pan.y / m_tree_canvas_zoom
-				};
-				const mngl::view canvas_view{
-					mngl::rectangle{
-						view_center - view_size * 0.5f,
-						view_size
-					}
-				};
 				const mngl::color background{
 					23.0f / 255.0f,
 					27.0f / 255.0f,
@@ -9382,16 +9630,13 @@ namespace tree_practicum
 						}
 
 						auto drawable =
-							mngl::two_d::make_tree_drawable(render_model);
+							mngl::two_d::make_tree_drawable(
+								render_model,
+								layout);
 						drawable->draw(
 							frame,
 							m_tree_font,
-							mngl::rectangle{
-								horizontal_margin,
-								vertical_margin + leaf_link_space,
-								layout.size.x,
-								layout.size.y
-							},
+							tree_area,
 							render_options);
 					});
 				m_tree_canvas_texture->display();
@@ -9458,26 +9703,50 @@ namespace tree_practicum
 			ImGui::EndChild();
 		}
 
-		void ensure_tree_canvas_texture(glm::uvec2 size)
+		[[nodiscard]] bool ensure_tree_canvas_texture(glm::uvec2 size)
 		{
 			if (size.x == 0 || size.y == 0)
 			{
-				throw std::invalid_argument(
-					"Tree canvas texture dimensions must be non-zero");
+				return false;
 			}
+
+			const auto& device = m_render_window.gpu_device();
+			const auto format =
+				device.swapchain_texture_format(m_render_window);
+			if (format == mngl::gpu::texture_format::invalid)
+			{
+				return false;
+			}
+			const auto* device_handle = device.raw();
 			if (m_tree_canvas_texture &&
 				m_tree_canvas_texture->valid())
 			{
+				const bool compatible =
+					m_tree_canvas_texture->can_render_to() &&
+					m_tree_canvas_texture->format() == format &&
+					m_tree_canvas_texture->raw_gpu_texture().device_raw() ==
+						device_handle;
 				const glm::uvec2 current_size =
 					m_tree_canvas_texture->size();
-				if (current_size.x == size.x &&
+				if (compatible &&
+					current_size.x == size.x &&
 					current_size.y == size.y)
 				{
-					return;
+					return true;
 				}
 			}
-			m_tree_canvas_texture.emplace(
-				m_render_window.create_texture(size));
+
+			auto replacement = m_render_window.create_texture(size, format);
+			if (!replacement.valid() ||
+				!replacement.can_render_to() ||
+				replacement.format() != format ||
+				replacement.raw_gpu_texture().device_raw() != device_handle ||
+				device.swapchain_texture_format(m_render_window) != format)
+			{
+				return false;
+			}
+			m_tree_canvas_texture.emplace(std::move(replacement));
+			return true;
 		}
 
 		void draw_tree_preview_legacy(
@@ -10785,6 +11054,20 @@ namespace tree_practicum
 				return { inserted, inserted, true, {} };
 			}
 
+			[[nodiscard]] tree_bulk_insert_result insert_many(
+				visual_tree& tree,
+				std::uint64_t requested_count,
+				search_tree_key_kind kind,
+				std::mt19937_64& random_engine) const override
+			{
+				return insert_native_search_tree_many(
+					tree,
+					requested_count,
+					kind,
+					tree_index(),
+					random_engine);
+			}
+
 			[[nodiscard]] std::string serialize(
 				const visual_tree& tree) const override
 			{
@@ -11305,7 +11588,18 @@ namespace tree_practicum
 
 			std::uint64_t inserted_count = 0;
 			std::string serialization;
-			if (tree_index == 4)
+			if (tree_index == 2)
+			{
+				auto native =
+					make_native_binary_tree<rb_tree<Value>, Value>(tree);
+				inserted_count = insert_random_native_values<Value>(
+					native,
+					requested_count,
+					kind,
+					random_engine);
+				serialization = native.to_string();
+			}
+			else if (tree_index == 4)
 			{
 				auto native =
 					make_native_binary_tree<treap<Value>, Value>(tree);
@@ -11885,5 +12179,18 @@ namespace tree_practicum
 		std::uint64_t m_current_document_state_id = 0;
 		std::uint64_t m_saved_document_state_id = 0;
 		std::uint64_t m_next_document_state_id = 1;
+		std::uint64_t m_tree_preview_revision = 0;
+		std::shared_ptr<const tree_preview_geometry>
+			m_tree_preview_geometry;
+		std::shared_ptr<const tree_preview_geometry>
+			m_tree_preview_visibility_geometry;
+		std::shared_ptr<const mngl::two_d::tree_draw_visibility>
+			m_tree_preview_visibility;
+		mngl::rectangle m_tree_preview_visibility_bounds{};
+		std::shared_ptr<const tree_preview_geometry>
+			m_tree_preview_visibility_request_geometry;
+		std::uint64_t m_tree_preview_visibility_request_id = 0;
+		mngl::rectangle m_tree_preview_visibility_request_bounds{};
+		mngl::two_d::tree_draw_culler m_tree_draw_culler;
 	};
 }

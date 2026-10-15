@@ -14,6 +14,19 @@
 #include <string_view>
 #include <vector>
 
+static glm::uvec2 drawable_pixel_size(mngl::window& window)
+{
+	constexpr SDL_WindowFlags unavailable_flags =
+		SDL_WINDOW_HIDDEN |
+		SDL_WINDOW_MINIMIZED |
+		SDL_WINDOW_OCCLUDED;
+	if ((SDL_GetWindowFlags(window.raw()) & unavailable_flags) != 0)
+	{
+		return {};
+	}
+	return window.pixel_size();
+}
+
 static int run_demo()
 {
 	if (SDL_Runtime.error())
@@ -23,7 +36,8 @@ static int run_demo()
 
 	SDL_Log("MNGL startup checkpoint: SDL initialized");
 	mngl::window::flags window_flags;
-	window_flags.resizeable = true;
+	window_flags.fullscreen = true;
+	window_flags.borderless = true;
 	window_flags.high_pixel_density = true;
 
 	float initial_scale = 1.0f;
@@ -135,9 +149,10 @@ static int run_demo()
 
 	while (mngl::Input::continue_work())
 	{
-		const auto target_size = window.pixel_size();
+		const auto target_size = drawable_pixel_size(window);
 		if (target_size.x == 0 || target_size.y == 0)
 		{
+			SDL_Delay(10);
 			continue;
 		}
 		if (!has_completed_frame)
@@ -450,13 +465,21 @@ static int run_demo()
 		{
 			SDL_Log("MNGL startup checkpoint: rendering swapchain");
 		}
-		window.clear(mngl::color{ 0.08f, 0.09f, 0.12f, 1.0f });
+		if (!window.try_clear(mngl::color{ 0.08f, 0.09f, 0.12f, 1.0f }))
+		{
+			SDL_Delay(10);
+			continue;
+		}
 		window.draw(panel_sprite);
 		if (show_workspace_surface)
 		{
 			window.draw(workspace_sprite);
 		}
-		window.display();
+		if (!window.try_display())
+		{
+			SDL_Delay(10);
+			continue;
+		}
 		if (!has_completed_frame)
 		{
 			SDL_Log("MNGL startup checkpoint: first frame presented");
@@ -493,7 +516,8 @@ static int run_tree_practicum()
 	}
 
 	mngl::window::flags window_flags;
-	window_flags.resizeable = true;
+	window_flags.fullscreen = true;
+	window_flags.borderless = true;
 	window_flags.high_pixel_density = true;
 
 	float initial_scale = 1.0f;
@@ -532,12 +556,25 @@ static int run_tree_practicum()
 
 	while (mngl::Input::continue_work())
 	{
+		const auto target_size = drawable_pixel_size(window);
+		if (target_size.x == 0 || target_size.y == 0)
+		{
+			SDL_Delay(10);
+			continue;
+		}
 		{
 			auto frame = gui.frame();
 			ui.draw(frame);
 		}
-		window.clear(mngl::color{ 0.08f, 0.09f, 0.12f, 1.0f });
-		window.display();
+		if (!window.try_clear(mngl::color{ 0.08f, 0.09f, 0.12f, 1.0f }))
+		{
+			SDL_Delay(10);
+			continue;
+		}
+		if (!window.try_display())
+		{
+			SDL_Delay(10);
+		}
 	}
 	return 0;
 }

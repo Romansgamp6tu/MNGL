@@ -42,6 +42,8 @@ namespace mngl::gpu
 			: owner_thread(require_owner_thread(o))
 			, handle(std::exchange(o.handle, nullptr))
 			, dev(std::exchange(o.dev, nullptr))
+			, has_acquired_swapchain_texture(
+				std::exchange(o.has_acquired_swapchain_texture, false))
 		{}
 
 		command_buffer& operator=(command_buffer&& o)
@@ -53,6 +55,8 @@ namespace mngl::gpu
 				submit_noexcept();
 				handle = std::exchange(o.handle, nullptr);
 				dev = std::exchange(o.dev, nullptr);
+				has_acquired_swapchain_texture =
+					std::exchange(o.has_acquired_swapchain_texture, false);
 			}
 			return *this;
 		}
@@ -89,7 +93,24 @@ namespace mngl::gpu
 			{
 				auto* pending = std::exchange(handle, nullptr);
 				dev = nullptr;
+				has_acquired_swapchain_texture = false;
 				TRY_SDL(SDL_SubmitGPUCommandBuffer(pending));
+			}
+		}
+
+		void cancel()
+		{
+			ensure_owner_thread();
+			if (has_acquired_swapchain_texture)
+			{
+				throw std::logic_error(
+					"Cannot cancel a command buffer after acquiring its swapchain texture");
+			}
+			if (handle)
+			{
+				auto* pending = std::exchange(handle, nullptr);
+				dev = nullptr;
+				TRY_SDL(SDL_CancelGPUCommandBuffer(pending));
 			}
 		}
 
@@ -112,7 +133,14 @@ namespace mngl::gpu
 
 			SDL_GPUTexture* tex_handle = nullptr;
 			glm::uvec2 size = { 0, 0 };
-			TRY_SDL(SDL_AcquireGPUSwapchainTexture(handle, win.raw(), &tex_handle, &size.x, &size.y));
+			// The non-blocking API can return a null texture while frames are in flight.
+			TRY_SDL(SDL_WaitAndAcquireGPUSwapchainTexture(
+				handle,
+				win.raw(),
+				&tex_handle,
+				&size.x,
+				&size.y));
+			has_acquired_swapchain_texture = tex_handle != nullptr;
 			auto fmt = static_cast<texture_format>(SDL_GetGPUSwapchainTextureFormat(dev, win.raw()));
 			return texture(dev, tex_handle, fmt, size);
 		}
@@ -153,6 +181,7 @@ namespace mngl::gpu
 			{
 				auto* pending = std::exchange(handle, nullptr);
 				dev = nullptr;
+				has_acquired_swapchain_texture = false;
 				if (!SDL_SubmitGPUCommandBuffer(pending))
 				{
 					SDL_LogError(
@@ -166,5 +195,6 @@ namespace mngl::gpu
 		const std::thread::id owner_thread;
 		SDL_GPUCommandBuffer* handle = nullptr;
 		SDL_GPUDevice* dev = nullptr;
+		bool has_acquired_swapchain_texture = false;
 	};
 }

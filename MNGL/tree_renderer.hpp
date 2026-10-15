@@ -7,15 +7,21 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <condition_variable>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <limits>
 #include <memory>
+#include <mutex>
+#include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -55,6 +61,28 @@ namespace mngl::two_d
 		std::size_t root = no_node;
 	};
 
+	struct tree_draw_edge
+	{
+		std::size_t parent = no_tree_draw_node;
+		std::size_t child_slot = 0;
+		std::size_t child = no_tree_draw_node;
+	};
+
+	struct tree_draw_visibility
+	{
+		std::vector<std::size_t> nodes;
+		std::vector<tree_draw_edge> edges;
+		std::vector<std::size_t> leaf_link_sources;
+	};
+
+	struct tree_draw_cull_result
+	{
+		std::uint64_t request_id = 0;
+		std::shared_ptr<const void> source;
+		tree_draw_visibility visibility;
+		std::exception_ptr error;
+	};
+
 	struct tree_layout_node
 	{
 		glm::vec2 center{};
@@ -90,6 +118,8 @@ namespace mngl::two_d
 		color b_plus_internal_fill{ 0.15f, 0.22f, 0.36f, 1.0f };
 		color highlight_border{ 1.0f, 0.87f, 0.50f, 1.0f };
 		color leaf_link_color{ 0.29f, 0.82f, 0.75f, 1.0f };
+		const tree_draw_visibility* visibility = nullptr;
+		std::span<const std::size_t> highlighted_nodes{};
 	};
 
 	using binary_tree_draw_options = tree_draw_options;
@@ -2065,10 +2095,22 @@ namespace mngl::two_d
 			font& value_font,
 			const tree_draw_model& model,
 			const ::mngl::rectangle& area,
-			const tree_draw_options& options)
+			const tree_draw_options& options,
+			const tree_layout* precomputed_layout = nullptr)
 		{
 			validate_tree_draw_options(area, options);
-			const tree_layout layout = build_tree_layout(model, options);
+			tree_layout generated_layout;
+			if (precomputed_layout == nullptr)
+			{
+				generated_layout = build_tree_layout(model, options);
+				precomputed_layout = &generated_layout;
+			}
+			const tree_layout& layout = *precomputed_layout;
+			if (layout.nodes.size() != model.nodes.size())
+			{
+				throw std::logic_error(
+					"Tree layout does not match the drawing model");
+			}
 			if (model.nodes.empty())
 			{
 				return;
@@ -2085,67 +2127,118 @@ namespace mngl::two_d
 					static_cast<double>(area.pos.y) +
 					area.size.y - layout.size.y)
 			};
-			std::vector<glm::vec2> centers(layout.nodes.size());
-			for (std::size_t i = 0; i < centers.size(); ++i)
+			const auto center_at = [&layout, &offset](std::size_t index)
 			{
-				centers[i] = {
+				if (index >= layout.nodes.size())
+				{
+					throw std::logic_error(
+						"Tree visibility contains an invalid node index");
+				}
+				return glm::vec2{
 					checked_tree_coordinate(
-						static_cast<double>(layout.nodes[i].center.x) +
+						static_cast<double>(layout.nodes[index].center.x) +
 						offset.x),
 					checked_tree_coordinate(
-						static_cast<double>(layout.nodes[i].center.y) +
+						static_cast<double>(layout.nodes[index].center.y) +
 						offset.y)
 				};
-			}
+			};
 
 			if (options.edge_width > 0.0f)
 			{
-				for (std::size_t index = 0; index < model.nodes.size(); ++index)
+				const auto draw_edge =
+					[&](std::size_t parent, std::size_t child_slot,
+						std::size_t child)
 				{
-					const auto& node = model.nodes[index];
-					const float node_left =
-						centers[index].x -
-						layout.nodes[index].size.x * 0.5f;
-					for (std::size_t i = 0; i < node.children.size(); ++i)
+					if (parent >= model.nodes.size() ||
+						child >= model.nodes.size() ||
+						child_slot >= model.nodes[parent].children.size() ||
+						model.nodes[parent].children[child_slot] != child)
 					{
-						const std::size_t child = node.children[i];
-						if (child == tree_draw_model::no_node)
+						throw std::logic_error(
+							"Tree visibility contains an invalid edge");
+					}
+					const auto& node = model.nodes[parent];
+					const glm::vec2 parent_center = center_at(parent);
+					const glm::vec2 child_center = center_at(child);
+					const float node_left =
+						parent_center.x -
+						layout.nodes[parent].size.x * 0.5f;
+					const float fraction = node.children.size() > 1
+						? static_cast<float>(child_slot) /
+							static_cast<float>(node.children.size() - 1)
+						: 0.5f;
+					draw_tree_segment(
+						frame,
 						{
-							continue;
+							node_left +
+								layout.nodes[parent].size.x * fraction,
+							parent_center.y -
+								options.node_size.y * 0.5f
+						},
+						{
+							child_center.x,
+							child_center.y +
+								options.node_size.y * 0.5f
+						},
+						options.edge_width,
+						options.edge_color);
+				};
+
+				if (options.visibility != nullptr)
+				{
+					for (const auto& edge : options.visibility->edges)
+					{
+						draw_edge(
+							edge.parent,
+							edge.child_slot,
+							edge.child);
+					}
+				}
+				else
+				{
+					for (std::size_t parent = 0;
+						parent < model.nodes.size();
+						++parent)
+					{
+						for (std::size_t child_slot = 0;
+							child_slot < model.nodes[parent].children.size();
+							++child_slot)
+						{
+							const std::size_t child =
+								model.nodes[parent].children[child_slot];
+							if (child != tree_draw_model::no_node)
+							{
+								draw_edge(parent, child_slot, child);
+							}
 						}
-						const float fraction = node.children.size() > 1
-							? static_cast<float>(i) /
-								static_cast<float>(node.children.size() - 1)
-							: 0.5f;
-						draw_tree_segment(
-							frame,
-							{
-								node_left +
-									layout.nodes[index].size.x * fraction,
-								centers[index].y -
-									options.node_size.y * 0.5f
-							},
-							{
-								centers[child].x,
-								centers[child].y +
-									options.node_size.y * 0.5f
-							},
-							options.edge_width,
-							options.edge_color);
 					}
 				}
 
 				if (options.show_leaf_links)
 				{
-					for (std::size_t index = 0; index < model.nodes.size(); ++index)
+					const auto draw_leaf_link = [&](std::size_t index)
 					{
+						if (index >= model.nodes.size())
+						{
+							throw std::logic_error(
+								"Tree visibility contains an invalid leaf link");
+						}
 						const std::size_t next = model.nodes[index].next_leaf;
 						if (next == tree_draw_model::no_node)
 						{
-							continue;
+							throw std::logic_error(
+								"Tree visibility references an absent leaf link");
 						}
+						if (next >= model.nodes.size())
+						{
+							throw std::logic_error(
+								"Tree leaf link contains an invalid node index");
+						}
+						const glm::vec2 source_center = center_at(index);
+						const glm::vec2 target_center = center_at(next);
 						const float link_y =
-							centers[index].y -
+							source_center.y -
 							options.node_size.y * 0.5f -
 							std::min(
 								options.node_size.y * 0.35f,
@@ -2153,25 +2246,25 @@ namespace mngl::two_d
 									options.node_size.y * 0.12f,
 									options.horizontal_gap * 0.20f));
 						glm::vec2 start{
-							centers[index].x +
+							source_center.x +
 								layout.nodes[index].size.x * 0.5f,
 							link_y
 						};
 						glm::vec2 end{
-							centers[next].x -
+							target_center.x -
 								layout.nodes[next].size.x * 0.5f,
 							link_y
 						};
 						if (end.x <= start.x)
 						{
 							start = {
-								centers[index].x,
-								centers[index].y -
+								source_center.x,
+								source_center.y -
 									options.node_size.y * 0.5f
 							};
 							end = {
-								centers[next].x,
-								centers[next].y -
+								target_center.x,
+								target_center.y -
 									options.node_size.y * 0.5f
 							};
 						}
@@ -2184,6 +2277,28 @@ namespace mngl::two_d
 								options.node_size.y * 0.08f,
 								options.edge_width * 2.5f),
 							options.leaf_link_color);
+					};
+
+					if (options.visibility != nullptr)
+					{
+						for (const std::size_t index :
+							options.visibility->leaf_link_sources)
+						{
+							draw_leaf_link(index);
+						}
+					}
+					else
+					{
+						for (std::size_t index = 0;
+							index < model.nodes.size();
+							++index)
+						{
+							if (model.nodes[index].next_leaf !=
+								tree_draw_model::no_node)
+							{
+								draw_leaf_link(index);
+							}
+						}
 					}
 				}
 			}
@@ -2205,13 +2320,17 @@ namespace mngl::two_d
 				throw std::logic_error(
 					"Tree drawing font metrics cannot be scaled");
 			}
-
-			for (std::size_t index = 0; index < model.nodes.size(); ++index)
+			const auto draw_node = [&](std::size_t index)
 			{
+				if (index >= model.nodes.size())
+				{
+					throw std::logic_error(
+						"Tree visibility contains an invalid node index");
+				}
 				const auto& node = model.nodes[index];
 				const auto& layout_node = layout.nodes[index];
 				const ::mngl::rectangle node_bounds{
-					centers[index] - layout_node.size * 0.5f,
+					center_at(index) - layout_node.size * 0.5f,
 					layout_node.size
 				};
 				const float node_radius = std::min(
@@ -2224,7 +2343,12 @@ namespace mngl::two_d
 					rounded_rectangle border;
 					border.bounds = node_bounds;
 					border.radius = node_radius;
-					border.tint = node.highlighted
+					const bool is_highlighted = node.highlighted ||
+						std::find(
+							options.highlighted_nodes.begin(),
+							options.highlighted_nodes.end(),
+							index) != options.highlighted_nodes.end();
+					border.tint = is_highlighted
 						? options.highlight_border
 						: options.node_border;
 					frame.draw(border);
@@ -2359,6 +2483,20 @@ namespace mngl::two_d
 					}
 					cell_left += cell_width;
 				}
+			};
+			if (options.visibility != nullptr)
+			{
+				for (const std::size_t index : options.visibility->nodes)
+				{
+					draw_node(index);
+				}
+			}
+			else
+			{
+				for (std::size_t index = 0; index < model.nodes.size(); ++index)
+				{
+					draw_node(index);
+				}
 			}
 		}
 	}
@@ -2370,13 +2508,502 @@ namespace mngl::two_d
 		return detail::build_tree_layout(model, options);
 	}
 
+	class tree_draw_culler
+	{
+	public:
+		tree_draw_culler()
+			: m_worker([this] { worker_loop(); })
+		{
+		}
+
+		~tree_draw_culler()
+		{
+			{
+				std::lock_guard lock(m_mutex);
+				m_stopping = true;
+			}
+			m_work_available.notify_one();
+			if (m_worker.joinable())
+			{
+				m_worker.join();
+			}
+		}
+
+		tree_draw_culler(const tree_draw_culler&) = delete;
+		tree_draw_culler& operator=(const tree_draw_culler&) = delete;
+
+		[[nodiscard]] tree_draw_visibility cull(
+			const tree_draw_model& model,
+			const tree_layout& layout,
+			const ::mngl::rectangle& area,
+			const ::mngl::rectangle& viewport,
+			const tree_draw_options& options)
+		{
+			std::lock_guard call_lock(m_call_mutex);
+			detail::validate_tree_draw_options(area, options);
+			detail::validate_tree_draw_area(viewport);
+			if (layout.nodes.size() != model.nodes.size())
+			{
+				throw std::logic_error(
+					"Tree layout does not match the culling model");
+			}
+			if (model.nodes.empty())
+			{
+				return {};
+			}
+
+			const std::size_t middle = model.nodes.size() / 2;
+			if (middle == 0)
+			{
+				tree_draw_visibility result;
+				collect_visible_range(
+					model,
+					layout,
+					area,
+					viewport,
+					options,
+					0,
+					model.nodes.size(),
+					result);
+				return result;
+			}
+
+			tree_draw_visibility result;
+			tree_draw_visibility worker_result;
+			std::uint64_t request_id = 0;
+			{
+				std::unique_lock lock(m_mutex);
+				m_work_complete.wait(
+					lock,
+					[this] { return m_stopping ||
+						(!m_worker_active && !m_pending.has_value()); });
+				if (m_stopping)
+				{
+					throw std::logic_error(
+						"Tree culling worker is shutting down");
+				}
+				request_id = next_request_id_locked();
+				m_pending = cull_request{
+					request_id,
+					true,
+					{},
+					&model,
+					&layout,
+					area,
+					viewport,
+					options,
+					middle,
+					model.nodes.size(),
+					&worker_result
+				};
+			}
+			m_work_available.notify_one();
+
+			std::exception_ptr main_error;
+			try
+			{
+				collect_visible_range(
+					model,
+					layout,
+					area,
+					viewport,
+					options,
+					0,
+					middle,
+					result);
+			}
+			catch (...)
+			{
+				main_error = std::current_exception();
+			}
+
+			std::exception_ptr worker_error;
+			{
+				std::unique_lock lock(m_mutex);
+				m_work_complete.wait(
+					lock,
+					[this, request_id]
+					{
+						return m_completed_request_id == request_id;
+					});
+				worker_error = m_worker_error;
+				m_worker_error = {};
+			}
+			if (main_error)
+			{
+				std::rethrow_exception(main_error);
+			}
+			if (worker_error)
+			{
+				std::rethrow_exception(worker_error);
+			}
+
+			result.nodes.insert(
+				result.nodes.end(),
+				worker_result.nodes.begin(),
+				worker_result.nodes.end());
+			result.edges.insert(
+				result.edges.end(),
+				worker_result.edges.begin(),
+				worker_result.edges.end());
+			result.leaf_link_sources.insert(
+				result.leaf_link_sources.end(),
+				worker_result.leaf_link_sources.begin(),
+				worker_result.leaf_link_sources.end());
+			return result;
+		}
+
+		template<class Snapshot>
+		[[nodiscard]] std::uint64_t request_async(
+			const std::shared_ptr<const Snapshot>& source,
+			const tree_draw_model& model,
+			const tree_layout& layout,
+			const ::mngl::rectangle& area,
+			const ::mngl::rectangle& viewport,
+			const tree_draw_options& options)
+		{
+			if (!source)
+			{
+				throw std::invalid_argument(
+					"Asynchronous tree culling requires a retained snapshot");
+			}
+			detail::validate_tree_draw_options(area, options);
+			detail::validate_tree_draw_area(viewport);
+			if (layout.nodes.size() != model.nodes.size())
+			{
+				throw std::logic_error(
+					"Tree layout does not match the culling model");
+			}
+
+			std::lock_guard call_lock(m_call_mutex);
+			std::uint64_t request_id = 0;
+			{
+				std::lock_guard lock(m_mutex);
+				if (m_stopping)
+				{
+					throw std::logic_error(
+						"Tree culling worker is shutting down");
+				}
+				request_id = next_request_id_locked();
+				m_pending = cull_request{
+					request_id,
+					false,
+					std::shared_ptr<const void>(source),
+					&model,
+					&layout,
+					area,
+					viewport,
+					options,
+					0,
+					model.nodes.size(),
+					nullptr
+				};
+			}
+			m_work_available.notify_one();
+			return request_id;
+		}
+
+		[[nodiscard]] std::optional<tree_draw_cull_result>
+			take_completed_result()
+		{
+			std::lock_guard lock(m_mutex);
+			if (!m_async_result.has_value())
+			{
+				return std::nullopt;
+			}
+			auto result = std::move(m_async_result);
+			m_async_result.reset();
+			return result;
+		}
+
+	private:
+		struct cull_request
+		{
+			std::uint64_t id = 0;
+			bool synchronous = false;
+			std::shared_ptr<const void> source;
+			const tree_draw_model* model = nullptr;
+			const tree_layout* layout = nullptr;
+			::mngl::rectangle area;
+			::mngl::rectangle viewport;
+			tree_draw_options options;
+			std::size_t begin = 0;
+			std::size_t end = 0;
+			tree_draw_visibility* output = nullptr;
+		};
+
+		[[nodiscard]] static bool intersects_view(
+			glm::vec2 first,
+			glm::vec2 second,
+			const ::mngl::rectangle& viewport,
+			float padding) noexcept
+		{
+			const double left = viewport.pos.x;
+			const double bottom = viewport.pos.y;
+			const double right = left + viewport.size.x;
+			const double top = bottom + viewport.size.y;
+			return
+				std::max(first.x, second.x) + padding >= left &&
+				std::min(first.x, second.x) - padding <= right &&
+				std::max(first.y, second.y) + padding >= bottom &&
+				std::min(first.y, second.y) - padding <= top;
+		}
+
+		static void collect_visible_range(
+			const tree_draw_model& model,
+			const tree_layout& layout,
+			const ::mngl::rectangle& area,
+			const ::mngl::rectangle& viewport,
+			const tree_draw_options& options,
+			std::size_t begin,
+			std::size_t end,
+			tree_draw_visibility& result)
+		{
+			const glm::vec2 offset{
+				detail::checked_tree_coordinate(
+					static_cast<double>(area.pos.x) +
+					std::max(
+						0.0,
+						(static_cast<double>(area.size.x) -
+							layout.size.x) * 0.5)),
+				detail::checked_tree_coordinate(
+					static_cast<double>(area.pos.y) +
+					area.size.y - layout.size.y)
+			};
+			const auto center_at = [&layout, &offset](std::size_t index)
+			{
+				if (index >= layout.nodes.size())
+				{
+					throw std::logic_error(
+						"Tree culling encountered an invalid node index");
+				}
+				return glm::vec2{
+					detail::checked_tree_coordinate(
+						static_cast<double>(layout.nodes[index].center.x) +
+						offset.x),
+					detail::checked_tree_coordinate(
+						static_cast<double>(layout.nodes[index].center.y) +
+						offset.y)
+				};
+			};
+
+			const std::size_t count = model.nodes.size();
+			const float node_padding = options.border_width * 0.5f;
+			const float edge_padding = options.edge_width * 0.5f;
+			const float leaf_link_y_offset =
+				std::min(
+					options.node_size.y * 0.35f,
+					std::max(
+						options.node_size.y * 0.12f,
+						options.horizontal_gap * 0.20f));
+			const float arrow_size = std::max(
+				options.node_size.y * 0.08f,
+				options.edge_width * 2.5f);
+
+			for (std::size_t index = begin; index < end; ++index)
+			{
+				const auto& node = model.nodes[index];
+				const glm::vec2 center = center_at(index);
+				const glm::vec2 size = layout.nodes[index].size;
+				if (intersects_view(
+					center - size * 0.5f,
+					center + size * 0.5f,
+					viewport,
+					node_padding))
+				{
+					result.nodes.push_back(index);
+				}
+
+				if (options.edge_width <= 0.0f)
+				{
+					continue;
+				}
+				const float node_left = center.x - size.x * 0.5f;
+				for (std::size_t child_slot = 0;
+					child_slot < node.children.size();
+					++child_slot)
+				{
+					const std::size_t child = node.children[child_slot];
+					if (child == tree_draw_model::no_node)
+					{
+						continue;
+					}
+					if (child >= count)
+					{
+						throw std::logic_error(
+							"Tree culling encountered an invalid child index");
+					}
+					const float fraction = node.children.size() > 1
+						? static_cast<float>(child_slot) /
+							static_cast<float>(node.children.size() - 1)
+						: 0.5f;
+					const glm::vec2 start{
+						node_left + size.x * fraction,
+						center.y - options.node_size.y * 0.5f
+					};
+					const glm::vec2 child_center = center_at(child);
+					const glm::vec2 finish{
+						child_center.x,
+						child_center.y + options.node_size.y * 0.5f
+					};
+					if (intersects_view(
+						start,
+						finish,
+						viewport,
+						edge_padding))
+					{
+						result.edges.push_back(
+							{ index, child_slot, child });
+					}
+				}
+
+				if (!options.show_leaf_links ||
+					node.next_leaf == tree_draw_model::no_node)
+				{
+					continue;
+				}
+				const std::size_t next = node.next_leaf;
+				if (next >= count)
+				{
+					throw std::logic_error(
+						"Tree culling encountered an invalid leaf link");
+				}
+				const glm::vec2 next_center = center_at(next);
+				const float link_y =
+					center.y - options.node_size.y * 0.5f -
+					leaf_link_y_offset;
+				glm::vec2 start{
+					center.x + size.x * 0.5f,
+					link_y
+				};
+				glm::vec2 finish{
+					next_center.x - layout.nodes[next].size.x * 0.5f,
+					link_y
+				};
+				if (finish.x <= start.x)
+				{
+					start = {
+						center.x,
+						center.y - options.node_size.y * 0.5f
+					};
+					finish = {
+						next_center.x,
+						next_center.y - options.node_size.y * 0.5f
+					};
+				}
+				if (intersects_view(
+					start,
+					finish,
+					viewport,
+					edge_padding + arrow_size))
+				{
+					result.leaf_link_sources.push_back(index);
+				}
+			}
+		}
+
+		void worker_loop() noexcept
+		{
+			for (;;)
+			{
+				cull_request request;
+				{
+					std::unique_lock lock(m_mutex);
+					m_work_available.wait(
+						lock,
+						[this] { return m_stopping || m_pending.has_value(); });
+					if (m_stopping)
+					{
+						return;
+					}
+					request = std::move(*m_pending);
+					m_pending.reset();
+					m_worker_active = true;
+				}
+
+				tree_draw_visibility async_result;
+				tree_draw_visibility& output = request.synchronous
+					? *request.output
+					: async_result;
+				std::exception_ptr worker_error;
+				try
+				{
+					collect_visible_range(
+						*request.model,
+						*request.layout,
+						request.area,
+						request.viewport,
+						request.options,
+						request.begin,
+						request.end,
+						output);
+				}
+				catch (...)
+				{
+					worker_error = std::current_exception();
+				}
+				{
+					std::lock_guard lock(m_mutex);
+					m_worker_active = false;
+					if (request.synchronous)
+					{
+						m_worker_error = worker_error;
+						m_completed_request_id = request.id;
+					}
+					else
+					{
+						tree_draw_cull_result completed;
+						completed.request_id = request.id;
+						completed.source = std::move(request.source);
+						completed.visibility = std::move(async_result);
+						completed.error = worker_error;
+						m_async_result = std::move(completed);
+					}
+				}
+				m_work_complete.notify_all();
+			}
+		}
+
+		[[nodiscard]] std::uint64_t next_request_id_locked() noexcept
+		{
+			if (m_next_request_id ==
+				std::numeric_limits<std::uint64_t>::max())
+			{
+				m_next_request_id = 0;
+			}
+			return ++m_next_request_id;
+		}
+
+		std::mutex m_call_mutex;
+		std::mutex m_mutex;
+		std::condition_variable m_work_available;
+		std::condition_variable m_work_complete;
+		std::optional<cull_request> m_pending;
+		std::optional<tree_draw_cull_result> m_async_result;
+		std::uint64_t m_next_request_id = 0;
+		std::uint64_t m_completed_request_id = 0;
+		std::exception_ptr m_worker_error;
+		bool m_worker_active = false;
+		bool m_stopping = false;
+		std::thread m_worker;
+	};
+
 	class tree_model_display_adapter final : public tree_drawable
 	{
 	public:
-		// The model is borrowed and must outlive this display adapter.
+		// The model and optional layout are borrowed and must outlive the adapter.
 		explicit tree_model_display_adapter(
 			const tree_draw_model& model) noexcept
-			: m_model(&model)
+			: m_model(&model),
+			  m_layout(nullptr)
+		{
+		}
+
+		tree_model_display_adapter(
+			const tree_draw_model& model,
+			const tree_layout& layout) noexcept
+			: m_model(&model),
+			  m_layout(&layout)
 		{
 		}
 
@@ -2391,17 +3018,29 @@ namespace mngl::two_d
 				value_font,
 				*m_model,
 				area,
-				options);
+				options,
+				m_layout);
 		}
 
 	private:
 		const tree_draw_model* m_model;
+		const tree_layout* m_layout;
 	};
 
 	[[nodiscard]] inline std::unique_ptr<tree_drawable>
 		make_tree_drawable(const tree_draw_model& model)
 	{
 		return std::make_unique<tree_model_display_adapter>(model);
+	}
+
+	[[nodiscard]] inline std::unique_ptr<tree_drawable>
+		make_tree_drawable(
+			const tree_draw_model& model,
+			const tree_layout& layout)
+	{
+		return std::make_unique<tree_model_display_adapter>(
+			model,
+			layout);
 	}
 
 	template<detail::displayable_binary_search_tree Tree>

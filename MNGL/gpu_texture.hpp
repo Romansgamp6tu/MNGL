@@ -77,7 +77,14 @@ namespace mngl::gpu
 		};
 
 		// Проверка на валидность
-		bool valid() const { return handle != nullptr; }
+		[[nodiscard]] bool valid() const noexcept
+		{
+			return handle != nullptr &&
+				dev != nullptr &&
+				fmt != texture_format::invalid &&
+				size.x != 0 &&
+				size.y != 0;
+		}
 		explicit operator bool() const { return valid(); }
 
 		// Доступ к сырым объектам SDL

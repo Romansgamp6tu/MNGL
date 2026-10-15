@@ -63,7 +63,18 @@ namespace mngl
 
 		void clear(const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f))
 		{
-			begin_target_frame(nullptr, clear_color);
+			if (!try_clear(clear_color))
+			{
+				throw std::runtime_error(
+					"No swapchain texture is available; the window may be minimized or occluded");
+			}
+		}
+
+		// Returns false when SDL cannot provide a swapchain texture for this frame.
+		[[nodiscard]] bool try_clear(
+			const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f))
+		{
+			return begin_target_frame(nullptr, clear_color);
 		}
 
 		void set_view(const ::mngl::view& value)
@@ -158,7 +169,7 @@ namespace mngl
 			const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f)
 		)
 		{
-			begin_target_frame(&target, clear_color);
+			(void)begin_target_frame(&target, clear_color);
 		}
 
 		void draw(const sprite& value)
@@ -235,9 +246,33 @@ namespace mngl
 
 		void display()
 		{
+			if (!display_frame())
+			{
+				throw std::runtime_error(
+					"Window render target became unavailable before presentation");
+			}
+		}
+
+		// Returns false if the window target became unavailable before presentation.
+		[[nodiscard]] bool try_display()
+		{
+			return display_frame();
+		}
+
+	private:
+		bool display_frame()
+		{
 			if (!m_frame || !m_command_buffer)
 			{
 				throw std::logic_error("Cannot display a render_window without an active frame");
+			}
+			if ((m_swapchain_texture &&
+					!swapchain_texture_is_usable(*m_swapchain_texture)) ||
+				(m_active_texture_target &&
+					!offscreen_target_is_usable(*m_active_texture_target)))
+			{
+				discard_active_frame();
+				return false;
 			}
 
 			try
@@ -274,8 +309,10 @@ namespace mngl
 			release_active_texture_target();
 			m_swapchain_texture.reset();
 			m_command_buffer.reset();
+			return true;
 		}
 
+	public:
 		// The returned texture is borrowed and remains valid only until display().
 		[[nodiscard]] const ::mngl::texture& swapchain_texture() const
 		{
@@ -377,7 +414,9 @@ namespace mngl
 			return format;
 		}
 
-		void begin_target_frame(::mngl::texture* target, const color& clear_color)
+		bool begin_target_frame(
+			::mngl::texture* target,
+			const color& clear_color)
 		{
 			if (m_frame || m_command_buffer)
 			{
@@ -385,9 +424,30 @@ namespace mngl
 			}
 
 			// Target textures are borrowed through display().
-			two_d::renderer* active_renderer = target
-				? &renderer_for(*target)
-				: &renderer_for(swapchain_format(), true);
+			gpu::texture_format acquired_swapchain_format =
+				gpu::texture_format::invalid;
+			two_d::renderer* active_renderer = nullptr;
+			if (target)
+			{
+				active_renderer = &renderer_for(*target);
+			}
+			else
+			{
+				if (!window_is_drawable())
+				{
+					return false;
+				}
+				acquired_swapchain_format =
+					gpu_device().swapchain_texture_format(*this);
+				if (acquired_swapchain_format ==
+					gpu::texture_format::invalid)
+				{
+					return false;
+				}
+				active_renderer = &renderer_for(
+					acquired_swapchain_format,
+					true);
+			}
 			if (target)
 			{
 				target->begin_external_render();
@@ -404,6 +464,22 @@ namespace mngl
 				{
 					auto swapchain_target = ::mngl::texture(
 						m_command_buffer->acquire_swapchain_texture(*this));
+					if (!swapchain_target.raw_gpu_texture().raw())
+					{
+						m_command_buffer->cancel();
+						m_command_buffer.reset();
+						m_hit_test_frame.reset();
+						return false;
+					}
+					if (!swapchain_texture_is_usable(
+						swapchain_target,
+						acquired_swapchain_format))
+					{
+						m_command_buffer->submit();
+						m_command_buffer.reset();
+						m_hit_test_frame.reset();
+						return false;
+					}
 					m_swapchain_texture.emplace(std::move(swapchain_target));
 					m_swapchain_texture->enable_hit_testing(m_hit_testing_enabled);
 					m_frame.emplace(active_renderer->begin_frame(*m_swapchain_texture, clear_color));
@@ -421,6 +497,88 @@ namespace mngl
 				m_command_buffer.reset();
 				throw;
 			}
+			return true;
+		}
+
+		[[nodiscard]] bool window_is_drawable() const
+		{
+			constexpr SDL_WindowFlags unavailable_flags =
+				SDL_WINDOW_HIDDEN |
+				SDL_WINDOW_MINIMIZED |
+				SDL_WINDOW_OCCLUDED;
+			if ((SDL_GetWindowFlags(raw()) & unavailable_flags) != 0)
+			{
+				return false;
+			}
+			const auto dimensions = pixel_size();
+			return dimensions.x != 0 && dimensions.y != 0;
+		}
+
+		[[nodiscard]] bool swapchain_texture_is_usable(
+			const ::mngl::texture& target) const
+		{
+			return swapchain_texture_is_usable(
+				target,
+				gpu_device().swapchain_texture_format(*this));
+		}
+
+		[[nodiscard]] bool swapchain_texture_is_usable(
+			const ::mngl::texture& target,
+			gpu::texture_format expected_format) const
+		{
+			if (!window_is_drawable() ||
+				expected_format == gpu::texture_format::invalid ||
+				gpu_device().swapchain_texture_format(*this) !=
+					expected_format ||
+				!target.valid() ||
+				!target.can_render_to() ||
+				target.format() != expected_format ||
+				target.raw_gpu_texture().device_raw() != gpu_device().raw())
+			{
+				return false;
+			}
+			const auto window_size = pixel_size();
+			const auto target_size = target.size();
+			return target_size.x == window_size.x &&
+				target_size.y == window_size.y;
+		}
+
+		[[nodiscard]] bool offscreen_target_is_usable(
+			const ::mngl::texture& target) const noexcept
+		{
+			return target.valid() &&
+				target.can_render_to() &&
+				target.raw_gpu_texture().device_raw() == gpu_device().raw();
+		}
+
+		void discard_active_frame()
+		{
+			m_frame.reset();
+			release_active_texture_target();
+			try
+			{
+				if (m_command_buffer)
+				{
+					if (m_swapchain_texture)
+					{
+						m_command_buffer->submit();
+					}
+					else
+					{
+						m_command_buffer->cancel();
+					}
+				}
+			}
+			catch (...)
+			{
+				m_swapchain_texture.reset();
+				m_command_buffer.reset();
+				m_hit_test_frame.reset();
+				throw;
+			}
+			m_swapchain_texture.reset();
+			m_command_buffer.reset();
+			m_hit_test_frame.reset();
 		}
 
 		[[nodiscard]] two_d::renderer& renderer_for(::mngl::texture& target)
