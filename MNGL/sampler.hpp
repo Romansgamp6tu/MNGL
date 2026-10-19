@@ -164,6 +164,11 @@ namespace mngl::gpu
 			return sampler{device, handle};
 		}
 
+		sampler build(const mngl::gpu::device& device) const
+		{
+			return build(device.raw());
+		}
+
 		// --- Пресеты ---
 
 		static sampler create_point_clamp(SDL_GPUDevice* device)
@@ -174,12 +179,22 @@ namespace mngl::gpu
 				.build(device);
 		}
 
+		static sampler create_point_clamp(const mngl::gpu::device& device)
+		{
+			return create_point_clamp(device.raw());
+		}
+
 		static sampler create_point_repeat(SDL_GPUDevice* device)
 		{
 			return sampler_builder{}
 				.set_filter(filter_mode::nearest)
 				.set_address_mode(sampler_address_mode::repeat)
 				.build(device);
+		}
+
+		static sampler create_point_repeat(const mngl::gpu::device& device)
+		{
+			return create_point_repeat(device.raw());
 		}
 
 		static sampler create_linear_clamp(SDL_GPUDevice* device)
@@ -191,6 +206,11 @@ namespace mngl::gpu
 				.build(device);
 		}
 
+		static sampler create_linear_clamp(const mngl::gpu::device& device)
+		{
+			return create_linear_clamp(device.raw());
+		}
+
 		static sampler create_linear_repeat(SDL_GPUDevice* device)
 		{
 			return sampler_builder{}
@@ -198,6 +218,11 @@ namespace mngl::gpu
 				.set_mipmap_mode(sampler_mipmap_mode::linear)
 				.set_address_mode(sampler_address_mode::repeat)
 				.build(device);
+		}
+
+		static sampler create_linear_repeat(const mngl::gpu::device& device)
+		{
+			return create_linear_repeat(device.raw());
 		}
 
 	private:

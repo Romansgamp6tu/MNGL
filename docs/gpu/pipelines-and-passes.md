@@ -27,15 +27,18 @@ auto pipeline = mngl::gpu::graphics_pipeline_builder{}
     .set_vertex_shader(vertex_shader)
     .set_fragment_shader(fragment_shader)
     .set_vertex_layout(layout)
-    .add_alpha_blend_target(
-        static_cast<SDL_GPUTextureFormat>(target.format()))
-    .build(device.raw());
+    .add_alpha_blend_target(target.format())
+    .build(device);
 ```
 
 Pipeline должен быть создан для формата целевого color attachment, с которым он будет использоваться.
+
+Низкоуровневые перегрузки с SDL-типами и `SDL_GPUDevice*` сохранены. Дополнительно `graphics_pipeline_builder` принимает `mngl::gpu::texture_format` и `mngl::gpu::device`, так что для обычного кода не нужны приведения и `device.raw()`.
 
 ## Render pass
 
 `mngl::gpu::render_pass` открывает проход записи команд в `command_buffer`. Простой overload принимает одну color texture; универсальный принимает список до четырёх color attachments и необязательный depth-stencil attachment. Для каждой цели можно выбрать load/store operation; по умолчанию цвет очищается и сохраняется.
 
 Внутри прохода pipeline и буферы связываются перед draw-командами. Uniform-данные передаются отдельно для vertex и fragment stage, а draw API поддерживает обычные и индексированные примитивы. Деструктор render pass завершает активный проход, поэтому он должен быть уничтожен до `command_buffer::submit()`.
+
+Compute pipeline и RAII `compute_pass` используют тот же command buffer и GPU-ресурсы. Загрузка, bindings и dispatch описаны в разделе [Compute shaders](compute.md).

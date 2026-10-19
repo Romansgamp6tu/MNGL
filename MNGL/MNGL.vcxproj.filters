@@ -116,6 +116,15 @@
     <ClInclude Include="command_buffer.hpp">
       <Filter>Файлы заголовков\gpu</Filter>
     </ClInclude>
+    <ClInclude Include="compute_pass.hpp">
+      <Filter>Файлы заголовков\gpu</Filter>
+    </ClInclude>
+    <ClInclude Include="compute_pipeline.hpp">
+      <Filter>Файлы заголовков\gpu</Filter>
+    </ClInclude>
+    <ClInclude Include="frame_graph.hpp">
+      <Filter>Файлы заголовков\gpu</Filter>
+    </ClInclude>
     <ClInclude Include="render_pass.hpp">
       <Filter>Файлы заголовков\gpu</Filter>
     </ClInclude>

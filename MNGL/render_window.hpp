@@ -6,10 +6,13 @@
 
 #include <cmath>
 #include <concepts>
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -30,6 +33,10 @@ namespace mngl
 
 	class render_window : public window
 	{
+	private:
+		void reset_frame_state() noexcept;
+		void cancel_active_frame(std::uint64_t generation) noexcept;
+
 	public:
 		render_window(
 			const std::string& title,
@@ -49,10 +56,7 @@ namespace mngl
 
 		~render_window()
 		{
-			m_frame.reset();
-			release_active_texture_target();
-			m_swapchain_texture.reset();
-			m_command_buffer.reset();
+			reset_frame_state();
 			if (m_overlay)
 			{
 				auto* overlay = std::exchange(m_overlay, nullptr);
@@ -161,69 +165,9 @@ namespace mngl
 			begin_target_frame(&target, clear_color);
 		}
 
-		void draw(const sprite& value)
+		void draw(const drawable& value)
 		{
 			active_frame().draw(value);
-		}
-
-		void draw(const two_d::circle& value)
-		{
-			active_frame().draw(value);
-		}
-
-		void draw(const two_d::ellipse& value)
-		{
-			active_frame().draw(value);
-		}
-
-		void draw(const two_d::rounded_rectangle& value)
-		{
-			active_frame().draw(value);
-		}
-
-		void draw(
-			const rectangle& bounds,
-			const color& tint = color(1.0f, 1.0f, 1.0f, 1.0f)
-		)
-		{
-			active_frame().draw(bounds, tint);
-		}
-		void draw(
-			const rectangle& bounds,
-			const color& tint,
-			const two_d::transform& object_transform
-		)
-		{
-			active_frame().draw(bounds, tint, object_transform);
-		}
-
-		// The source is borrowed until display() submits the window frame.
-		void draw(
-			const ::mngl::texture& source,
-			const rectangle& bounds,
-			const color& tint = color(1.0f, 1.0f, 1.0f, 1.0f)
-		)
-		{
-			active_frame().draw(source, bounds, tint);
-		}
-		void draw(
-			const ::mngl::texture& source,
-			const rectangle& bounds,
-			const color& tint,
-			const two_d::transform& object_transform
-		)
-		{
-			active_frame().draw(source, bounds, tint, object_transform);
-		}
-
-		void draw_quad(
-			const two_d::texture_region& source,
-			const gpu::quad_transform& transform,
-			const color& tint = color(1.0f, 1.0f, 1.0f, 1.0f),
-			const gpu::quad_draw_state& state = {}
-		)
-		{
-			active_frame().draw_quad(source, transform, tint, state);
 		}
 
 		template<typename DrawFunction>
@@ -231,6 +175,23 @@ namespace mngl
 		void draw(DrawFunction&& draw_function)
 		{
 			active_frame().draw(std::forward<DrawFunction>(draw_function));
+		}
+
+		void prepare(const drawable& value)
+		{
+			active_frame().prepare(value);
+		}
+
+		[[nodiscard]] two_d::recording_context create_recording_context(
+			std::size_t expected_draw_count = 0
+		)
+		{
+			return active_frame().create_recording_context(expected_draw_count);
+		}
+
+		void merge(two_d::recording_context&& context)
+		{
+			active_frame().merge(std::move(context));
 		}
 
 		void display()
@@ -264,16 +225,127 @@ namespace mngl
 			}
 			catch (...)
 			{
-				m_frame.reset();
-				release_active_texture_target();
-				m_swapchain_texture.reset();
-				m_command_buffer.reset();
+				if (!m_frame || !m_frame->active())
+				{
+					reset_frame_state();
+				}
 				throw;
 			}
-			m_frame.reset();
-			release_active_texture_target();
-			m_swapchain_texture.reset();
-			m_command_buffer.reset();
+			reset_frame_state();
+		}
+
+		class frame_scope
+		{
+		public:
+			frame_scope(const frame_scope&) = delete;
+			frame_scope& operator=(const frame_scope&) = delete;
+			frame_scope(frame_scope&&) = delete;
+			frame_scope& operator=(frame_scope&&) = delete;
+
+			~frame_scope() noexcept
+			{
+				cancel();
+			}
+
+			void draw(const drawable& value)
+			{
+				ensure_active();
+				m_owner->draw(value);
+			}
+
+			template<typename DrawFunction>
+				requires std::invocable<DrawFunction, two_d::Frame2D&>
+			void draw(DrawFunction&& draw_function)
+			{
+				ensure_active();
+				m_owner->draw(std::forward<DrawFunction>(draw_function));
+			}
+
+			void prepare(const drawable& value)
+			{
+				ensure_active();
+				m_owner->prepare(value);
+			}
+
+			[[nodiscard]] two_d::recording_context create_recording_context(
+				std::size_t expected_draw_count = 0
+			)
+			{
+				ensure_active();
+				return m_owner->create_recording_context(expected_draw_count);
+			}
+
+			void merge(two_d::recording_context&& context)
+			{
+				ensure_active();
+				m_owner->merge(std::move(context));
+			}
+
+			void display()
+			{
+				ensure_active();
+				m_owner->display();
+				m_owner = nullptr;
+			}
+
+		private:
+			friend class render_window;
+
+			explicit frame_scope(
+				render_window& owner,
+				const color& clear_color
+			)
+				: m_owner(&owner)
+			{
+				owner.clear(clear_color);
+				m_generation = owner.m_active_frame_generation;
+			}
+
+			frame_scope(
+				render_window& owner,
+				::mngl::texture& target,
+				const color& clear_color
+			)
+				: m_owner(&owner)
+			{
+				owner.clear(target, clear_color);
+				m_generation = owner.m_active_frame_generation;
+			}
+
+			void ensure_active() const
+			{
+				if (!m_owner || m_generation == 0 ||
+					m_owner->m_active_frame_generation != m_generation)
+				{
+					throw std::logic_error("Render-window frame scope is no longer active");
+				}
+			}
+
+			void cancel() noexcept
+			{
+				if (auto* owner = std::exchange(m_owner, nullptr))
+				{
+					owner->cancel_active_frame(m_generation);
+				}
+			}
+
+			render_window* m_owner;
+			std::uint64_t m_generation = 0;
+		};
+
+		[[nodiscard]] frame_scope frame(
+			const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f)
+		)
+		{
+			return frame_scope(*this, clear_color);
+		}
+
+		[[nodiscard]] frame_scope frame(
+			::mngl::texture& target,
+			const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f)
+		)
+		{
+			return frame_scope(*this, target, clear_color);
 		}
 
 		// The returned texture is borrowed and remains valid only until display().
@@ -415,12 +487,15 @@ namespace mngl
 			}
 			catch (...)
 			{
-				m_frame.reset();
-				release_active_texture_target();
-				m_swapchain_texture.reset();
-				m_command_buffer.reset();
+				reset_frame_state();
 				throw;
 			}
+
+			if (++m_next_frame_generation == 0)
+			{
+				++m_next_frame_generation;
+			}
+			m_active_frame_generation = m_next_frame_generation;
 		}
 
 		[[nodiscard]] two_d::renderer& renderer_for(::mngl::texture& target)
@@ -483,6 +558,122 @@ namespace mngl
 		std::optional<gpu::command_buffer> m_command_buffer;
 		std::optional<::mngl::texture> m_swapchain_texture;
 		std::optional<two_d::Frame2D> m_frame;
+		std::uint64_t m_next_frame_generation = 0;
+		std::uint64_t m_active_frame_generation = 0;
 		detail::render_window_overlay* m_overlay = nullptr;
+	};
+
+	inline void render_window::reset_frame_state() noexcept
+	{
+		m_frame.reset();
+		release_active_texture_target();
+		m_swapchain_texture.reset();
+		m_command_buffer.reset();
+		m_active_frame_generation = 0;
+	}
+
+	inline void render_window::cancel_active_frame(std::uint64_t generation) noexcept
+	{
+		if (generation != 0 && generation == m_active_frame_generation)
+		{
+			reset_frame_state();
+		}
+	}
+
+	class resizable_texture
+	{
+	public:
+		explicit resizable_texture(
+			render_window& window,
+			gpu::texture_format format = gpu::texture_format::invalid,
+			uint32_t usage = texture::usage::sampler | texture::usage::color_target
+		)
+			: m_window(window)
+			, m_format(format)
+			, m_usage(usage)
+		{
+			if ((usage & texture::usage::color_target) == 0)
+			{
+				throw std::invalid_argument(
+					"A resizable texture must have color_target usage");
+			}
+		}
+
+		resizable_texture(const resizable_texture&) = delete;
+		resizable_texture& operator=(const resizable_texture&) = delete;
+		resizable_texture(resizable_texture&&) = delete;
+		resizable_texture& operator=(resizable_texture&&) = delete;
+
+		[[nodiscard]] texture& target()
+		{
+			synchronize_texture();
+			if (!m_target.valid())
+			{
+				throw std::logic_error(
+					"Cannot access a resizable texture while its window has zero pixel size");
+			}
+			return m_target;
+		}
+
+		[[nodiscard]] sprite& as_sprite()
+		{
+			auto& image = target();
+			m_sprite.source_texture = &image;
+
+			const auto viewport = m_window.coordinate_size();
+			if (viewport.x > 0.0f && viewport.y > 0.0f &&
+				(!m_has_sprite_size ||
+					m_sprite_size.x != viewport.x ||
+					m_sprite_size.y != viewport.y))
+			{
+				m_sprite.size(viewport);
+				m_sprite_size = viewport;
+				m_has_sprite_size = true;
+			}
+			return m_sprite;
+		}
+
+	private:
+		void synchronize_texture()
+		{
+			const auto requested_size = m_window.pixel_size();
+			if (requested_size.x == 0 || requested_size.y == 0 ||
+				(m_target.valid() && m_target.size() == requested_size))
+			{
+				return;
+			}
+			if (m_target.rendering())
+			{
+				throw std::logic_error(
+					"Cannot resize a texture while it is being rendered to");
+			}
+
+			auto replacement = m_window.create_texture(
+				requested_size,
+				m_format,
+				m_usage);
+			if (m_target.valid())
+			{
+				if (const auto target_view = m_target.get_view())
+				{
+					replacement.set_view(*target_view);
+				}
+				if (m_target.hit_testing_enabled())
+				{
+					replacement.enable_hit_testing();
+				}
+			}
+
+			m_target = std::move(replacement);
+			m_sprite.source_texture = &m_target;
+		}
+
+		render_window& m_window;
+		gpu::texture_format m_format;
+		uint32_t m_usage;
+		texture m_target;
+		sprite m_sprite;
+		glm::vec2 m_sprite_size{};
+		bool m_has_sprite_size = false;
 	};
 }

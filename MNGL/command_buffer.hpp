@@ -93,6 +93,17 @@ namespace mngl::gpu
 			}
 		}
 
+		void cancel()
+		{
+			ensure_owner_thread();
+			if (handle)
+			{
+				auto* pending = std::exchange(handle, nullptr);
+				dev = nullptr;
+				TRY_SDL(SDL_CancelGPUCommandBuffer(pending));
+			}
+		}
+
 		texture acquire_swapchain_texture(window& win)
 		{
 			ensure_owner_thread();

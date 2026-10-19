@@ -715,6 +715,49 @@ namespace mngl
     template<typename T>
     concept EventType = std::derived_from<T, eventBase>;
 
+    namespace detail
+    {
+        struct event_subscription_state
+        {
+            std::atomic_bool connected = true;
+        };
+    }
+
+    class event_connection
+    {
+    public:
+        event_connection() = default;
+        event_connection(const event_connection&) = delete;
+        event_connection& operator=(const event_connection&) = delete;
+
+        event_connection(event_connection&& other) noexcept;
+        event_connection& operator=(event_connection&& other) noexcept;
+        ~event_connection();
+
+        void disconnect() noexcept;
+
+        [[nodiscard]] bool connected() const noexcept
+        {
+            return m_state &&
+                m_state->connected.load(std::memory_order_acquire);
+        }
+
+        [[nodiscard]] explicit operator bool() const noexcept
+        {
+            return connected();
+        }
+
+    private:
+        friend class event_manager;
+
+        explicit event_connection(
+            std::shared_ptr<detail::event_subscription_state> state) noexcept
+            : m_state(std::move(state))
+        { }
+
+        std::shared_ptr<detail::event_subscription_state> m_state;
+    };
+
     // =========================================================================
     // 2. ЦЕНТРАЛЬНЫЙ МЕНЕДЖЕР СОБЫТИЙ (EVENT BUS + SDL WATCHER)
     // =========================================================================
@@ -734,15 +777,26 @@ namespace mngl
         }
 
         template<EventType T>
-        static void on(callback<T> cb)
+        [[nodiscard]] static event_connection on(callback<T> cb)
         {
             instance();
+            auto subscription = std::make_shared<listener<T>>(std::move(cb));
             auto& listeners = getListeners<T>();
             std::lock_guard lock(listeners.writer_mutex);
-            auto updated = std::make_shared<typename listener_collection<T>::listener_vector>(
-                *listeners.callbacks.load(std::memory_order_acquire));
-            updated->push_back(std::make_shared<callback<T>>(std::move(cb)));
+            const auto current = listeners.callbacks.load(std::memory_order_acquire);
+            auto updated = std::make_shared<typename listener_collection<T>::listener_vector>();
+            updated->reserve(current->size() + 1);
+            for (const auto& existing : *current)
+            {
+                if (auto live = existing.lock();
+                    live && live->connected.load(std::memory_order_acquire))
+                {
+                    updated->push_back(live);
+                }
+            }
+            updated->push_back(subscription);
             listeners.callbacks.store(std::move(updated), std::memory_order_release);
+            return event_connection(std::move(subscription));
         }
 
         template<EventType T>
@@ -750,9 +804,15 @@ namespace mngl
         {
             std::lock_guard lock(dispatch_mutex);
             const auto listeners = getListeners<T>().callbacks.load(std::memory_order_acquire);
-            for (const auto& cb : *listeners)
+            for (const auto& weak_listener : *listeners)
             {
-                if (*cb) (*cb)(event);
+                if (auto listener = weak_listener.lock();
+                    listener &&
+                    listener->connected.load(std::memory_order_acquire) &&
+                    listener->handler)
+                {
+                    listener->handler(event);
+                }
             }
         }
 
@@ -775,6 +835,8 @@ namespace mngl
         }
 
     private:
+        friend class event_connection;
+
         // SDL event watches may run on posting threads; serialize callbacks while allowing nested emits.
         static inline std::recursive_mutex dispatch_mutex;
         static inline std::mutex imgui_input_events_mutex;
@@ -848,9 +910,19 @@ namespace mngl
         }
 
         template<EventType T>
+        struct listener : detail::event_subscription_state
+        {
+            callback<T> handler;
+
+            explicit listener(callback<T> value)
+                : handler(std::move(value))
+            { }
+        };
+
+        template<EventType T>
         struct listener_collection
         {
-            using listener_vector = std::vector<std::shared_ptr<callback<T>>>;
+            using listener_vector = std::vector<std::weak_ptr<listener<T>>>;
 
             std::mutex writer_mutex;
             std::atomic<std::shared_ptr<const listener_vector>> callbacks{
@@ -859,7 +931,16 @@ namespace mngl
 
             bool empty() const
             {
-                return callbacks.load(std::memory_order_acquire)->empty();
+                for (const auto& weak_listener : *callbacks.load(std::memory_order_acquire))
+                {
+                    if (auto listener = weak_listener.lock();
+                        listener &&
+                        listener->connected.load(std::memory_order_acquire))
+                    {
+                        return false;
+                    }
+                }
+                return true;
             }
         };
 
@@ -1213,6 +1294,35 @@ namespace mngl
             }
         }
     };
+
+    inline event_connection::event_connection(event_connection&& other) noexcept
+        : m_state(std::move(other.m_state))
+    { }
+
+    inline event_connection& event_connection::operator=(event_connection&& other) noexcept
+    {
+        if (this != &other)
+        {
+            disconnect();
+            m_state = std::move(other.m_state);
+        }
+        return *this;
+    }
+
+    inline event_connection::~event_connection()
+    {
+        disconnect();
+    }
+
+    inline void event_connection::disconnect() noexcept
+    {
+        if (m_state)
+        {
+            std::lock_guard lock(event_manager::dispatch_mutex);
+            m_state->connected.store(false, std::memory_order_release);
+            m_state.reset();
+        }
+    }
 
     inline void pollEvents()
     {

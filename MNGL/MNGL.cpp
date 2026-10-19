@@ -1,6 +1,8 @@
 #include "input.hpp"
 #include "imgui_compat.hpp"
 #include "render_window.hpp"
+#include "compute_pass.hpp"
+#include "frame_graph.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -38,12 +40,10 @@ static int run_demo()
 	SDL_Log("MNGL startup checkpoint: creating render window");
 	mngl::render_window window("MNGL — проверка ImGui", initial_size, window_flags);
 	SDL_Log("MNGL startup checkpoint: render window and GPU device ready");
-	auto workspace_texture = window.create_texture(window.pixel_size());
+	mngl::resizable_texture workspace(window);
+	auto& workspace_texture = workspace.target();
 	SDL_Log("MNGL startup checkpoint: workspace texture ready");
-	auto workspace_size = window.coordinate_size();
-	mngl::sprite workspace_sprite(
-		workspace_texture,
-		mngl::rectangle{ 0.0f, 0.0f, workspace_size.x, workspace_size.y });
+	auto& workspace_sprite = workspace.as_sprite();
 	const mngl::rectangle bounds{ 0.2f, 0.2f, 0.8f, 0.5f };
 	const mngl::rectangle panel_bounds{ 0.26666668f, 0.2f, 0.8f, 0.6f };
 	const auto panel_resolution = [panel_bounds](glm::uvec2 window_pixels)
@@ -143,16 +143,14 @@ static int run_demo()
 			SDL_Log("MNGL startup checkpoint: entering first frame");
 		}
 		const auto logical_window_size = window.size();
-		if (workspace_texture.size() != target_size)
-		{
-			workspace_texture = window.create_texture(target_size);
-		}
+		(void)workspace.target();
+		(void)workspace.as_sprite();
 		const auto next_panel_size = panel_resolution(target_size);
 		if (panel.size() != next_panel_size)
 		{
 			panel = create_panel_texture(next_panel_size);
 		}
-		workspace_size = window.coordinate_size();
+		const auto workspace_size = window.coordinate_size();
 		if (mngl::Input::is_key_pressed(mngl::scancode::f1))
 		{
 			show_workspace_surface = !show_workspace_surface;
@@ -395,8 +393,10 @@ static int run_demo()
 		{
 			SDL_Log("MNGL startup checkpoint: rendering workspace texture");
 		}
-		window.clear(workspace_texture, mngl::color{ 0.0f, 0.0f, 0.0f, 0.0f });
-		window.display();
+		auto workspace_render_frame = window.frame(
+			workspace_texture,
+			mngl::color{ 0.0f, 0.0f, 0.0f, 0.0f });
+		workspace_render_frame.display();
 		if (!has_completed_frame)
 		{
 			SDL_Log("MNGL startup checkpoint: workspace texture rendered");
@@ -432,13 +432,13 @@ static int run_demo()
 		{
 			SDL_Log("MNGL startup checkpoint: rendering panel texture");
 		}
-		panel.clear(mngl::color{ 0.08f, 0.09f, 0.12f, 1.0f });
-		panel.draw([&](mngl::two_d::Frame2D& frame)
+		auto panel_render_frame = panel.frame(mngl::color{ 0.08f, 0.09f, 0.12f, 1.0f });
+		panel_render_frame.draw([&](mngl::two_d::Frame2D& frame)
 		{
 			button.tint = fill;
 			frame.draw(button);
 		});
-		panel.display();
+		panel_render_frame.display();
 		if (!has_completed_frame)
 		{
 			SDL_Log("MNGL startup checkpoint: panel texture rendered");
@@ -448,13 +448,13 @@ static int run_demo()
 		{
 			SDL_Log("MNGL startup checkpoint: rendering swapchain");
 		}
-		window.clear(mngl::color{ 0.08f, 0.09f, 0.12f, 1.0f });
-		window.draw(panel_sprite);
+		auto output_frame = window.frame(mngl::color{ 0.08f, 0.09f, 0.12f, 1.0f });
+		output_frame.draw(panel_sprite);
 		if (show_workspace_surface)
 		{
-			window.draw(workspace_sprite);
+			output_frame.draw(workspace_sprite);
 		}
-		window.display();
+		output_frame.display();
 		if (!has_completed_frame)
 		{
 			SDL_Log("MNGL startup checkpoint: first frame presented");

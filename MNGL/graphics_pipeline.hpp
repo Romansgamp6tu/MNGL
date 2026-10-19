@@ -4,6 +4,7 @@
 #include "graphics_shader.hpp"
 #include "vertex_layout.hpp"
 #include "device.hpp"
+#include "gpu_texture.hpp"
 
 namespace mngl::gpu
 {
@@ -182,6 +183,14 @@ namespace mngl::gpu
 			return *this;
 		}
 
+		graphics_pipeline_builder& add_color_target(
+			texture_format format,
+			SDL_GPUColorTargetBlendState blend_state = {}
+		)
+		{
+			return add_color_target(static_cast<SDL_GPUTextureFormat>(format), blend_state);
+		}
+
 		graphics_pipeline_builder& add_alpha_blend_target(SDL_GPUTextureFormat format)
 		{
 			SDL_GPUColorTargetBlendState blend{};
@@ -196,11 +205,21 @@ namespace mngl::gpu
 			return add_color_target(format, blend);
 		}
 
+		graphics_pipeline_builder& add_alpha_blend_target(texture_format format)
+		{
+			return add_alpha_blend_target(static_cast<SDL_GPUTextureFormat>(format));
+		}
+
 		graphics_pipeline_builder& set_depth_stencil_format(SDL_GPUTextureFormat format) noexcept
 		{
 			m_depth_stencil_format = format;
 			m_has_depth_target = (format != SDL_GPU_TEXTUREFORMAT_INVALID);
 			return *this;
+		}
+
+		graphics_pipeline_builder& set_depth_stencil_format(texture_format format) noexcept
+		{
+			return set_depth_stencil_format(static_cast<SDL_GPUTextureFormat>(format));
 		}
 
 		graphics_pipeline build(SDL_GPUDevice* device) const
@@ -269,6 +288,11 @@ namespace mngl::gpu
 			}
 
 			return graphics_pipeline{device, handle};
+		}
+
+		graphics_pipeline build(const mngl::gpu::device& dev) const
+		{
+			return build(dev.raw());
 		}
 
 	private:

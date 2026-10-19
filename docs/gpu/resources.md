@@ -17,9 +17,11 @@ commands.submit();
 
 ## Текстуры и форматы
 
-`mngl::gpu::texture` создаётся с размером, `gpu::texture_format` и usage-флагами. Например, `sampler` разрешает чтение через sampler, `color_target` — использование как color attachment, `graphics_read` — чтение как graphics storage resource. Не каждая комбинация формата и usage поддерживается выбранным GPU; создание неподдерживаемой комбинации завершается ошибкой.
+`mngl::gpu::texture` создаётся с размером, `gpu::texture_format` и usage-флагами. Например, `sampler` разрешает чтение через sampler, `color_target` — использование как color attachment, `graphics_read` — чтение как graphics storage resource, `compute_read`/`compute_write`/`compute_rw` — доступ из compute pass. Не каждая комбинация формата и usage поддерживается выбранным GPU; создание неподдерживаемой комбинации завершается ошибкой.
 
 `mngl::gpu::texture` не загружает файл и не управляет 2D-кадром. Для повседневной работы используйте [высокоуровневую `mngl::texture`](../2d/render-to-texture.md).
+
+Для compute buffers доступны `compute_storage_read` и `compute_storage_write`; indirect dispatch использует `buffer_usage::indirect`. Права чтения/записи должны совпадать с тем, как ресурс объявлен в compute shader. Подробнее — в [руководстве по compute shaders](compute.md).
 
 ## Sampler
 
@@ -29,3 +31,5 @@ commands.submit();
 - `create_linear_clamp` и `create_linear_repeat`.
 
 Sampler и текстура, к которой он применяется, должны принадлежать одному GPU device.
+
+`sampler_builder::build` и фабрики готовых sampler-пресетов принимают как `SDL_GPUDevice*`, так и `mngl::gpu::device`.

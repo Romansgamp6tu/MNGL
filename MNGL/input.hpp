@@ -71,16 +71,23 @@ namespace mngl
 		}
 		static void init_all()
 		{
-			static [[maybe_unused]] bool app_quit_inited = [&]() -> bool
-			{
-				event_manager::on<appQuit>([](const appQuit&) { should_work.store(false, std::memory_order_release); });
-				event_manager::on<appTerminating>([](const appTerminating&) { should_work.store(false, std::memory_order_release); });
-				event_manager::on<windowCloseRequest>([](const windowCloseRequest&) { should_work.store(false, std::memory_order_release); });
-				return true;
-			}();
+			[[maybe_unused]] static auto app_quit_subscription =
+				event_manager::on<appQuit>([](const appQuit&)
+				{
+					should_work.store(false, std::memory_order_release);
+				});
+			[[maybe_unused]] static auto app_terminating_subscription =
+				event_manager::on<appTerminating>([](const appTerminating&)
+				{
+					should_work.store(false, std::memory_order_release);
+				});
+			[[maybe_unused]] static auto window_close_subscription =
+				event_manager::on<windowCloseRequest>([](const windowCloseRequest&)
+				{
+					should_work.store(false, std::memory_order_release);
+				});
 
-			static [[maybe_unused]] bool kboard_inited = [&]() -> bool
-			{
+			[[maybe_unused]] static auto key_down_subscription =
 				event_manager::on<keyDown>([](const keyDown& e)
 				{
 					if (!e.repeat) [[likely]]
@@ -92,6 +99,7 @@ namespace mngl
 						}
 					}
 				});
+			[[maybe_unused]] static auto key_up_subscription =
 				event_manager::on<keyUp>([](const keyUp& e)
 				{
 					std::lock_guard lock(state_mutex);
@@ -106,11 +114,8 @@ namespace mngl
 					}
 					holded_keys.erase(e.code);
 				});
-				return true;
-			}();
 
-			static [[maybe_unused]] bool mouse_inited = [&]() -> bool
-			{
+			[[maybe_unused]] static auto mouse_motion_subscription =
 				event_manager::on<mouseMotion>([](const mouseMotion& e)
 				{
 					std::lock_guard lock(state_mutex);
@@ -118,6 +123,7 @@ namespace mngl
 						e.position,
 						!gui_wants_mouse.load(std::memory_order_relaxed));
 				});
+			[[maybe_unused]] static auto mouse_button_down_subscription =
 				event_manager::on<mouseButtonDown>([](const mouseButtonDown& e)
 				{
 					std::lock_guard lock(state_mutex);
@@ -135,6 +141,7 @@ namespace mngl
 						mholded &= ~mask;
 					}
 				});
+			[[maybe_unused]] static auto mouse_button_up_subscription =
 				event_manager::on<mouseButtonUp>([](const mouseButtonUp& e)
 				{
 					std::lock_guard lock(state_mutex);
@@ -152,6 +159,7 @@ namespace mngl
 					}
 					mholded &= ~mask;
 				});
+			[[maybe_unused]] static auto mouse_wheel_subscription =
 				event_manager::on<mouseWheel>([](const mouseWheel& e)
 				{
 					std::lock_guard lock(state_mutex);
@@ -162,8 +170,6 @@ namespace mngl
 						mscrolldelta += e.scroll;
 					}
 				});
-				return true;
-			}();
 		}
 
 		static inline std::set<scancode> pressed_keys;
