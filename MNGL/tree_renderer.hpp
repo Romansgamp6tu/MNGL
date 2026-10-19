@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <future>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -139,6 +140,15 @@ namespace mngl::two_d
 			font& value_font,
 			const ::mngl::rectangle& area,
 			const tree_draw_options& options = {}) const = 0;
+
+		virtual void draw_parallel(
+			Frame2D& frame,
+			font& value_font,
+			const ::mngl::rectangle& area,
+			const tree_draw_options& options = {}) const
+		{
+			draw(frame, value_font, area, options);
+		}
 	};
 
 	class binary_tree_drawable : public tree_drawable
@@ -604,7 +614,8 @@ namespace mngl::two_d
 			float center_y,
 			float maximum_height,
 			float line_height_factor,
-			const color& tint)
+			const color& tint,
+			bool prepared_glyphs = false)
 		{
 			if (text.empty())
 			{
@@ -613,15 +624,23 @@ namespace mngl::two_d
 			float text_height = std::min(
 				maximum_height,
 				bounds.size.y / line_height_factor);
-			float text_width = value_font.measure_text_line_width(
-				text,
-				text_height);
+			float text_width = prepared_glyphs
+				? value_font.measure_text_line_width_prepared(
+					text,
+					text_height)
+				: value_font.measure_text_line_width(
+					text,
+					text_height);
 			if (text_width > bounds.size.x)
 			{
 				text_height *= bounds.size.x / text_width;
-				text_width = value_font.measure_text_line_width(
-					text,
-					text_height);
+				text_width = prepared_glyphs
+					? value_font.measure_text_line_width_prepared(
+						text,
+						text_height)
+					: value_font.measure_text_line_width(
+						text,
+						text_height);
 			}
 
 			const float rendered_line_height =
@@ -672,7 +691,7 @@ namespace mngl::two_d
 			};
 			transform edge_transform;
 			edge_transform.rotate(angle, start);
-			frame.draw(bounds, tint, edge_transform);
+			frame.draw(rectangle_shape(bounds, tint, edge_transform));
 		}
 
 		inline void draw_tree_snapshot(
@@ -1483,7 +1502,10 @@ namespace mngl::two_d
 									divider_width,
 									fill_bounds.size.y
 								};
-								frame.draw(divider, options.edge_color, transform{});
+								frame.draw(rectangle_shape(
+									divider,
+									options.edge_color,
+									transform{}));
 							}
 							divider_x += layout_node.cell_widths[i];
 						}
@@ -1653,10 +1675,10 @@ namespace mngl::two_d
 							divider_width,
 							fill_bounds.size.y
 						};
-						frame.draw(
+						frame.draw(rectangle_shape(
 							divider,
 							options.edge_color,
-							transform{});
+							transform{}));
 					}
 				}
 
@@ -2101,7 +2123,8 @@ namespace mngl::two_d
 			const tree_draw_model& model,
 			const ::mngl::rectangle& area,
 			const tree_draw_options& options,
-			const tree_layout* precomputed_layout = nullptr)
+			const tree_layout* precomputed_layout = nullptr,
+			bool allow_parallel_recording = false)
 		{
 			validate_tree_draw_options(area, options);
 			tree_layout generated_layout;
@@ -2120,6 +2143,11 @@ namespace mngl::two_d
 			{
 				return;
 			}
+			constexpr std::size_t parallel_recording_minimum_nodes = 512;
+			constexpr std::size_t parallel_recording_initial_worker_count = 2;
+			constexpr std::size_t parallel_recording_minimum_nodes_per_worker =
+				parallel_recording_minimum_nodes /
+				parallel_recording_initial_worker_count;
 
 			const glm::vec2 offset{
 				checked_tree_coordinate(
@@ -2330,7 +2358,29 @@ namespace mngl::two_d
 						"Tree drawing font metrics cannot be scaled");
 				}
 			}
-			const auto draw_node = [&](std::size_t index)
+			const auto annotation_for = [](const tree_draw_node& node,
+				std::size_t key_index)
+			{
+				std::string annotation;
+				if (key_index == 0)
+				{
+					annotation = node.annotation;
+				}
+				if (!node.key_metadata.empty() &&
+					!node.key_metadata[key_index].empty())
+				{
+					if (!annotation.empty())
+					{
+						annotation += " ";
+					}
+					annotation += node.key_metadata[key_index];
+				}
+				return annotation;
+			};
+			const auto draw_node =
+				[&](Frame2D& draw_frame,
+					std::size_t index,
+					bool prepared_glyphs)
 			{
 				if (index >= model.nodes.size())
 				{
@@ -2361,7 +2411,7 @@ namespace mngl::two_d
 					border.tint = is_highlighted
 						? options.highlight_border
 						: options.node_border;
-					frame.draw(border);
+					draw_frame.draw(border);
 				}
 
 				const glm::vec2 inset(options.border_width);
@@ -2392,7 +2442,7 @@ namespace mngl::two_d
 					fill.tint = options.node_fill;
 					break;
 				}
-				frame.draw(fill);
+				draw_frame.draw(fill);
 
 				float cell_left = node_bounds.pos.x;
 				for (std::size_t i = 0; i < layout_node.cell_widths.size(); ++i)
@@ -2402,15 +2452,15 @@ namespace mngl::two_d
 						const float divider_width = std::min(
 							options.edge_width,
 							layout_node.size.y * 0.1f);
-						frame.draw(
-							{
+						draw_frame.draw(rectangle_shape(
+							::mngl::rectangle{
 								cell_left - divider_width * 0.5f,
 								fill_bounds.pos.y,
 								divider_width,
 								fill_bounds.size.y
 							},
 							options.edge_color,
-							transform{});
+							transform{}));
 					}
 					cell_left += layout_node.cell_widths[i];
 				}
@@ -2435,20 +2485,7 @@ namespace mngl::two_d
 					const float horizontal_padding = std::min(
 						cell_width * 0.06f,
 						layout_node.size.y * 0.12f);
-					std::string annotation;
-					if (i == 0)
-					{
-						annotation = node.annotation;
-					}
-					if (!node.key_metadata.empty() &&
-						!node.key_metadata[i].empty())
-					{
-						if (!annotation.empty())
-						{
-							annotation += " ";
-						}
-						annotation += node.key_metadata[i];
-					}
+					const std::string annotation = annotation_for(node, i);
 					const bool has_annotation = !annotation.empty();
 					const float row_height =
 						has_annotation
@@ -2469,14 +2506,15 @@ namespace mngl::two_d
 						row_height
 					};
 					draw_fitted_tree_text(
-						frame,
+						draw_frame,
 						value_font,
 						node.keys[i],
 						value_bounds,
 						value_bounds.pos.y + value_bounds.size.y * 0.5f,
 						options.value_text_height,
 						line_height_factor,
-						options.value_color);
+						options.value_color,
+						prepared_glyphs);
 					if (has_annotation)
 					{
 						const ::mngl::rectangle metadata_bounds{
@@ -2486,7 +2524,7 @@ namespace mngl::two_d
 							row_height
 						};
 						draw_fitted_tree_text(
-							frame,
+							draw_frame,
 							value_font,
 							annotation,
 							metadata_bounds,
@@ -2494,23 +2532,159 @@ namespace mngl::two_d
 								metadata_bounds.size.y * 0.5f,
 							options.metadata_text_height,
 							line_height_factor,
-							options.metadata_color);
+							options.metadata_color,
+							prepared_glyphs);
 					}
 					cell_left += cell_width;
 				}
 			};
+			const std::size_t visible_node_count =
+				options.visibility != nullptr
+				? options.visibility->nodes.size()
+				: 0;
+			const unsigned int hardware_concurrency =
+				allow_parallel_recording &&
+					visible_node_count >= parallel_recording_minimum_nodes
+				? std::thread::hardware_concurrency()
+				: 0;
+			if (hardware_concurrency >=
+				parallel_recording_initial_worker_count)
+			{
+				const std::size_t maximum_worker_count =
+					static_cast<std::size_t>(hardware_concurrency);
+				std::size_t worker_count =
+					parallel_recording_initial_worker_count;
+				while (worker_count < maximum_worker_count)
+				{
+					const std::size_t next_worker_count =
+						worker_count > maximum_worker_count / 2
+						? maximum_worker_count
+						: worker_count * 2;
+					if (visible_node_count / next_worker_count <
+						parallel_recording_minimum_nodes_per_worker)
+					{
+						break;
+					}
+					worker_count = next_worker_count;
+				}
+				if (options.show_node_text)
+				{
+					for (const std::size_t index : options.visibility->nodes)
+					{
+						if (index >= model.nodes.size())
+						{
+							continue;
+						}
+						const auto& node = model.nodes[index];
+						for (std::size_t key_index = 0;
+							key_index < node.keys.size();
+							++key_index)
+						{
+							if (!node.keys[key_index].empty())
+							{
+								frame.prepare(value_font, node.keys[key_index]);
+							}
+							const std::string annotation =
+								annotation_for(node, key_index);
+							if (!annotation.empty())
+							{
+								frame.prepare(value_font, annotation);
+							}
+						}
+					}
+				}
+
+				const auto partition_range =
+					[worker_count](std::size_t count, std::size_t worker_index)
+				{
+					const std::size_t base = count / worker_count;
+					const std::size_t remainder = count % worker_count;
+					const std::size_t begin =
+						worker_index * base +
+						std::min(worker_index, remainder);
+					const std::size_t length =
+						base + (worker_index < remainder ? 1 : 0);
+					return std::pair{ begin, begin + length };
+				};
+				struct worker_recording
+				{
+					recording_context nodes;
+					std::size_t node_begin = 0;
+					std::size_t node_end = 0;
+				};
+				std::vector<worker_recording> workers(worker_count);
+				for (std::size_t worker_index = 0;
+					worker_index < worker_count;
+					++worker_index)
+				{
+					auto& worker = workers[worker_index];
+					const auto [node_begin, node_end] =
+						partition_range(
+							options.visibility->nodes.size(),
+							worker_index);
+					worker.node_begin = node_begin;
+					worker.node_end = node_end;
+					if (node_begin != node_end)
+					{
+						worker.nodes = frame.create_recording_context(
+							node_end - node_begin);
+					}
+				}
+
+				std::vector<std::future<void>> jobs;
+				jobs.reserve(worker_count);
+				for (std::size_t worker_index = 0;
+					worker_index < worker_count;
+					++worker_index)
+				{
+					jobs.push_back(std::async(
+						std::launch::async,
+						[&, worker_index]
+						{
+							auto& worker = workers[worker_index];
+							worker.nodes.draw(
+								[&](Frame2D& worker_frame)
+								{
+									for (std::size_t index =
+											worker.node_begin;
+										index < worker.node_end;
+										++index)
+									{
+										draw_node(
+											worker_frame,
+											options.visibility->nodes[index],
+											true);
+									}
+								});
+							worker.nodes.finish();
+						}));
+				}
+				for (auto& job : jobs)
+				{
+					job.get();
+				}
+
+				for (auto& worker : workers)
+				{
+					if (worker.nodes.valid())
+					{
+						frame.merge(std::move(worker.nodes));
+					}
+				}
+				return;
+			}
 			if (options.visibility != nullptr)
 			{
 				for (const std::size_t index : options.visibility->nodes)
 				{
-					draw_node(index);
+					draw_node(frame, index, false);
 				}
 			}
 			else
 			{
 				for (std::size_t index = 0; index < model.nodes.size(); ++index)
 				{
-					draw_node(index);
+					draw_node(frame, index, false);
 				}
 			}
 		}
@@ -3182,6 +3356,22 @@ namespace mngl::two_d
 				area,
 				options,
 				m_layout);
+		}
+
+		void draw_parallel(
+			Frame2D& frame,
+			font& value_font,
+			const ::mngl::rectangle& area,
+			const tree_draw_options& options = {}) const override
+		{
+			detail::draw_tree_model_snapshot(
+				frame,
+				value_font,
+				*m_model,
+				area,
+				options,
+				m_layout,
+				true);
 		}
 
 	private:

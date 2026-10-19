@@ -421,6 +421,11 @@ namespace mngl
 	};
 }
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4455)
+#endif
+
 constexpr mngl::color operator""rgb(uint64_t x)
 {
 	return mngl::color((x >> 16) & 255, (x >> 8) & 255, (x & 255));
@@ -430,6 +435,10 @@ constexpr mngl::color operator""rgba(uint64_t x)
 {
 	return mngl::color((x >> 24) & 255, (x >> 16) & 255, (x >> 8) & 255, (x & 255));
 }
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 //есть несколько способов хеширования
 //#define COLOR_HASH_UINT32_T

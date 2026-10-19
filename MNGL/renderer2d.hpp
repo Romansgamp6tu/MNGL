@@ -525,6 +525,11 @@ namespace mngl::two_d
 		~Frame2D() noexcept;
 
 		void draw(const ::mngl::drawable& value);
+		void draw_text(
+			font& typeface,
+			std::string_view text,
+			glm::vec2 top_left,
+			const text_draw_options& options = {});
 		template<typename DrawFunction>
 			requires std::invocable<DrawFunction, Frame2D&>
 		void draw(DrawFunction&& draw_function)
@@ -535,6 +540,7 @@ namespace mngl::two_d
 		}
 
 		void prepare(const ::mngl::drawable& value);
+		void prepare(font& typeface, std::string_view text);
 		[[nodiscard]] recording_context create_recording_context(
 			std::size_t expected_draw_count = 0);
 		void merge(recording_context&& context);
@@ -2692,6 +2698,23 @@ namespace mngl::two_d
 		value.draw(*this);
 	}
 
+	inline void Frame2D::draw_text(
+		font& typeface,
+		std::string_view text,
+		glm::vec2 top_left,
+		const text_draw_options& options)
+	{
+		ensure_active();
+		ensure_recording_allowed();
+		m_control->owner->submit_text(
+			m_token,
+			m_recording_context,
+			typeface,
+			text,
+			top_left,
+			options);
+	}
+
 	inline void recording_context::draw(const ::mngl::drawable& value)
 	{
 		ensure_active();
@@ -2942,6 +2965,11 @@ namespace mngl::two_d
 		}
 		m_control->owner->ensure_preparation_allowed(m_token);
 		value.prepare(*this);
+	}
+
+	inline void Frame2D::prepare(font& typeface, std::string_view text)
+	{
+		prepare_font(typeface, text);
 	}
 
 	inline recording_context Frame2D::create_recording_context(

@@ -85,6 +85,16 @@ namespace tree_practicum
 			load_history
 		};
 
+		enum class tree_tool_operation
+		{
+			find,
+			insert,
+			random_insert,
+			erase,
+			merge,
+			split
+		};
+
 		struct pending_workspace_action
 		{
 			workspace_action_kind kind = workspace_action_kind::none;
@@ -176,6 +186,7 @@ namespace tree_practicum
 		struct tree_canvas_view_state
 		{
 			std::optional<mngl::texture> texture;
+			std::optional<visual_key> context_menu_key;
 			int tree_index = -1;
 			float zoom = 1.0f;
 			ImVec2 pan{};
@@ -765,7 +776,8 @@ namespace tree_practicum
 
 		void draw(mngl::imgui_context::frame_scope& frame)
 		{
-			m_hovered_tree_delete_key.reset();
+			m_hovered_tree_key.reset();
+			m_hovered_tree_comparison_pane.reset();
 			process_pending_tree_files();
 			draw_menu(frame);
 			ImGui::DockSpaceOverViewport();
@@ -792,6 +804,13 @@ namespace tree_practicum
 			const float info_height = area.y * 0.25f;
 			const float top_height = area.y - info_height;
 			const float workspace_width = area.x - explorer_width - functions_width;
+			const ImVec2 workspace_origin{
+				origin.x + explorer_width,
+				origin.y
+			};
+			const float tools_height = m_show_tools
+				? std::min(360.0f, top_height * 0.42f)
+				: 0.0f;
 
 			if (m_show_explorer)
 			{
@@ -800,16 +819,26 @@ namespace tree_practicum
 					origin,
 					{ explorer_width, area.y });
 			}
-			if (m_show_workspace)
+			if (m_show_tools)
 			{
-				draw_workspace(
+				draw_tools(
 					frame,
-					{ origin.x + explorer_width, origin.y },
-					{ workspace_width, top_height });
+					workspace_origin,
+					{ workspace_width, tools_height });
 			}
 			else
 			{
 				commit_pending_input_edits();
+			}
+			if (m_show_workspace)
+			{
+				draw_workspace(
+					frame,
+					{
+						workspace_origin.x,
+						workspace_origin.y + tools_height
+					},
+					{ workspace_width, top_height - tools_height });
 			}
 			if (m_show_functions)
 			{
@@ -825,6 +854,7 @@ namespace tree_practicum
 					{ origin.x + explorer_width, origin.y + top_height },
 					{ area.x - explorer_width, info_height });
 			}
+			draw_tool_parameters(frame);
 			draw_file_dialog();
 			draw_unsaved_changes_dialog();
 			process_keyboard_shortcuts();
@@ -1543,6 +1573,7 @@ namespace tree_practicum
 							return lowercase_ascii(entry.path) ==
 								expected_path;
 						});
+				});
 		}
 
 		[[nodiscard]] history_state capture_history_counterpart(
@@ -1804,6 +1835,7 @@ namespace tree_practicum
 			cancel_tree_animation();
 			clear_tree_find_result();
 			commit_pending_input_edits();
+			m_tree_canvas_context_menu_key.reset();
 			const auto previous = current_interface_state();
 			m_active_tree = tree_index;
 			record_interface_change(previous);
@@ -1900,6 +1932,7 @@ namespace tree_practicum
 				!text_input_active &&
 				!ImGui::IsAnyItemActive() &&
 				!modal_dialog_open &&
+				!m_active_tree_tool.has_value() &&
 				!io.KeyCtrl &&
 				!io.KeyShift &&
 				!io.KeyAlt &&
@@ -1907,44 +1940,67 @@ namespace tree_practicum
 			if (operation_shortcuts_enabled)
 			{
 				if (ImGui::IsKeyPressed(ImGuiKey_Backspace, false) &&
-					m_hovered_tree_delete_key)
+					m_hovered_tree_key)
 				{
 					auto key =
-						std::move(m_hovered_tree_delete_key);
-					m_hovered_tree_delete_key.reset();
-					perform_search_tree_erase(std::move(key));
+						std::move(m_hovered_tree_key);
+					auto comparison_pane =
+						std::move(m_hovered_tree_comparison_pane);
+					m_hovered_tree_key.reset();
+					m_hovered_tree_comparison_pane.reset();
+					invoke_tree_tool(
+						tree_tool_operation::erase,
+						std::move(key),
+						std::move(comparison_pane));
 					return;
 				}
 				if (ImGui::IsKeyPressed(ImGuiKey_F, false))
 				{
-					perform_search_tree_find();
+					invoke_tree_tool(tree_tool_operation::find);
 					return;
 				}
 				if (ImGui::IsKeyPressed(ImGuiKey_R, false))
 				{
-					perform_search_tree_random_insert();
+					invoke_tree_tool(
+						tree_tool_operation::random_insert);
 					return;
 				}
 				if (ImGui::IsKeyPressed(ImGuiKey_A, false) ||
 					ImGui::IsKeyPressed(ImGuiKey_Insert, false))
 				{
-					perform_search_tree_insert();
+					invoke_tree_tool(tree_tool_operation::insert);
 					return;
 				}
 				if (ImGui::IsKeyPressed(ImGuiKey_D, false) ||
 					ImGui::IsKeyPressed(ImGuiKey_Delete, false))
 				{
-					perform_search_tree_erase();
+					auto key = std::move(m_hovered_tree_key);
+					auto comparison_pane =
+						std::move(m_hovered_tree_comparison_pane);
+					m_hovered_tree_key.reset();
+					m_hovered_tree_comparison_pane.reset();
+					invoke_tree_tool(
+						tree_tool_operation::erase,
+						std::move(key),
+						std::move(comparison_pane));
 					return;
 				}
 				if (ImGui::IsKeyPressed(ImGuiKey_M, false))
 				{
-					perform_search_tree_merge();
+					invoke_tree_tool(tree_tool_operation::merge);
 					return;
 				}
 				if (ImGui::IsKeyPressed(ImGuiKey_C, false))
 				{
-					perform_search_tree_split();
+					auto key = std::move(m_hovered_tree_key);
+					auto comparison_pane =
+						std::move(m_hovered_tree_comparison_pane);
+					m_hovered_tree_key.reset();
+					m_hovered_tree_comparison_pane.reset();
+					invoke_tree_tool(
+						tree_tool_operation::split,
+						std::move(key),
+						std::move(comparison_pane));
 					return;
 				}
 			}
@@ -2069,10 +2125,24 @@ namespace tree_practicum
 				ImGui::EndMenu();
 			}
 
+			if (ImGui::BeginMenu("Настройки"))
+			{
+				ImGui::MenuItem(
+					"Сразу выполнять Erase/Split по наведённому ключу",
+					nullptr,
+					&m_execute_hovered_key_tools_immediately);
+				ImGui::TextDisabled(
+					m_execute_hovered_key_tools_immediately
+						? "Выключите для подтверждения в окне параметров."
+						: "Включите для немедленного выполнения.");
+				ImGui::EndMenu();
+			}
+
 			if (ImGui::BeginMenu("Вид"))
 			{
 				ImGui::MenuItem("Проводник", nullptr, &m_show_explorer);
 				ImGui::MenuItem("Окно дерева", nullptr, &m_show_workspace);
+				ImGui::MenuItem("Панель инструментов", nullptr, &m_show_tools);
 				ImGui::MenuItem("Поиск функций", nullptr, &m_show_functions);
 				ImGui::MenuItem("Информация", nullptr, &m_show_information);
 				ImGui::EndMenu();
@@ -2103,7 +2173,7 @@ namespace tree_practicum
 					false,
 					can_operate))
 				{
-					perform_search_tree_find();
+					invoke_tree_tool(tree_tool_operation::find);
 				}
 				if (ImGui::MenuItem(
 					"Вставить ключ",
@@ -2111,7 +2181,7 @@ namespace tree_practicum
 					false,
 					can_operate))
 				{
-					perform_search_tree_insert();
+					invoke_tree_tool(tree_tool_operation::insert);
 				}
 				if (ImGui::MenuItem(
 					"Случайная вставка",
@@ -2119,7 +2189,8 @@ namespace tree_practicum
 					false,
 					can_operate))
 				{
-					perform_search_tree_random_insert();
+					invoke_tree_tool(
+						tree_tool_operation::random_insert);
 				}
 				if (ImGui::MenuItem(
 					"Удалить ключ",
@@ -2127,7 +2198,7 @@ namespace tree_practicum
 					false,
 					can_operate))
 				{
-					perform_search_tree_erase();
+					invoke_tree_tool(tree_tool_operation::erase);
 				}
 				if (ImGui::MenuItem(
 					"Разделить дерево",
@@ -2135,26 +2206,20 @@ namespace tree_practicum
 					false,
 					can_operate))
 				{
-					perform_search_tree_split();
+					invoke_tree_tool(tree_tool_operation::split);
 				}
-				const bool can_merge = can_merge_selected_search_tree();
 				if (ImGui::MenuItem(
 					"Объединить с источником",
 					"M",
 					false,
-					can_merge))
+					can_operate))
 				{
-					perform_search_tree_merge();
+					invoke_tree_tool(tree_tool_operation::merge);
 				}
 				if (!can_operate)
 				{
 					ImGui::TextDisabled(
 						"Для операций выберите корректное дерево с ключами int64_t или double.");
-				}
-				else if (!can_merge)
-				{
-					ImGui::TextDisabled(
-						"Для merge сначала выберите источник в рабочей области.");
 				}
 				ImGui::EndMenu();
 			}
@@ -3656,6 +3721,7 @@ namespace tree_practicum
 				pane.archive_member_path.clear();
 				pane.tree.reset();
 				pane.tree_index = 0;
+				pane.canvas.context_menu_key.reset();
 				pane.canvas.tree_index = -1;
 				pane.canvas.zoom = 1.0f;
 				pane.canvas.pan = {};
@@ -3721,6 +3787,7 @@ namespace tree_practicum
 			pane.tree = *m_loaded_visual_tree;
 			pane.tree_index = static_cast<std::size_t>(m_active_tree);
 			pane.canvas.tree_index = -1;
+			pane.canvas.context_menu_key.reset();
 			pane.canvas.view_initialized = false;
 			pane.canvas.fit_requested = true;
 			select_archive_entry_in_explorer(
@@ -3871,6 +3938,7 @@ namespace tree_practicum
 				pane.tree = std::move(parsed_tree);
 				pane.tree_index = parsed_tree_index;
 				pane.canvas.tree_index = -1;
+				pane.canvas.context_menu_key.reset();
 				pane.canvas.view_initialized = false;
 				pane.canvas.fit_requested = true;
 				invalidate_tree_preview_cache();
@@ -4612,7 +4680,8 @@ namespace tree_practicum
 			}
 		}
 
-		void perform_search_tree_split()
+		void perform_search_tree_split(
+			std::optional<visual_key> hovered_key = std::nullopt)
 		{
 			clear_tree_find_result();
 			if (!can_insert_into_selected_search_tree())
@@ -4627,9 +4696,11 @@ namespace tree_practicum
 				commit_pending_input_edits();
 				cancel_tree_animation();
 				m_tree_operation_error.clear();
-				auto pivot = parse_numeric_search_tree_key_input(
-					std::string_view(m_key_input.data()),
-					m_loaded_search_tree_key_kind);
+				auto pivot = hovered_key
+					? std::move(*hovered_key)
+					: parse_numeric_search_tree_key_input(
+						std::string_view(m_key_input.data()),
+						m_loaded_search_tree_key_kind);
 				const auto key_kind = m_loaded_search_tree_key_kind.value_or(
 					search_tree_key_kind_for_value(pivot.value));
 				const std::string pivot_text = full_visual_value(pivot.value);
@@ -4724,6 +4795,76 @@ namespace tree_practicum
 					"Split не выполнен: {}",
 					error.what());
 				logger.error("Search-tree split failed: ", error.what());
+			}
+		}
+
+		void invoke_tree_tool(
+			tree_tool_operation operation,
+			std::optional<visual_key> selected_key = std::nullopt,
+			std::optional<std::size_t> comparison_pane = std::nullopt)
+		{
+			if (selected_key &&
+				comparison_pane &&
+				m_tree_comparison_mode &&
+				!perform_io([&]
+				{
+					focus_comparison_pane(*comparison_pane);
+				}))
+			{
+				return;
+			}
+
+			const bool targeted_operation =
+				operation == tree_tool_operation::erase ||
+				operation == tree_tool_operation::split;
+			if (selected_key &&
+				targeted_operation &&
+				m_execute_hovered_key_tools_immediately)
+			{
+				m_active_tree_tool.reset();
+				if (operation == tree_tool_operation::erase)
+				{
+					perform_search_tree_erase(std::move(selected_key));
+				}
+				else
+				{
+					perform_search_tree_split(std::move(selected_key));
+				}
+				return;
+			}
+
+			commit_pending_input_edits();
+			if (selected_key)
+			{
+				set_path_buffer(
+					m_key_input,
+					full_visual_value(selected_key->value));
+			}
+			m_active_tree_tool = operation;
+		}
+
+		void perform_tree_tool(tree_tool_operation operation)
+		{
+			switch (operation)
+			{
+			case tree_tool_operation::find:
+				perform_search_tree_find();
+				break;
+			case tree_tool_operation::insert:
+				perform_search_tree_insert();
+				break;
+			case tree_tool_operation::random_insert:
+				perform_search_tree_random_insert();
+				break;
+			case tree_tool_operation::erase:
+				perform_search_tree_erase();
+				break;
+			case tree_tool_operation::merge:
+				perform_search_tree_merge();
+				break;
+			case tree_tool_operation::split:
+				perform_search_tree_split();
+				break;
 			}
 		}
 
@@ -4897,6 +5038,7 @@ namespace tree_practicum
 			cancel_tree_animation();
 			invalidate_tree_preview_cache();
 			clear_tree_find_result();
+			m_tree_canvas_context_menu_key.reset();
 			m_current_tree_name.clear();
 			m_current_tree_serialization.clear();
 			m_current_tree_path.clear();
@@ -5718,13 +5860,14 @@ namespace tree_practicum
 			ImGui::EndTabBar();
 		}
 
-		void draw_workspace(
+		void draw_tools(
 			mngl::imgui_context::frame_scope& frame,
 			ImVec2 position,
 			ImVec2 size)
 		{
 			set_initial_window_rect(position, size);
-			auto panel = frame.window("Дерево###TreePracticum.Workspace");
+			auto panel = frame.window(
+				"Инструменты дерева###TreePracticum.Tools");
 			if (!panel)
 			{
 				commit_pending_input_edits();
@@ -5825,65 +5968,41 @@ namespace tree_practicum
 			}
 			ImGui::NewLine();
 
-			ImGui::SetNextItemWidth(130.0f);
-			const auto key_state_before_widget = current_interface_state();
-			const bool insert_on_enter = ImGui::InputTextWithHint(
-				"Ключ",
-				"ключ int64_t или double",
-				m_key_input.data(),
-				m_key_input.size(),
-				ImGuiInputTextFlags_EnterReturnsTrue);
-			track_input_edit(
-				m_key_input_edit_start,
-				key_state_before_widget,
-				ImGui::IsItemActivated(),
-				ImGui::IsItemDeactivatedAfterEdit(),
-				ImGui::IsItemDeactivated());
 			const bool can_operate =
 				can_insert_into_selected_search_tree();
-			ImGui::SameLine();
 			ImGui::BeginDisabled(!can_operate);
-			const bool find_clicked = ImGui::Button("Найти [F]");
-			ImGui::EndDisabled();
-			if (find_clicked)
+			if (ImGui::Button("Найти [F]"))
 			{
-				perform_search_tree_find();
+				invoke_tree_tool(tree_tool_operation::find);
 			}
 			ImGui::SameLine();
-			ImGui::BeginDisabled(!can_operate);
-			const bool insert_clicked = ImGui::Button("Вставить [A / Ins]");
-			ImGui::EndDisabled();
-			if (insert_clicked || (insert_on_enter && can_operate))
+			if (ImGui::Button("Вставить [A / Ins]"))
 			{
-				perform_search_tree_insert();
+				invoke_tree_tool(tree_tool_operation::insert);
 			}
 			ImGui::SameLine();
-			ImGui::BeginDisabled(!can_operate);
-			const bool erase_clicked = ImGui::Button("Удалить [D / Del]");
-			ImGui::EndDisabled();
-			if (erase_clicked)
+			if (ImGui::Button("Удалить [D / Del]"))
 			{
-				perform_search_tree_erase();
+				invoke_tree_tool(tree_tool_operation::erase);
 			}
-
 			ImGui::NewLine();
-			ImGui::BeginDisabled(!can_operate);
-			const bool split_clicked = ImGui::Button("Split [C]");
-			ImGui::EndDisabled();
-			if (split_clicked)
+			if (ImGui::Button("Split [C]"))
 			{
-				perform_search_tree_split();
+				invoke_tree_tool(tree_tool_operation::split);
 			}
 			ImGui::SameLine();
-			draw_merge_source_selector();
-			ImGui::SameLine();
-			ImGui::BeginDisabled(!can_merge_selected_search_tree());
-			const bool merge_clicked = ImGui::Button("Merge [M]");
-			ImGui::EndDisabled();
-			if (merge_clicked)
+			if (ImGui::Button("Случайная вставка [R]"))
 			{
-				perform_search_tree_merge();
+				invoke_tree_tool(tree_tool_operation::random_insert);
 			}
+			ImGui::SameLine();
+			if (ImGui::Button("Объединить [M]"))
+			{
+				invoke_tree_tool(tree_tool_operation::merge);
+			}
+			ImGui::EndDisabled();
+			ImGui::TextDisabled(
+				"Параметры операций открываются в отдельном окне.");
 
 			if (m_tree_find_result_valid &&
 				m_tree_find_tree_index == m_active_tree)
@@ -5897,33 +6016,6 @@ namespace tree_practicum
 				ImGui::PopStyleColor();
 			}
 
-			ImGui::SetNextItemWidth(150.0f);
-			const auto random_count_state_before_widget =
-				current_interface_state();
-			ImU64 random_count_input =
-				static_cast<ImU64>(m_random_count);
-			(void)ImGui::InputScalar(
-				"Случайных",
-				ImGuiDataType_U64,
-				&random_count_input);
-			m_random_count =
-				static_cast<std::uint64_t>(random_count_input);
-			track_input_edit(
-				m_random_count_edit_start,
-				random_count_state_before_widget,
-				ImGui::IsItemActivated(),
-				ImGui::IsItemDeactivatedAfterEdit(),
-				ImGui::IsItemDeactivated());
-			ImGui::SameLine();
-			ImGui::BeginDisabled(!can_operate);
-			const bool random_insert_clicked =
-				ImGui::Button("Добавить случайные [R]##random");
-			ImGui::EndDisabled();
-			if (random_insert_clicked)
-			{
-				perform_search_tree_random_insert();
-			}
-
 			ImGui::Separator();
 			if (ImGui::Button("Вписать дерево"))
 			{
@@ -5934,7 +6026,7 @@ namespace tree_practicum
 							m_active_comparison_pane,
 							0,
 							static_cast<int>(
-								m_tree_comparison_panes.size() - 1)))]
+								m_tree_comparison_panes.size() - 1))) ]
 						.canvas.fit_requested = true;
 				}
 				else
@@ -5945,6 +6037,188 @@ namespace tree_practicum
 			ImGui::SameLine();
 			ImGui::TextDisabled("Колесо: масштаб · средняя кнопка: сдвиг");
 			ImGui::Separator();
+		}
+
+		void draw_tool_parameters(
+			mngl::imgui_context::frame_scope& frame)
+		{
+			if (!m_active_tree_tool)
+			{
+				return;
+			}
+
+			if (const ImGuiViewport* viewport = ImGui::GetMainViewport())
+			{
+				const ImVec2 size{
+					std::min(520.0f, viewport->WorkSize.x * 0.5f),
+					std::min(300.0f, viewport->WorkSize.y * 0.5f)
+				};
+				set_initial_window_rect(
+					{
+						viewport->WorkPos.x +
+							(viewport->WorkSize.x - size.x) * 0.5f,
+						viewport->WorkPos.y +
+							(viewport->WorkSize.y - size.y) * 0.5f
+					},
+					size);
+			}
+
+			auto panel = frame.window(
+				"Параметры инструмента###TreePracticum.ToolParameters");
+			if (!panel)
+			{
+				commit_pending_input_edits();
+				return;
+			}
+
+			const tree_tool_operation operation = *m_active_tree_tool;
+			const bool can_operate =
+				can_insert_into_selected_search_tree();
+			const char* operation_name = "";
+			const char* action_label = "Выполнить";
+			bool submit_on_enter = false;
+			switch (operation)
+			{
+			case tree_tool_operation::find:
+				operation_name = "Найти ключ";
+				action_label = "Найти";
+				break;
+			case tree_tool_operation::insert:
+				operation_name = "Вставить ключ";
+				action_label = "Вставить";
+				break;
+			case tree_tool_operation::random_insert:
+				operation_name = "Случайная вставка";
+				action_label = "Добавить";
+				break;
+			case tree_tool_operation::erase:
+				operation_name = "Удалить ключ";
+				action_label = "Удалить";
+				break;
+			case tree_tool_operation::merge:
+				operation_name = "Объединить деревья";
+				action_label = "Объединить";
+				break;
+			case tree_tool_operation::split:
+				operation_name = "Разделить дерево";
+				action_label = "Разделить";
+				break;
+			}
+			ImGui::TextColored(
+				{ 0.53f, 0.76f, 0.96f, 1.0f },
+				"%s",
+				operation_name);
+			ImGui::Separator();
+
+			const auto draw_key_parameter = [&](const char* label)
+			{
+				ImGui::SetNextItemWidth(300.0f);
+				const auto key_state_before_widget =
+					current_interface_state();
+				const bool submitted = ImGui::InputTextWithHint(
+					label,
+					"ключ int64_t или double",
+					m_key_input.data(),
+					m_key_input.size(),
+					ImGuiInputTextFlags_EnterReturnsTrue);
+				track_input_edit(
+					m_key_input_edit_start,
+					key_state_before_widget,
+					ImGui::IsItemActivated(),
+					ImGui::IsItemDeactivatedAfterEdit(),
+					ImGui::IsItemDeactivated());
+				return submitted;
+			};
+
+			switch (operation)
+			{
+			case tree_tool_operation::find:
+				submit_on_enter = draw_key_parameter("Ключ");
+				break;
+			case tree_tool_operation::insert:
+				submit_on_enter = draw_key_parameter("Новый ключ");
+				break;
+			case tree_tool_operation::erase:
+				submit_on_enter = draw_key_parameter("Ключ для удаления");
+				break;
+			case tree_tool_operation::split:
+				submit_on_enter = draw_key_parameter("Опорный ключ");
+				break;
+			case tree_tool_operation::random_insert:
+			{
+				ImGui::SetNextItemWidth(180.0f);
+				const auto random_count_state_before_widget =
+					current_interface_state();
+				ImU64 random_count_input =
+					static_cast<ImU64>(m_random_count);
+				(void)ImGui::InputScalar(
+					"Количество ключей",
+					ImGuiDataType_U64,
+					&random_count_input);
+				m_random_count =
+					static_cast<std::uint64_t>(random_count_input);
+				track_input_edit(
+					m_random_count_edit_start,
+					random_count_state_before_widget,
+					ImGui::IsItemActivated(),
+					ImGui::IsItemDeactivatedAfterEdit(),
+					ImGui::IsItemDeactivated());
+				break;
+			}
+			case tree_tool_operation::merge:
+				draw_merge_source_selector();
+				break;
+			}
+
+			if (!m_tree_operation_error.empty())
+			{
+				ImGui::TextColored(
+					{ 1.0f, 0.42f, 0.38f, 1.0f },
+					"%s",
+					m_tree_operation_error.c_str());
+			}
+			if (!can_operate)
+			{
+				ImGui::TextDisabled(
+					"Откройте дерево с ключами int64_t или double.");
+			}
+
+			const bool can_apply = operation == tree_tool_operation::merge
+				? can_merge_selected_search_tree()
+				: can_operate;
+			ImGui::BeginDisabled(!can_apply);
+			const bool apply_clicked = ImGui::Button(action_label);
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+			const bool cancel_clicked = ImGui::Button("Отмена");
+			if (apply_clicked || (submit_on_enter && can_apply))
+			{
+				commit_pending_input_edits();
+				m_tree_operation_error.clear();
+				perform_tree_tool(operation);
+				if (m_tree_operation_error.empty())
+				{
+					m_active_tree_tool.reset();
+				}
+			}
+			else if (cancel_clicked)
+			{
+				commit_pending_input_edits();
+				m_active_tree_tool.reset();
+			}
+		}
+
+		void draw_workspace(
+			mngl::imgui_context::frame_scope& frame,
+			ImVec2 position,
+			ImVec2 size)
+		{
+			set_initial_window_rect(position, size);
+			auto panel = frame.window("Дерево###TreePracticum.Workspace");
+			if (!panel)
+			{
+				return;
+			}
 			if (m_tree_comparison_mode)
 			{
 				draw_comparison_tree_panels();
@@ -9942,6 +10216,9 @@ namespace tree_practicum
 			auto& canvas_fit_requested = canvas_state
 				? canvas_state->fit_requested
 				: m_tree_canvas_fit_requested;
+			auto& context_menu_key = canvas_state
+				? canvas_state->context_menu_key
+				: m_tree_canvas_context_menu_key;
 			if (!ImGui::BeginChild(
 				child_id,
 				ImVec2(0.0f, 0.0f),
@@ -10053,7 +10330,8 @@ namespace tree_practicum
 					"TreeCanvas",
 					canvas_size,
 					ImGuiButtonFlags_MouseButtonLeft |
-						ImGuiButtonFlags_MouseButtonMiddle);
+						ImGuiButtonFlags_MouseButtonMiddle |
+						ImGuiButtonFlags_MouseButtonRight);
 				const bool canvas_hovered = ImGui::IsItemHovered();
 				const bool canvas_active = ImGui::IsItemActive();
 				if (canvas_clicked)
@@ -10333,26 +10611,38 @@ namespace tree_practicum
 						}
 					}
 				}
-				const bool hovered_key_deletable =
-					hovered_node >= 0 &&
-					hovered_key_index >= 0 &&
-					current_tree_loaded &&
-					preview_tree_is_active &&
-					!showing_animation &&
-					tree_index == static_cast<std::size_t>(m_active_tree) &&
-					(!m_tree_comparison_mode ||
-						cache_index ==
-							static_cast<std::size_t>(
-								m_active_comparison_pane)) &&
-					can_insert_into_selected_search_tree();
-				if (hovered_key_deletable)
+				const visual_key* hovered_key = nullptr;
+				if (hovered_node >= 0 && hovered_key_index >= 0)
 				{
-					m_hovered_tree_delete_key =
+					hovered_key = std::addressof(
 						tree.nodes[
 							static_cast<std::size_t>(hovered_node)]
 							.keys[
 								static_cast<std::size_t>(
-									hovered_key_index)];
+									hovered_key_index)]);
+				}
+				const bool hovered_key_contextable =
+					hovered_key &&
+					current_tree_loaded &&
+					!showing_animation &&
+					search_tree_algorithm_for(
+						static_cast<int>(tree_index)) != nullptr &&
+					(std::holds_alternative<double>(hovered_key->value) ||
+						std::holds_alternative<std::int64_t>(
+							hovered_key->value));
+				if (hovered_key_contextable)
+				{
+					m_hovered_tree_key = *hovered_key;
+					if (m_tree_comparison_mode && canvas_state)
+					{
+						m_hovered_tree_comparison_pane = cache_index;
+					}
+				}
+				if (hovered_key_contextable &&
+					ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+				{
+					context_menu_key = *hovered_key;
+					ImGui::OpenPopup("TreeKeyTools");
 				}
 				std::vector<std::size_t> highlighted_nodes;
 				if (current_tree_loaded &&
@@ -10429,14 +10719,14 @@ namespace tree_practicum
 								grid_spacing) * grid_spacing;
 							x < grid_end_x;)
 						{
-							frame.draw(
+							frame.draw(mngl::two_d::rectangle_shape(
 								mngl::rectangle{
 									static_cast<float>(x),
 									visible.pos.y,
 									grid_width,
 									visible.size.y
 								},
-								grid_color);
+								grid_color));
 							const double next_x = x + grid_spacing;
 							if (next_x <= x)
 							{
@@ -10452,14 +10742,14 @@ namespace tree_practicum
 								grid_spacing) * grid_spacing;
 							y < grid_end_y;)
 						{
-							frame.draw(
+							frame.draw(mngl::two_d::rectangle_shape(
 								mngl::rectangle{
 									visible.pos.x,
 									static_cast<float>(y),
 									visible.size.x,
 									grid_width
 								},
-								grid_color);
+								grid_color));
 							const double next_y = y + grid_spacing;
 							if (next_y <= y)
 							{
@@ -10472,7 +10762,7 @@ namespace tree_practicum
 							mngl::two_d::make_tree_drawable(
 								render_model,
 								layout);
-						drawable->draw(
+						drawable->draw_parallel(
 							frame,
 							m_tree_font,
 							tree_area,
@@ -10549,10 +10839,10 @@ namespace tree_practicum
 								key.detail.data());
 						}
 					}
-					if (hovered_key_deletable)
+					if (hovered_key_contextable)
 					{
 						ImGui::TextDisabled(
-							"Backspace — удалить ключ под курсором");
+							"Backspace / D / Del — Erase · C — Split · ПКМ — инструменты для ключа");
 					}
 					ImGui::Text("Дочерних узлов: %zu", node.children.size());
 					if (node.next_leaf != no_visual_node)
@@ -10562,6 +10852,54 @@ namespace tree_practicum
 							node.next_leaf + 1);
 					}
 					ImGui::EndTooltip();
+				}
+
+				std::optional<tree_tool_operation> context_menu_action;
+				if (ImGui::BeginPopup("TreeKeyTools"))
+				{
+					if (context_menu_key)
+					{
+						const std::string key_text =
+							full_visual_value(context_menu_key->value);
+						ImGui::TextDisabled(
+							"Ключ: %s",
+							key_text.c_str());
+						ImGui::Separator();
+						if (ImGui::MenuItem("Найти ключ"))
+						{
+							context_menu_action =
+								tree_tool_operation::find;
+						}
+						if (ImGui::MenuItem("Удалить ключ [D / Del]"))
+						{
+							context_menu_action =
+								tree_tool_operation::erase;
+						}
+						if (ImGui::MenuItem("Split по ключу [C]"))
+						{
+							context_menu_action =
+								tree_tool_operation::split;
+						}
+					}
+					ImGui::EndPopup();
+				}
+				else if (!ImGui::IsPopupOpen("TreeKeyTools"))
+				{
+					context_menu_key.reset();
+				}
+
+				if (context_menu_action && context_menu_key)
+				{
+					auto key = std::move(context_menu_key);
+					context_menu_key.reset();
+					const auto comparison_pane =
+						m_tree_comparison_mode && canvas_state
+						? std::optional<std::size_t>{ cache_index }
+						: std::nullopt;
+					invoke_tree_tool(
+						*context_menu_action,
+						std::move(key),
+						comparison_pane);
 				}
 			}
 			ImGui::EndChild();
@@ -11246,14 +11584,8 @@ namespace tree_practicum
 
 				const bool can_operate =
 					can_insert_into_selected_search_tree();
-				if (selected.name == "merge")
-				{
-					draw_merge_source_selector();
-				}
 				ImGui::BeginDisabled(
-					selected.name == "merge"
-						? !can_merge_selected_search_tree()
-						: !can_operate);
+					!can_operate);
 				const char* action_label =
 					selected.name == "find"
 					? "Найти ключ"
@@ -11272,27 +11604,28 @@ namespace tree_practicum
 				{
 					if (selected.name == "find")
 					{
-						perform_search_tree_find();
+						invoke_tree_tool(tree_tool_operation::find);
 					}
 					else if (selected.name == "insert")
 					{
-						perform_search_tree_insert();
+						invoke_tree_tool(tree_tool_operation::insert);
 					}
 					else if (selected.name == "insert_random")
 					{
-						perform_search_tree_random_insert();
+						invoke_tree_tool(
+							tree_tool_operation::random_insert);
 					}
 					else if (selected.name == "erase")
 					{
-						perform_search_tree_erase();
+						invoke_tree_tool(tree_tool_operation::erase);
 					}
 					else if (selected.name == "merge")
 					{
-						perform_search_tree_merge();
+						invoke_tree_tool(tree_tool_operation::merge);
 					}
 					else
 					{
-						perform_search_tree_split();
+						invoke_tree_tool(tree_tool_operation::split);
 					}
 				}
 				if (selected.name == "merge" &&
@@ -11300,7 +11633,7 @@ namespace tree_practicum
 				{
 					ImGui::SameLine();
 					ImGui::TextDisabled(
-						"Выберите источник того же типа и с подходящим диапазоном ключей.");
+						"Укажите источник в окне параметров.");
 				}
 				else if (!can_operate)
 				{
@@ -12995,7 +13328,10 @@ namespace tree_practicum
 		std::optional<search_tree_key_kind> m_split_result_key_kind;
 		std::string m_split_pivot_label;
 		std::optional<visual_tree> m_loaded_visual_tree;
-		std::optional<visual_key> m_hovered_tree_delete_key;
+		std::optional<visual_key> m_hovered_tree_key;
+		std::optional<std::size_t> m_hovered_tree_comparison_pane;
+		std::optional<visual_key> m_tree_canvas_context_menu_key;
+		std::optional<tree_tool_operation> m_active_tree_tool;
 		std::array<tree_comparison_pane, 2> m_tree_comparison_panes;
 		std::array<tree_preview_cache_state, 2> m_tree_preview_caches;
 		std::optional<search_tree_key_kind> m_loaded_search_tree_key_kind;
@@ -13024,8 +13360,10 @@ namespace tree_practicum
 		pending_workspace_action m_pending_workspace_action;
 		bool m_show_explorer = true;
 		bool m_show_workspace = true;
+		bool m_show_tools = true;
 		bool m_show_functions = true;
 		bool m_show_information = true;
+		bool m_execute_hovered_key_tools_immediately = true;
 		bool m_tree_canvas_view_initialized = false;
 		bool m_tree_canvas_fit_requested = false;
 		bool m_focus_function_search = false;
