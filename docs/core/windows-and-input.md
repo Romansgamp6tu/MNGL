@@ -89,24 +89,25 @@ while (mngl::Input::continue_work())
 
 Создавайте ImGui-кадр после `Input::continue_work()` и завершайте его до `render_window::display()`: `display()` добавляет UI-проход после 2D-кадра. `Input` передаёт SDL-события backend-у на главном потоке и не отдаёт игре клавиатурный или мышиный ввод, захваченный интерфейсом. Обёртки `frame_scope`, `window_scope`, `dockspace_scope`, `main_menu_bar_scope` и `menu_scope` управляют временем жизни кадра, окон, меню и dockable-панелей; доступны `window()`, `dockspace()`, `main_menu_bar()`, `menu()`, `toggle()`, `text()`, `button()`, `input()`, `checkbox()`, `selectable()`, `context_menu()`, `radio_button()`, `bullet()`, `progress_bar()`, `slider()`, `combo()` и `image()`.
 
-Чтобы выводить весь ImGui workspace в одну offscreen-текстуру, передайте её в `gui.frame(surface)`. Текстура должна быть доступна для рендеринга и сэмплирования, использовать формат swapchain и оставаться живой до `window.display()`. Для HiDPI включите `window_flags.high_pixel_density`: backing-текстура создаётся в физических пикселях, а ImGui сохраняет логический размер элементов, учитывая `DisplayFramebufferScale` от SDL. При изменении `window.pixel_size()` пересоздавайте offscreen-текстуру; ImGui-кадр и hit-test автоматически используют её новый размер. После завершения ImGui scope отрисуйте её как обычный `mngl::sprite`:
+Чтобы выводить весь ImGui workspace в одну offscreen-текстуру, используйте `mngl::resizable_texture`: она обновляет backing-текстуру до `window.pixel_size()` при обращении к `target()`, а `as_sprite()` подгоняет размер спрайта к логической области окна. Обычные `mngl::texture` при изменении окна остаются прежнего размера. Для HiDPI включите `window_flags.high_pixel_density`: backing-текстура создаётся в физических пикселях, а ImGui сохраняет логический размер элементов, учитывая `DisplayFramebufferScale` от SDL. Текстура должна оставаться живой до `window.display()`:
 
 ```cpp
 mngl::window::flags window_flags;
 window_flags.high_pixel_density = true;
 mngl::render_window window("My app", { 1280, 720 }, window_flags);
-auto surface = window.create_texture(window.pixel_size());
-const auto viewport = window.coordinate_size();
-mngl::sprite workspace_sprite(
-    surface,
-    mngl::rectangle{ 0.0f, 0.0f, viewport.x, viewport.y });
+mngl::resizable_texture workspace(window);
 mngl::imgui_context gui(window);
 window.enable_hit_testing();
 
 while (mngl::Input::continue_work())
 {
+    if (window.pixel_size().x == 0 || window.pixel_size().y == 0)
     {
-        auto frame = gui.frame(surface);
+        continue;
+    }
+
+    {
+        auto frame = gui.frame(workspace.target());
         auto host = frame.window("Workspace");
         auto docks = host.dockspace("MainWorkspace");
         auto panel = docks.window("Controls");
@@ -116,16 +117,16 @@ while (mngl::Input::continue_work())
         }
     }
 
-    window.clear(surface, mngl::color{ 0.0f, 0.0f, 0.0f, 0.0f });
+    window.clear(workspace.target(), mngl::color{ 0.0f, 0.0f, 0.0f, 0.0f });
     window.display();
 
     window.clear();
-    window.draw(workspace_sprite);
+    window.draw(workspace.as_sprite());
     window.display();
 }
 ```
 
-Для маршрутизации мыши включите hit-testing на `render_window` до первого кадра (`window.enable_hit_testing()`). `gui.frame(surface)` находит поверхность в hit-test-пути верхнего спрайта и преобразует курсор в пиксели текстуры, учитывая размер, поворот и UV-область спрайта. Наведение вне поверхности по-прежнему передаётся сцене, но начатое на ней перетаскивание продолжает получать координаты за её границами; продолжение за границами OS-окна зависит от поддержки захвата мыши SDL платформой. Клавиатурные и текстовые события по-прежнему приходят через SDL backend.
+Для маршрутизации мыши включите hit-testing на `render_window` до первого кадра (`window.enable_hit_testing()`). `gui.frame(workspace.target())` находит поверхность в hit-test-пути верхнего спрайта и преобразует курсор в пиксели текстуры, учитывая размер, поворот и UV-область спрайта. Наведение вне поверхности по-прежнему передаётся сцене, но начатое на ней перетаскивание продолжает получать координаты за её границами; продолжение за границами OS-окна зависит от поддержки захвата мыши SDL платформой. Клавиатурные и текстовые события по-прежнему приходят через SDL backend.
 
 Демо `MNGL.exe` служит ручным стендом: окно можно менять по размеру, режимы в панели «Управление» проверяют перенос, масштаб, поворот и UV crop поверхности, а `F1` скрывает её, чтобы проверить hit-test кнопки сцены под ней. Оно выводит логический и физический размеры окна и обеих offscreen-текстур. Прозрачные участки спрайта пока считаются попаданием; начав перетаскивание на поверхности, его можно продолжить за её границами.
 

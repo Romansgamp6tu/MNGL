@@ -44,15 +44,17 @@ namespace mngl::gpu
 	// Executable paths may be absolute or names resolved through PATH.
 	struct shader_compile_options
 	{
-		graphics_shader_stage stage = graphics_shader_stage::vertex;
+		shader_stage stage = shader_stage::vertex;
 		shader_format format = static_cast<shader_format>(MNGL_DEFAULT_SHADER_FORMAT);
 		std::string entrypoint = "main";
 		shader_resource_layout resources{};
 		shader_source_language source_language = shader_source_language::hlsl;
 		std::filesystem::path shadercross_executable = "shadercross";
 		std::filesystem::path glslang_validator_executable = "glslangValidator";
-		// Reflect the MNGL HLSL fragment layout at b0/space3 and resources at space2.
+		// Reflect the MNGL HLSL layout at b0/space3 and resources at space2.
 		bool reflect_uniforms = false;
+		// Zero means infer the literal group size from HLSL [numthreads] or GLSL local_size.
+		glm::uvec3 compute_threadgroup_size{ 0, 0, 0 };
 	};
 
 	class shader_loader
@@ -63,60 +65,14 @@ namespace mngl::gpu
 			const shader_compile_options& options = {}
 		)
 		{
-			const auto output_format = output_format_for(options.format);
-			const auto stage = stage_name_for(options.stage);
-			if (!valid_entrypoint(options.entrypoint))
+			if (!valid_graphics_shader_stage(options.stage))
 			{
-				throw std::invalid_argument("Shader entrypoint must be a valid identifier");
+				throw std::invalid_argument(
+					"shader_loader::compile accepts only vertex and fragment shaders; use compile_compute for compute shaders");
 			}
-			if (options.source_language != shader_source_language::hlsl &&
-				options.source_language != shader_source_language::glsl)
-			{
-				throw std::invalid_argument("Unsupported shader source language");
-			}
-			validate_source_file(source_path);
 
 			const auto reflected_uniforms = reflect_uniforms_if_requested(options, source_path);
-
-			auto temp_dir = temporary_directory::create();
-			const auto compiled_path = temp_dir.path() /
-				std::format("compiled.{}", output_format.extension);
-
-			std::vector<uint8_t> bytes;
-			if (options.source_language == shader_source_language::hlsl)
-			{
-				run_shadercross(
-					source_path,
-					source_path,
-					"HLSL",
-					stage,
-					output_format,
-					compiled_path,
-					options);
-				bytes = read_shader_output(compiled_path, "shadercross", source_path);
-			}
-			else
-			{
-				const auto spirv_path = temp_dir.path() / "source.spv";
-				run_glslang(source_path, spirv_path, options);
-
-				if (options.format == shader_format::spirv)
-				{
-					bytes = read_shader_output(spirv_path, "glslangValidator", source_path);
-				}
-				else
-				{
-					run_shadercross(
-						spirv_path,
-						source_path,
-						"SPIRV",
-						stage,
-						output_format,
-						compiled_path,
-						options);
-					bytes = read_shader_output(compiled_path, "shadercross", source_path);
-				}
-			}
+			auto bytes = compile_shader_bytecode(source_path, options, options.stage);
 
 			graphics_shader_asset asset{};
 			asset.stage = options.stage;
@@ -125,6 +81,68 @@ namespace mngl::gpu
 			asset.resources = options.resources;
 			asset.debug_name = source_path.filename().string();
 			apply_uniform_reflection(asset, options, reflected_uniforms);
+			if (!asset.valid())
+			{
+				throw std::runtime_error("Shader compilation produced an invalid graphics shader asset");
+			}
+			return asset;
+		}
+
+		static graphics_shader_asset compile_vertex(
+			const std::filesystem::path& source_path,
+			shader_compile_options options = {}
+		)
+		{
+			options.stage = graphics_shader_stage::vertex;
+			return compile(source_path, options);
+		}
+
+		static graphics_shader_asset compile_fragment(
+			const std::filesystem::path& source_path,
+			shader_compile_options options = {}
+		)
+		{
+			options.stage = graphics_shader_stage::fragment;
+			if (options.source_language == shader_source_language::hlsl)
+			{
+				options.reflect_uniforms = true;
+			}
+			return compile(source_path, options);
+		}
+
+		static compute_shader_asset compile_compute(
+			const std::filesystem::path& source_path,
+			shader_compile_options options = {}
+		)
+		{
+			options.stage = shader_stage::compute;
+			if (options.source_language == shader_source_language::hlsl)
+			{
+				options.reflect_uniforms = true;
+			}
+			if (options.source_language == shader_source_language::glsl &&
+				options.reflect_uniforms)
+			{
+				throw std::invalid_argument(
+					"MNGL named uniform/resource reflection currently supports HLSL compute shaders only");
+			}
+
+			const auto threadgroup_size = resolve_compute_threadgroup_size(source_path, options);
+			const auto reflected_uniforms = reflect_uniforms_if_requested(options, source_path);
+			auto bytes = compile_shader_bytecode(source_path, options, shader_stage::compute);
+
+			compute_shader_asset asset{};
+			asset.stage = shader_stage::compute;
+			asset.code.assign(options.format, std::move(bytes));
+			asset.entrypoint = options.entrypoint;
+			asset.resources = options.resources;
+			asset.debug_name = source_path.filename().string();
+			asset.threadgroup_size = threadgroup_size;
+			apply_uniform_reflection(asset, options, reflected_uniforms);
+			if (!asset.valid())
+			{
+				throw std::runtime_error("Shader compilation produced an invalid compute shader asset");
+			}
 			return asset;
 		}
 
@@ -134,7 +152,7 @@ namespace mngl::gpu
 			const shader_compile_options& options = {}
 		)
 		{
-			if (!valid_shader_stage(options.stage) || !valid_shader_format(options.format) ||
+			if (!valid_graphics_shader_stage(options.stage) || !valid_shader_format(options.format) ||
 				!valid_entrypoint(options.entrypoint))
 			{
 				throw std::invalid_argument("Cannot load shader bytecode with invalid shader options");
@@ -167,6 +185,73 @@ namespace mngl::gpu
 			asset.resources = options.resources;
 			asset.debug_name = bytecode_path.filename().string();
 			apply_uniform_reflection(asset, options, reflected_uniforms);
+			return asset;
+		}
+
+		static compute_shader_asset load_compute_binary(
+			const std::filesystem::path& bytecode_path,
+			const std::filesystem::path& reflection_source = {},
+			const shader_compile_options& options = {}
+		)
+		{
+			if (!valid_shader_format(options.format) || !valid_entrypoint(options.entrypoint))
+			{
+				throw std::invalid_argument("Cannot load compute shader bytecode with invalid shader options");
+			}
+			validate_source_file(bytecode_path);
+
+			auto bytes = read_binary_file(bytecode_path);
+			if (bytes.empty())
+			{
+				throw std::invalid_argument(std::format(
+					"Shader bytecode is empty: '{}'",
+					bytecode_path.string()));
+			}
+
+			glm::uvec3 threadgroup_size = options.compute_threadgroup_size;
+			if (threadgroup_size.x == 0 &&
+				threadgroup_size.y == 0 &&
+				threadgroup_size.z == 0)
+			{
+				if (reflection_source.empty())
+				{
+					throw std::invalid_argument(
+						"Loading compute bytecode requires compute_threadgroup_size or the matching source file");
+				}
+				threadgroup_size = resolve_compute_threadgroup_size(reflection_source, options);
+			}
+			else if (threadgroup_size.x == 0 ||
+				threadgroup_size.y == 0 ||
+				threadgroup_size.z == 0)
+			{
+				throw std::invalid_argument("Compute threadgroup dimensions must all be non-zero");
+			}
+
+			uniform_reflection reflected_uniforms{};
+			if (options.reflect_uniforms)
+			{
+				if (reflection_source.empty())
+				{
+					throw std::invalid_argument(
+						"Named-uniform reflection requires the matching HLSL source path");
+				}
+				auto reflection_options = options;
+				reflection_options.stage = shader_stage::compute;
+				reflected_uniforms = reflect_uniforms_if_requested(reflection_options, reflection_source);
+			}
+
+			compute_shader_asset asset{};
+			asset.stage = shader_stage::compute;
+			asset.code.assign(options.format, std::move(bytes));
+			asset.entrypoint = options.entrypoint;
+			asset.resources = options.resources;
+			asset.debug_name = bytecode_path.filename().string();
+			asset.threadgroup_size = threadgroup_size;
+			apply_uniform_reflection(asset, options, reflected_uniforms);
+			if (!asset.valid())
+			{
+				throw std::runtime_error("Loaded bytecode produced an invalid compute shader asset");
+			}
 			return asset;
 		}
 
@@ -314,25 +399,27 @@ namespace mngl::gpu
 			}
 		}
 
-		static std::string_view stage_name_for(graphics_shader_stage stage)
+		static std::string_view stage_name_for(shader_stage stage)
 		{
 			switch (stage)
 			{
-			case graphics_shader_stage::vertex: return "vertex";
-			case graphics_shader_stage::fragment: return "fragment";
+			case shader_stage::vertex: return "vertex";
+			case shader_stage::fragment: return "fragment";
+			case shader_stage::compute: return "compute";
 			default:
-				throw std::invalid_argument("Unsupported graphics shader stage");
+				throw std::invalid_argument("Unsupported shader stage");
 			}
 		}
 
-		static std::string_view glsl_stage_name_for(graphics_shader_stage stage)
+		static std::string_view glsl_stage_name_for(shader_stage stage)
 		{
 			switch (stage)
 			{
-			case graphics_shader_stage::vertex: return "vert";
-			case graphics_shader_stage::fragment: return "frag";
+			case shader_stage::vertex: return "vert";
+			case shader_stage::fragment: return "frag";
+			case shader_stage::compute: return "comp";
 			default:
-				throw std::invalid_argument("glslangValidator does not support the requested graphics shader stage");
+				throw std::invalid_argument("glslangValidator does not support the requested shader stage");
 			}
 		}
 
@@ -367,17 +454,18 @@ namespace mngl::gpu
 				return {};
 			}
 			if (options.source_language != shader_source_language::hlsl ||
-				options.stage != graphics_shader_stage::fragment)
+				(options.stage != shader_stage::fragment &&
+					options.stage != shader_stage::compute))
 			{
 				throw std::invalid_argument(
-					"MNGL named uniform/resource reflection currently supports HLSL fragment shaders only");
+					"MNGL named uniform/resource reflection currently supports HLSL fragment and compute shaders only");
 			}
 			validate_source_file(source_path);
-			return reflect_hlsl_uniforms(source_path);
+			return reflect_hlsl_uniforms(source_path, options.stage);
 		}
 
 		static void apply_uniform_reflection(
-			graphics_shader_asset& asset,
+			shader_asset& asset,
 			const shader_compile_options& options,
 			const uniform_reflection& reflected_uniforms
 		)
@@ -409,6 +497,14 @@ namespace mngl::gpu
 				options.resources.uniform_buffers,
 				reflected_uniforms.resource_counts.uniform_buffers,
 				"uniform buffer");
+			validate_count(
+				options.resources.read_write_storage_textures,
+				reflected_uniforms.resource_counts.read_write_storage_textures,
+				"read-write storage texture");
+			validate_count(
+				options.resources.read_write_storage_buffers,
+				reflected_uniforms.resource_counts.read_write_storage_buffers,
+				"read-write storage buffer");
 
 			asset.resources = reflected_uniforms.resource_counts;
 			if (reflected_uniforms.block_size != 0)
@@ -421,7 +517,10 @@ namespace mngl::gpu
 			}
 		}
 
-		static uniform_reflection reflect_hlsl_uniforms(const std::filesystem::path& source_path)
+		static uniform_reflection reflect_hlsl_uniforms(
+			const std::filesystem::path& source_path,
+			shader_stage stage
+		)
 		{
 			std::ifstream source_file(source_path, std::ios::binary);
 			if (!source_file)
@@ -450,10 +549,14 @@ namespace mngl::gpu
 				R"(\bTexture2D(?:\s*<[^>]+>)?\s+([A-Za-z_]\w*)\s*:\s*register\s*\(\s*t(\d+)\s*,\s*space\s*(\d+)\s*\)\s*;)");
 			static const std::regex buffer_resource(
 				R"(\bStructuredBuffer\s*<[^>]+>\s+([A-Za-z_]\w*)\s*:\s*register\s*\(\s*t(\d+)\s*,\s*space\s*(\d+)\s*\)\s*;)");
+			static const std::regex read_write_texture_resource(
+				R"(\bRWTexture2D(?:\s*<[^>]+>)?\s+([A-Za-z_]\w*)\s*:\s*register\s*\(\s*u(\d+)\s*,\s*space\s*(\d+)\s*\)\s*;)");
+			static const std::regex read_write_buffer_resource(
+				R"(\bRWStructuredBuffer\s*<[^>]+>\s+([A-Za-z_]\w*)\s*:\s*register\s*\(\s*u(\d+)\s*,\s*space\s*(\d+)\s*\)\s*;)");
 			static const std::regex sampler_resource(
 				R"(\bSamplerState\s+([A-Za-z_]\w*)\s*:\s*register\s*\(\s*s(\d+)\s*,\s*space\s*(\d+)\s*\)\s*;)");
 			static const std::regex resource_register(
-				R"(\bregister\s*\(\s*[ts]\s*\d+)");
+				R"(\bregister\s*\(\s*[tsu]\s*\d+)");
 			static const std::regex row_major_default(
 				R"(#\s*pragma\s+pack_matrix\s*\(\s*row_major\s*\))");
 
@@ -469,7 +572,7 @@ namespace mngl::gpu
 			if (keyword_count > 1)
 			{
 				throw std::invalid_argument(
-					"MNGL reflection supports at most one fragment cbuffer");
+					"MNGL reflection supports at most one HLSL cbuffer");
 			}
 
 			uniform_reflection result{};
@@ -481,7 +584,7 @@ namespace mngl::gpu
 					std::stoul(block_match[2].str()) != 3)
 				{
 					throw std::invalid_argument(
-						"MNGL fragment cbuffer must use register(b0, space3)");
+						"MNGL HLSL cbuffer must use register(b0, space3)");
 				}
 
 				const std::string body = block_match[3].str();
@@ -653,7 +756,7 @@ namespace mngl::gpu
 				}
 				if (result.fields.empty())
 				{
-					throw std::invalid_argument("MNGL fragment cbuffer must declare at least one uniform field");
+					throw std::invalid_argument("MNGL HLSL cbuffer must declare at least one uniform field");
 				}
 				result.block_size = (byte_offset + 15) & ~uint32_t(15);
 				result.resource_counts.uniform_buffers = 1;
@@ -667,6 +770,8 @@ namespace mngl::gpu
 			};
 			std::vector<resource_declaration> textures;
 			std::vector<resource_declaration> buffers;
+			std::vector<resource_declaration> read_write_textures;
+			std::vector<resource_declaration> read_write_buffers;
 			std::vector<resource_declaration> samplers;
 			auto collect_resources = [](const std::string& text, const std::regex& pattern)
 			{
@@ -693,6 +798,8 @@ namespace mngl::gpu
 			};
 			textures = collect_resources(source, texture_resource);
 			buffers = collect_resources(source, buffer_resource);
+			read_write_textures = collect_resources(source, read_write_texture_resource);
+			read_write_buffers = collect_resources(source, read_write_buffer_resource);
 			samplers = collect_resources(source, sampler_resource);
 
 			std::size_t reflected_resource_registers = 0;
@@ -702,10 +809,19 @@ namespace mngl::gpu
 			{
 				++reflected_resource_registers;
 			}
-			if (reflected_resource_registers != textures.size() + buffers.size() + samplers.size())
+			if (reflected_resource_registers !=
+				textures.size() + buffers.size() +
+				read_write_textures.size() + read_write_buffers.size() +
+				samplers.size())
 			{
 				throw std::invalid_argument(
-					"MNGL resource reflection supports Texture2D, StructuredBuffer, and SamplerState at space2");
+					"MNGL resource reflection supports Texture2D, StructuredBuffer, RWTexture2D, RWStructuredBuffer, and SamplerState at space2");
+			}
+			if (stage != shader_stage::compute &&
+				(!read_write_textures.empty() || !read_write_buffers.empty()))
+			{
+				throw std::invalid_argument(
+					"HLSL read-write storage resources are only supported in compute shaders");
 			}
 
 			auto require_space2 = [](const std::vector<resource_declaration>& declarations)
@@ -714,12 +830,14 @@ namespace mngl::gpu
 				{
 					if (declaration.space != 2)
 					{
-						throw std::invalid_argument("MNGL fragment resources must use HLSL register space2");
+						throw std::invalid_argument("MNGL HLSL resources must use register space2");
 					}
 				}
 			};
 			require_space2(textures);
 			require_space2(buffers);
+			require_space2(read_write_textures);
+			require_space2(read_write_buffers);
 			require_space2(samplers);
 
 			auto contiguous_slot_count = [](std::vector<uint32_t> slots, std::string_view kind)
@@ -740,6 +858,8 @@ namespace mngl::gpu
 			std::vector<uint32_t> sampled_texture_slots;
 			std::vector<uint32_t> storage_texture_slots;
 			std::vector<uint32_t> storage_buffer_slots;
+			std::vector<uint32_t> read_write_storage_texture_slots;
+			std::vector<uint32_t> read_write_storage_buffer_slots;
 			std::vector<uint32_t> sampler_slots;
 			for (const auto& declaration : buffers)
 			{
@@ -747,6 +867,15 @@ namespace mngl::gpu
 				result.resources.push_back({
 					.name = declaration.name,
 					.kind = shader_resource_kind::storage_buffer,
+					.slot = declaration.slot
+				});
+			}
+			for (const auto& declaration : read_write_buffers)
+			{
+				read_write_storage_buffer_slots.push_back(declaration.slot);
+				result.resources.push_back({
+					.name = declaration.name,
+					.kind = shader_resource_kind::read_write_storage_buffer,
 					.slot = declaration.slot
 				});
 			}
@@ -766,6 +895,15 @@ namespace mngl::gpu
 					.kind = sampled
 						? shader_resource_kind::sampled_texture
 						: shader_resource_kind::storage_texture,
+					.slot = declaration.slot
+				});
+			}
+			for (const auto& declaration : read_write_textures)
+			{
+				read_write_storage_texture_slots.push_back(declaration.slot);
+				result.resources.push_back({
+					.name = declaration.name,
+					.kind = shader_resource_kind::read_write_storage_texture,
 					.slot = declaration.slot
 				});
 			}
@@ -795,7 +933,160 @@ namespace mngl::gpu
 				contiguous_slot_count(std::move(storage_texture_slots), "storage texture");
 			result.resource_counts.storage_buffers =
 				contiguous_slot_count(std::move(storage_buffer_slots), "storage buffer");
+			result.resource_counts.read_write_storage_textures =
+				contiguous_slot_count(
+					std::move(read_write_storage_texture_slots),
+					"read-write storage texture");
+			result.resource_counts.read_write_storage_buffers =
+				contiguous_slot_count(
+					std::move(read_write_storage_buffer_slots),
+					"read-write storage buffer");
 			return result;
+		}
+
+		static glm::uvec3 resolve_compute_threadgroup_size(
+			const std::filesystem::path& source_path,
+			const shader_compile_options& options
+		)
+		{
+			const auto requested = options.compute_threadgroup_size;
+			const bool any_requested = requested.x != 0 || requested.y != 0 || requested.z != 0;
+			if (any_requested)
+			{
+				if (requested.x == 0 || requested.y == 0 || requested.z == 0)
+				{
+					throw std::invalid_argument("Compute threadgroup dimensions must all be non-zero");
+				}
+			}
+
+			validate_source_file(source_path);
+			std::ifstream source_file(source_path, std::ios::binary);
+			if (!source_file)
+			{
+				throw std::runtime_error(std::format(
+					"Failed to read shader source for compute threadgroup reflection: '{}'",
+					source_path.string()));
+			}
+			std::string source{
+				std::istreambuf_iterator<char>(source_file),
+				std::istreambuf_iterator<char>() };
+			if (source_file.bad())
+			{
+				throw std::runtime_error(std::format(
+					"Failed while reading shader source for compute threadgroup reflection: '{}'",
+					source_path.string()));
+			}
+
+			static const std::regex comments(R"(//[^\r\n]*|/\*[\s\S]*?\*/)");
+			source = std::regex_replace(source, comments, "");
+
+			auto parse_dimension = [](const std::string& value)
+			{
+				const auto parsed = std::stoull(value);
+				if (parsed == 0 || parsed > std::numeric_limits<uint32_t>::max())
+				{
+					throw std::invalid_argument(
+						"Compute threadgroup dimensions must fit in a non-zero 32-bit integer");
+				}
+				return static_cast<uint32_t>(parsed);
+			};
+
+			if (options.source_language == shader_source_language::hlsl)
+			{
+				static const std::regex numthreads(
+					R"(\[\s*numthreads\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*\]\s*\w+\s+([A-Za-z_]\w*)\s*\()");
+				glm::uvec3 reflected{ 0, 0, 0 };
+				std::size_t match_count = 0;
+				for (auto it = std::sregex_iterator(source.begin(), source.end(), numthreads);
+					it != std::sregex_iterator();
+					++it)
+				{
+					const std::smatch& match = *it;
+					if (match[4].str() != options.entrypoint)
+					{
+						continue;
+					}
+					reflected = {
+						parse_dimension(match[1].str()),
+						parse_dimension(match[2].str()),
+						parse_dimension(match[3].str())
+					};
+					++match_count;
+				}
+				if (match_count == 0 && any_requested)
+				{
+					return requested;
+				}
+				if (match_count != 1)
+				{
+					throw std::invalid_argument(std::format(
+						"Could not infer one HLSL [numthreads] declaration for entrypoint '{}'; set compute_threadgroup_size explicitly",
+						options.entrypoint));
+				}
+				if (any_requested &&
+					(requested.x != reflected.x ||
+						requested.y != reflected.y ||
+						requested.z != reflected.z))
+				{
+					throw std::invalid_argument(
+						"compute_threadgroup_size does not match the HLSL [numthreads] declaration");
+				}
+				return any_requested ? requested : reflected;
+			}
+
+			if (options.source_language == shader_source_language::glsl)
+			{
+				static const std::regex local_size_layout(
+					R"(layout\s*\(([^)]*)\)\s*in\s*;)");
+				static const std::regex local_size_x(R"(local_size_x\s*=\s*(\d+))");
+				static const std::regex local_size_y(R"(local_size_y\s*=\s*(\d+))");
+				static const std::regex local_size_z(R"(local_size_z\s*=\s*(\d+))");
+				glm::uvec3 reflected{ 0, 0, 0 };
+				std::size_t match_count = 0;
+				for (auto it = std::sregex_iterator(source.begin(), source.end(), local_size_layout);
+					it != std::sregex_iterator();
+					++it)
+				{
+					const std::string layout = (*it)[1].str();
+					std::smatch x_match;
+					if (!std::regex_search(layout, x_match, local_size_x))
+					{
+						continue;
+					}
+					std::smatch y_match;
+					std::smatch z_match;
+					reflected = {
+						parse_dimension(x_match[1].str()),
+						std::regex_search(layout, y_match, local_size_y)
+							? parse_dimension(y_match[1].str())
+							: 1u,
+						std::regex_search(layout, z_match, local_size_z)
+							? parse_dimension(z_match[1].str())
+							: 1u
+					};
+					++match_count;
+				}
+				if (match_count == 0 && any_requested)
+				{
+					return requested;
+				}
+				if (match_count != 1)
+				{
+					throw std::invalid_argument(
+						"Could not infer one GLSL local_size layout; set compute_threadgroup_size explicitly");
+				}
+				if (any_requested &&
+					(requested.x != reflected.x ||
+						requested.y != reflected.y ||
+						requested.z != reflected.z))
+				{
+					throw std::invalid_argument(
+						"compute_threadgroup_size does not match the GLSL local_size layout");
+				}
+				return any_requested ? requested : reflected;
+			}
+
+			throw std::invalid_argument("Unsupported shader source language");
 		}
 
 		static std::filesystem::path argument(std::string_view value)
@@ -906,6 +1197,62 @@ namespace mngl::gpu
 					source_path.string()));
 			}
 			return bytes;
+		}
+
+		static std::vector<uint8_t> compile_shader_bytecode(
+			const std::filesystem::path& source_path,
+			const shader_compile_options& options,
+			shader_stage stage
+		)
+		{
+			const auto output_format = output_format_for(options.format);
+			const auto stage_name = stage_name_for(stage);
+			if (!valid_entrypoint(options.entrypoint))
+			{
+				throw std::invalid_argument("Shader entrypoint must be a valid identifier");
+			}
+			if (options.source_language != shader_source_language::hlsl &&
+				options.source_language != shader_source_language::glsl)
+			{
+				throw std::invalid_argument("Unsupported shader source language");
+			}
+			validate_source_file(source_path);
+
+			auto compile_options = options;
+			compile_options.stage = stage;
+			auto temp_dir = temporary_directory::create();
+			const auto compiled_path = temp_dir.path() /
+				std::format("compiled.{}", output_format.extension);
+
+			if (options.source_language == shader_source_language::hlsl)
+			{
+				run_shadercross(
+					source_path,
+					source_path,
+					"HLSL",
+					stage_name,
+					output_format,
+					compiled_path,
+					compile_options);
+				return read_shader_output(compiled_path, "shadercross", source_path);
+			}
+
+			const auto spirv_path = temp_dir.path() / "source.spv";
+			run_glslang(source_path, spirv_path, compile_options);
+			if (options.format == shader_format::spirv)
+			{
+				return read_shader_output(spirv_path, "glslangValidator", source_path);
+			}
+
+			run_shadercross(
+				spirv_path,
+				source_path,
+				"SPIRV",
+				stage_name,
+				output_format,
+				compiled_path,
+				compile_options);
+			return read_shader_output(compiled_path, "shadercross", source_path);
 		}
 
 		static bool valid_entrypoint(std::string_view entrypoint) noexcept

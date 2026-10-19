@@ -2,7 +2,7 @@
 
 `mngl::two_d::transform` хранит affine-матрицу `glm::mat4` в плоскости XY. Матрица по умолчанию единичная, поэтому не меняет существующее положение объекта. Она применяется к геометрии объекта перед проекцией текущего `view`.
 
-У спрайта и фигур `circle`, `ellipse` и `rounded_rectangle` поле `transform` имеет один тип — `mngl::two_d::transform`:
+У спрайта, фигур `circle`, `ellipse`, `rounded_rectangle` и заливки `rectangle_shape` поле `transform` имеет один тип — `mngl::two_d::transform`:
 
 ```cpp
 mngl::two_d::circle marker{ { 0.5f, 0.5f }, 0.08f };
@@ -31,7 +31,7 @@ window.draw(icon);
 mngl::sprite icon(atlas_region, { 0.2f, 0.2f, 0.3f, 0.3f });
 ```
 
-Для немедленных draw-вызовов передайте трансформацию последним аргументом: `frame.draw(bounds, tint, transform)` или `frame.draw(texture, bounds, tint, transform)`. То же доступно у `render_window` и render-target `texture`.
+Все объекты рисуются единым `draw(drawable)`. Чтобы трансформировать залитый прямоугольник, передайте матрицу в `rectangle_shape` или измените его поле `transform`.
 
 `translate`, `rotate` и `scale` домножают матрицу справа; координаты задаются в единицах текущего 2D мира, угол — в радианах. `rotate` и `scale` принимают необязательный центр преобразования. Матрицу GLM можно прочитать через `matrix()` или установить через `matrix(value)`; разрешены только конечные affine-матрицы в плоскости XY.
 

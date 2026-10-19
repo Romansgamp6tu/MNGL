@@ -207,6 +207,9 @@
     <ClInclude Include="render_window.hpp" />
     <ClInclude Include="color.hpp" />
     <ClInclude Include="command_buffer.hpp" />
+    <ClInclude Include="compute_pass.hpp" />
+    <ClInclude Include="compute_pipeline.hpp" />
+    <ClInclude Include="frame_graph.hpp" />
     <ClInclude Include="device.hpp" />
     <ClInclude Include="event.hpp" />
     <ClInclude Include="graphics_pipeline.hpp" />

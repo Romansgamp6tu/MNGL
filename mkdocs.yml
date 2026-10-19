@@ -19,6 +19,7 @@ nav:
       - Трансформации: 2d/transforms.md
       - Hit testing: 2d/hit-testing.md
       - Расширенный рендеринг: 2d/advanced-rendering.md
+      - Параллельная запись кадра: 2d/parallel-recording.md
   - Основы:
       - Обзор: core/index.md
       - Окна и ввод: core/windows-and-input.md
@@ -31,5 +32,7 @@ nav:
       - Устройство и команды: gpu/device-and-commands.md
       - GPU-ресурсы: gpu/resources.md
       - Шейдеры: gpu/shaders.md
+      - Compute shaders: gpu/compute.md
       - Pipeline и render pass: gpu/pipelines-and-passes.md
+      - Граф кадра: gpu/frame-graph.md
   - Справочник по модулям: reference/index.md

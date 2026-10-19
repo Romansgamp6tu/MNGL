@@ -33,11 +33,14 @@ namespace mngl
 
 namespace mngl::gpu
 {
-	enum class graphics_shader_stage : uint8_t
+	enum class shader_stage : uint8_t
 	{
 		vertex = SDL_GPU_SHADERSTAGE_VERTEX,
 		fragment = SDL_GPU_SHADERSTAGE_FRAGMENT,
+		compute = 2,
 	};
+
+	using graphics_shader_stage = shader_stage;
 
 	enum class shader_format : uint32_t
 	{
@@ -64,9 +67,21 @@ namespace mngl::gpu
 		}
 	}
 
-	constexpr bool valid_shader_stage(graphics_shader_stage stage) noexcept
+	constexpr bool valid_shader_stage(shader_stage stage) noexcept
 	{
-		return stage == graphics_shader_stage::vertex || stage == graphics_shader_stage::fragment;
+		return stage == shader_stage::vertex ||
+			stage == shader_stage::fragment ||
+			stage == shader_stage::compute;
+	}
+
+	constexpr bool valid_graphics_shader_stage(shader_stage stage) noexcept
+	{
+		return stage == shader_stage::vertex || stage == shader_stage::fragment;
+	}
+
+	constexpr bool valid_compute_shader_stage(shader_stage stage) noexcept
+	{
+		return stage == shader_stage::compute;
 	}
 
 	struct shader_resource_layout
@@ -75,11 +90,15 @@ namespace mngl::gpu
 		uint32_t storage_textures = 0;
 		uint32_t storage_buffers = 0;
 		uint32_t uniform_buffers = 0;
+		uint32_t read_write_storage_textures = 0;
+		uint32_t read_write_storage_buffers = 0;
 
 		constexpr bool empty() const noexcept
 		{
 			return samplers == 0 && storage_textures == 0 &&
-				storage_buffers == 0 && uniform_buffers == 0;
+				storage_buffers == 0 && uniform_buffers == 0 &&
+				read_write_storage_textures == 0 &&
+				read_write_storage_buffers == 0;
 		}
 
 		constexpr bool operator==(const shader_resource_layout&) const noexcept = default;
@@ -113,7 +132,7 @@ namespace mngl::gpu
 	// Невладеющий view для быстрой передачи в SDL_GPUShaderCreateInfo
 	struct graphics_shader_create_view
 	{
-		graphics_shader_stage stage = graphics_shader_stage::vertex;
+		shader_stage stage = shader_stage::vertex;
 		shader_format format = shader_format::invalid;
 		std::span<const uint8_t> code;
 		const char* entrypoint = "main";
@@ -121,10 +140,12 @@ namespace mngl::gpu
 
 		bool valid() const noexcept
 		{
-			return valid_shader_stage(stage) &&
+			return valid_graphics_shader_stage(stage) &&
 				valid_shader_format(format) &&
 				!code.empty() &&
-				entrypoint != nullptr && entrypoint[0] != '\0';
+				entrypoint != nullptr && entrypoint[0] != '\0' &&
+				resources.read_write_storage_textures == 0 &&
+				resources.read_write_storage_buffers == 0;
 		}
 
 		SDL_GPUShaderCreateInfo to_sdl() const noexcept
@@ -166,7 +187,9 @@ namespace mngl::gpu
 	{
 		sampled_texture,
 		storage_texture,
-		storage_buffer
+		storage_buffer,
+		read_write_storage_texture,
+		read_write_storage_buffer
 	};
 
 	struct shader_resource_field_layout
@@ -195,7 +218,9 @@ namespace mngl::gpu
 		{ }
 	};
 
+	struct shader_asset;
 	struct graphics_shader_asset;
+	struct compute_shader_asset;
 	class shader_loader;
 
 	namespace detail
@@ -246,7 +271,7 @@ namespace mngl::gpu
 
 		class shader_uniform_storage
 		{
-			friend struct ::mngl::gpu::graphics_shader_asset;
+			friend struct ::mngl::gpu::shader_asset;
 
 			uint32_t block_size = 0;
 			std::unordered_map<std::string, shader_uniform_field_layout> layout;
@@ -258,8 +283,8 @@ namespace mngl::gpu
 		};
 	}
 
-	// CPU-ассет шейдера (байты на диске/в памяти)
-	struct graphics_shader_asset
+	// CPU-side shader data shared by graphics and compute shader assets.
+	struct shader_asset
 	{
 		class uniform_setter
 		{
@@ -290,18 +315,18 @@ namespace mngl::gpu
 			}
 
 		private:
-			friend struct graphics_shader_asset;
+			friend struct shader_asset;
 
-			uniform_setter(graphics_shader_asset& shader, std::string_view name)
+			uniform_setter(shader_asset& shader, std::string_view name)
 				: m_shader(&shader)
 				, m_name(name)
 			{ }
 
-			graphics_shader_asset* m_shader;
+			shader_asset* m_shader;
 			std::string m_name;
 		};
 
-		graphics_shader_stage stage = graphics_shader_stage::vertex;
+		shader_stage stage = shader_stage::vertex;
 		shader_bytecode code;
 		std::string entrypoint = "main";
 		shader_resource_layout resources{};
@@ -376,22 +401,6 @@ namespace mngl::gpu
 			return valid_shader_stage(stage) && code.valid() && !entrypoint.empty();
 		}
 		explicit operator bool() const noexcept { return valid(); }
-
-		graphics_shader_create_view view() const noexcept
-		{
-			return graphics_shader_create_view{
-				.stage = stage,
-				.format = code.format,
-				.code = code.bytes,
-				.entrypoint = entrypoint.c_str(),
-				.resources = resources
-			};
-		}
-
-		SDL_GPUShaderCreateInfo create_info() const noexcept
-		{
-			return view().to_sdl();
-		}
 
 	private:
 		friend class shader_loader;
@@ -743,11 +752,12 @@ namespace mngl::gpu
 		{
 			const auto field = m_uniform_storage.resource_layout_by_name.find(std::string(name));
 			if (!source || field == m_uniform_storage.resource_layout_by_name.end() ||
-				field->second.kind == shader_resource_kind::storage_buffer)
+				field->second.kind == shader_resource_kind::storage_buffer ||
+				field->second.kind == shader_resource_kind::read_write_storage_buffer)
 			{
 				throw std::invalid_argument("Shader has no texture resource named '" + std::string(name) + "'");
 			}
-			if (field->second.kind == shader_resource_kind::storage_texture && sampler_state)
+			if (field->second.kind != shader_resource_kind::sampled_texture && sampler_state)
 			{
 				throw std::invalid_argument("Storage textures cannot have a sampler binding");
 			}
@@ -760,7 +770,8 @@ namespace mngl::gpu
 		{
 			const auto field = m_uniform_storage.resource_layout_by_name.find(std::string(name));
 			if (field == m_uniform_storage.resource_layout_by_name.end() ||
-				field->second.kind != shader_resource_kind::storage_buffer)
+				(field->second.kind != shader_resource_kind::storage_buffer &&
+					field->second.kind != shader_resource_kind::read_write_storage_buffer))
 			{
 				throw std::invalid_argument("Shader has no storage buffer resource named '" + std::string(name) + "'");
 			}
@@ -768,6 +779,54 @@ namespace mngl::gpu
 				field->first,
 				shader_resource_assignment{ .storage_buffer = &source });
 		}
+	};
+
+	struct graphics_shader_asset : shader_asset
+	{
+		bool valid() const noexcept
+		{
+			return valid_graphics_shader_stage(stage) &&
+				shader_asset::valid() &&
+				resources.read_write_storage_textures == 0 &&
+				resources.read_write_storage_buffers == 0;
+		}
+		explicit operator bool() const noexcept { return valid(); }
+
+		graphics_shader_create_view view() const noexcept
+		{
+			return graphics_shader_create_view{
+				.stage = stage,
+				.format = code.format,
+				.code = code.bytes,
+				.entrypoint = entrypoint.c_str(),
+				.resources = resources
+			};
+		}
+
+		SDL_GPUShaderCreateInfo create_info() const noexcept
+		{
+			return view().to_sdl();
+		}
+	};
+
+	struct compute_shader_asset : shader_asset
+	{
+		compute_shader_asset() noexcept
+		{
+			stage = shader_stage::compute;
+		}
+
+		glm::uvec3 threadgroup_size{ 0, 0, 0 };
+
+		bool valid() const noexcept
+		{
+			return valid_compute_shader_stage(stage) &&
+				shader_asset::valid() &&
+				threadgroup_size.x != 0 &&
+				threadgroup_size.y != 0 &&
+				threadgroup_size.z != 0;
+		}
+		explicit operator bool() const noexcept { return valid(); }
 	};
 
 	// RAII-обёртка над GPU-объектом SDL_GPUShader*

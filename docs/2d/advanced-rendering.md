@@ -15,3 +15,5 @@
 `two_d::renderer` также предоставляет создание custom materials и material instances. Материалы используют fragment shader и bindings для uniform blocks, sampled/storage textures и storage buffers. Низкоуровневая настройка этих ресурсов описана в разделе [GPU и шейдеры](../gpu/shaders.md).
 
 `mngl::gpu::batcher2d` — более низкий уровень пакетной отрисовки quad-геометрии. Для пользовательских material instances ресурсы должны принадлежать тому же GPU device и жить не меньше использующих их material instances.
+
+`batcher2d` также позволяет записывать команды в отдельные `recording_context`: создайте контексты во время кадра, записывайте каждый только из одного потока, завершите их через `finish()` и объедините вызовами `merge_recording_context()` в нужном порядке до `flush()`. `flush()` отклоняет кадр с ещё живыми контекстами вместо того, чтобы молча потерять их команды. Чтобы отбросить команды контекста, уничтожьте его; `cancel_frame()` отбрасывает весь кадр.

@@ -2,36 +2,68 @@
 
 Высокоуровневое 2D API предназначено для обычного рисования без ручной настройки GPU-состояния. Окно и текстура предоставляют похожий цикл кадра:
 
-1. `clear()` начинает кадр и очищает цель.
-2. `draw(...)` добавляет фигуры или текстуры.
-3. `display()` завершает и отправляет кадр.
+1. `frame()` начинает кадр и очищает цель.
+2. `frame.draw(drawable)` добавляет рисуемый объект.
+3. `frame.display()` завершает и отправляет кадр.
 
-Например:
+Рисуемые объекты реализуют `mngl::drawable`, поэтому для окна, текстуры и `Frame2D` используется одна перегрузка `draw(const drawable&)`. `mngl::rectangle` описывает только геометрию; для заливки используйте drawable `mngl::two_d::rectangle_shape`.
 
 ```cpp
-window.clear();
-window.draw(bounds, color);
-window.display();
+auto frame = window.frame();
+frame.draw(mngl::two_d::rectangle_shape{ bounds, color });
+frame.display();
 ```
 
-Те же операции доступны у `mngl::texture`, поэтому текстура может быть самостоятельной целью рендеринга. Для разовой отрисовки текстуры передавайте её напрямую в `draw`; `mngl::sprite` удобен, когда положение, размер или поворот объекта нужно хранить и менять между кадрами.
+Если frame scope уничтожен без `display()`, он отменяет кадр и освобождает цель. Старый стиль `clear() → draw() → display()` также поддерживается.
+
+Те же операции доступны у `mngl::texture`, поэтому текстура может быть самостоятельной целью рендеринга. Frame scope не владеет окном или целевой текстурой: они должны жить до `display()` либо отмены кадра. Спрайты, фигуры, заливки прямоугольника и текст реализуют `drawable`; изображение показывается через `mngl::sprite`, который хранит его положение, размер и поворот.
 
 ## Пользовательские отрисовщики
 
-Чтобы объединить собственную логику рисования без наследования и новых перегрузок, передайте вызываемый объект в `draw()`. Он синхронно получает активный `two_d::Frame2D` и может использовать обычные draw-вызовы:
+Для повторно используемого пользовательского объекта унаследуйте класс от `mngl::drawable` и реализуйте `draw(two_d::Frame2D&) const`. После этого объект можно передавать в обычный `draw()` на окне или текстуре — новые перегрузки для него не нужны:
 
 ```cpp
-window.clear();
-window.draw([&](mngl::two_d::Frame2D& frame)
+class health_bar : public mngl::drawable
 {
-    frame.draw(background, background_color);
-    frame.draw(player_sprite);
-});
-window.display();
+public:
+    explicit health_bar(float value) : value(value) {}
+
+protected:
+    void draw(mngl::two_d::Frame2D& frame) const override
+    {
+        frame.draw(mngl::two_d::rectangle_shape{
+            { 0.1f, 0.9f, 0.8f, 0.04f },
+            mngl::color{ 0.2f, 0.8f, 0.3f, 1.0f } });
+        frame.draw(mngl::two_d::rectangle_shape{
+            { 0.1f, 0.9f, 0.8f * value, 0.04f },
+            mngl::color{ 0.9f, 0.2f, 0.2f, 1.0f } });
+    }
+
+private:
+    float value;
+};
+
+health_bar health(0.75f);
+auto frame = window.frame();
+frame.draw(health);
+frame.display();
 ```
 
-Такой же callback доступен у render-target `mngl::texture` между её `clear()` и `display()`. Callback выполняется сразу; не сохраняйте переданную ссылку на кадр и не завершайте кадр внутри callback.
-Для повторно используемого отрисовщика передайте в `draw()` объект с `operator()(mngl::two_d::Frame2D&)`.
+Метод `drawable::draw` вызывается синхронно; переданный `Frame2D` нельзя сохранять после вызова. Ресурсы, которые объект передаёт в кадр, должны оставаться живыми до `frame.display()`.
+
+Для одноразовой или захватывающей локальные переменные логики можно передать callback в `draw()`. Он синхронно получает активный `two_d::Frame2D` и может использовать обычные draw-вызовы:
+
+```cpp
+auto frame = window.frame();
+frame.draw([&](mngl::two_d::Frame2D& frame)
+{
+    frame.draw(mngl::two_d::rectangle_shape{ background, background_color });
+    frame.draw(player_sprite);
+});
+frame.display();
+```
+
+Такой же callback доступен у frame scope render-target `mngl::texture`. Callback выполняется сразу; не сохраняйте переданную ссылку на кадр и не завершайте кадр внутри callback.
 
 ## Руководства
 
@@ -41,3 +73,4 @@ window.display();
 - [Трансформации](transforms.md)
 - [Попадания и локальные координаты мыши](hit-testing.md)
 - [Рендер текста и большие документы](text-rendering.md)
+- [Параллельная запись кадра](parallel-recording.md)

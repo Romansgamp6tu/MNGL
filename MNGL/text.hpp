@@ -29,6 +29,7 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -92,8 +93,11 @@ namespace mngl::two_d
 		friend class renderer;
 
 		struct implementation;
+		void prepare_glyphs(std::string_view text);
 		[[nodiscard]] detail::text_glyph glyph(uint32_t codepoint, bool rasterize);
+		[[nodiscard]] detail::text_glyph glyph_prepared(uint32_t codepoint) const;
 		[[nodiscard]] float kerning(uint32_t left, uint32_t right);
+		[[nodiscard]] float kerning_prepared(uint32_t left, uint32_t right) const;
 		[[nodiscard]] SDL_GPUDevice* device_raw() const noexcept;
 		void upload_pending(gpu::command_buffer& command_buffer);
 		void mark_uploads_dirty() noexcept;
@@ -477,6 +481,7 @@ namespace mngl::two_d
 		std::array<std::optional<cached_glyph>, 128> ascii_glyphs{};
 		std::unordered_map<uint32_t, cached_glyph> other_glyphs;
 		std::vector<atlas_page> pages;
+		std::mutex upload_mutex;
 	};
 
 	inline font::font(
@@ -552,6 +557,55 @@ namespace mngl::two_d
 		};
 	}
 
+	inline detail::text_glyph font::glyph_prepared(uint32_t codepoint) const
+	{
+		if (!m_implementation)
+		{
+			throw std::logic_error("Cannot use a moved-from font");
+		}
+
+		const implementation::cached_glyph* cached = nullptr;
+		if (codepoint < m_implementation->ascii_glyphs.size())
+		{
+			const auto& entry = m_implementation->ascii_glyphs[codepoint];
+			if (entry)
+			{
+				cached = &*entry;
+			}
+		}
+		else if (const auto found = m_implementation->other_glyphs.find(codepoint);
+			found != m_implementation->other_glyphs.end())
+		{
+			cached = &found->second;
+		}
+
+		if (!cached || !cached->rasterized)
+		{
+			throw std::logic_error(
+				"Glyph was not prepared for parallel text rendering; call font::prepare_glyphs() first");
+		}
+
+		const ::mngl::texture* page = nullptr;
+		if (cached->atlas_page != detail::text_no_atlas_page)
+		{
+			if (cached->atlas_page >= m_implementation->pages.size())
+			{
+				throw std::logic_error("Prepared font glyph refers to an invalid atlas page");
+			}
+			page = &m_implementation->pages[cached->atlas_page].texture;
+		}
+		return {
+			page,
+			cached->uv_bounds,
+			cached->codepoint,
+			cached->advance,
+			cached->x_offset,
+			cached->y_offset,
+			cached->width,
+			cached->height
+		};
+	}
+
 	inline float font::kerning(uint32_t left, uint32_t right)
 	{
 		if (!m_implementation || left == 0 || right == 0)
@@ -560,6 +614,20 @@ namespace mngl::two_d
 		}
 		const auto left_glyph = glyph(left, false);
 		const auto right_glyph = glyph(right, false);
+		return static_cast<float>(stbtt_GetCodepointKernAdvance(
+			&m_implementation->font_info,
+			static_cast<int>(left_glyph.codepoint),
+			static_cast<int>(right_glyph.codepoint))) * m_implementation->scale;
+	}
+
+	inline float font::kerning_prepared(uint32_t left, uint32_t right) const
+	{
+		if (!m_implementation || left == 0 || right == 0)
+		{
+			return 0.0f;
+		}
+		const auto left_glyph = glyph_prepared(left);
+		const auto right_glyph = glyph_prepared(right);
 		return static_cast<float>(stbtt_GetCodepointKernAdvance(
 			&m_implementation->font_info,
 			static_cast<int>(left_glyph.codepoint),
@@ -801,6 +869,7 @@ namespace mngl::two_d
 		float pen_x = 0.0f;
 		uint32_t previous_codepoint = 0;
 		const float tab_width = glyph(' ', false).advance * scale * 4.0f;
+
 		for (std::size_t offset = 0; offset < text.size();)
 		{
 			uint32_t codepoint = 0;
@@ -839,5 +908,23 @@ namespace mngl::two_d
 		}
 
 		return pen_x;
+	}
+
+	inline void font::prepare_glyphs(std::string_view text)
+	{
+		(void)glyph(' ', true);
+		for (std::size_t offset = 0; offset < text.size();)
+		{
+			uint32_t codepoint = 0;
+			(void)detail::next_utf8_codepoint(text, offset, codepoint);
+			if (codepoint != '\t' && codepoint != '\r' && codepoint != '\n')
+			{
+				const auto prepared = glyph(codepoint, true);
+				if (prepared.codepoint != codepoint)
+				{
+					(void)glyph(prepared.codepoint, true);
+				}
+			}
+		}
 	}
 }

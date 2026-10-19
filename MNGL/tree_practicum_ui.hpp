@@ -101,12 +101,10 @@ namespace tree_practicum
 			std::vector<std::string> tree_paths;
 		};
 
-		inline static std::once_flag file_drop_listener_once;
 		inline static std::mutex pending_file_drops_mutex;
 		inline static std::vector<std::string> pending_file_drops;
 		inline static std::string pending_file_dialog_error;
 		inline static std::atomic_uint64_t next_tree_animation_source_id{ 1 };
-		inline static std::once_flag tree_animation_listener_once;
 		inline static std::mutex tree_animation_queues_mutex;
 		inline static constexpr SDL_DialogFileFilter tree_file_dialog_filter{
 			"Tree serialization",
@@ -1305,8 +1303,7 @@ namespace tree_practicum
 
 		void register_tree_animation_queue()
 		{
-			std::call_once(tree_animation_listener_once, []()
-			{
+			[[maybe_unused]] static auto tree_animation_subscription =
 				mngl::event_manager::on<tree_animation_event>(
 					[](const tree_animation_event& event)
 					{
@@ -1332,7 +1329,6 @@ namespace tree_practicum
 						std::lock_guard lock(queue->mutex);
 						queue->events.push_back(event.step);
 					});
-			});
 
 			std::lock_guard lock(tree_animation_queues_mutex);
 			tree_animation_event_queues[m_tree_animation_source_id] =
@@ -1547,7 +1543,6 @@ namespace tree_practicum
 							return lowercase_ascii(entry.path) ==
 								expected_path;
 						});
-				});
 		}
 
 		[[nodiscard]] history_state capture_history_counterpart(
@@ -2503,14 +2498,12 @@ namespace tree_practicum
 
 		static void register_file_drop_listener()
 		{
-			std::call_once(file_drop_listener_once, []
-			{
+			[[maybe_unused]] static auto file_drop_subscription =
 				mngl::event_manager::on<mngl::dropFile>(
 					[](const mngl::dropFile& event)
-				{
-					enqueue_tree_file_path(event.data);
-				});
-			});
+					{
+						enqueue_tree_file_path(event.data);
+					});
 		}
 
 		static void enqueue_tree_file_path(std::string_view path)
@@ -10413,8 +10406,8 @@ namespace tree_practicum
 					1.0f
 				};
 				canvas_texture->set_view(canvas_view);
-				canvas_texture->clear(background);
-				canvas_texture->draw(
+				auto canvas_frame = canvas_texture->frame(background);
+				canvas_frame.draw(
 					[&](mngl::two_d::Frame2D& frame)
 					{
 						frame.set_view(canvas_view);
@@ -10485,7 +10478,7 @@ namespace tree_practicum
 							tree_area,
 							render_options);
 					});
-				canvas_texture->display();
+				canvas_frame.display();
 
 				const ImVec2 canvas_max{
 					canvas_min.x + canvas_size.x,

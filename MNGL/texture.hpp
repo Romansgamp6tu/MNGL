@@ -18,23 +18,22 @@
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
 namespace mngl
 {
 	class texture;
+	class drawable;
 	class imgui_context;
-	struct sprite;
 
 	namespace two_d
 	{
 		class Frame2D;
+		class recording_context;
 		class renderer;
-		class transform;
-		struct circle;
-		struct ellipse;
-		struct rounded_rectangle;
 	}
 
 	namespace detail
@@ -43,23 +42,6 @@ namespace mngl
 		{
 		public:
 			virtual ~texture_render_session() = default;
-			virtual void draw(const sprite& value) = 0;
-			virtual void draw(const two_d::circle& value) = 0;
-			virtual void draw(const two_d::ellipse& value) = 0;
-			virtual void draw(const two_d::rounded_rectangle& value) = 0;
-			virtual void draw(const rectangle& bounds, const color& tint) = 0;
-			virtual void draw(
-				const rectangle& bounds,
-				const color& tint,
-				const two_d::transform& transform
-			) = 0;
-			virtual void draw(const texture& source, const rectangle& bounds, const color& tint) = 0;
-			virtual void draw(
-				const texture& source,
-				const rectangle& bounds,
-				const color& tint,
-				const two_d::transform& transform
-			) = 0;
 			virtual two_d::Frame2D& frame() noexcept = 0;
 			virtual void display() = 0;
 		};
@@ -91,6 +73,10 @@ namespace mngl
 
 	class texture
 	{
+	private:
+		void reset_active_frame() noexcept;
+		void cancel_active_frame(std::uint64_t generation) noexcept;
+
 	public:
 		using pixel_format = gpu::texture_format;
 		using usage = gpu::texture::usage_flags;
@@ -165,6 +151,23 @@ namespace mngl
 			: texture(source.raw(), usg)
 		{ }
 
+		explicit texture(
+			const std::string& path,
+			uint32_t usg = default_upload_usage
+		)
+		{
+			detail::surface_ptr image(IMG_Load(path.c_str()));
+			if (!image)
+			{
+				throw sdl_error("Failed to load image from " + path + ": ");
+			}
+
+			auto& device = gpu::device::global();
+			gpu::command_buffer cmd(device);
+			load_from_surface(device, cmd, image.get(), usg);
+			cmd.submit();
+		}
+
 		// 3. Создание текстуры из массива float-данных (для HDR, симуляций, высотных карт)
 		texture(
 			const gpu::device& dev,
@@ -205,21 +208,11 @@ namespace mngl
 			uint32_t usg = default_upload_usage
 		)
 		{
-			if (!surface)
+			if (rendering())
 			{
-				throw std::invalid_argument("Cannot create texture from null SDL_Surface!");
+				throw std::logic_error("Cannot replace a texture while it is being rendered to");
 			}
-
-			// RGBA32 — байтовый порядок R,G,B,A независимо от endianness (в отличие от RGBA8888)
-			detail::surface_ptr converted(SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32));
-			if (!converted)
-			{
-				throw sdl_error("Failed to convert surface format: ");
-			}
-			if (converted->w <= 0 || converted->h <= 0 || !converted->pixels || converted->pitch < converted->w * 4)
-			{
-				throw std::invalid_argument("SDL_Surface has invalid dimensions or pixel data");
-			}
+			auto converted = convert_surface(surface);
 
 			const uint32_t w = static_cast<uint32_t>(converted->w);
 			const uint32_t h = static_cast<uint32_t>(converted->h);
@@ -233,6 +226,84 @@ namespace mngl
 				h
 			);
 			m_gpu_tex = std::move(tex);
+			m_hit_test_frame.reset();
+		}
+
+		// Updates an RGBA8 texture from a same-sized SDL surface.
+		void update_from_surface(gpu::command_buffer& cmd, SDL_Surface* surface)
+		{
+			if (rendering())
+			{
+				throw std::logic_error("Cannot update a texture while it is being rendered to");
+			}
+			if (!valid())
+			{
+				throw std::logic_error("Cannot update an invalid texture from SDL_Surface");
+			}
+
+			auto converted = convert_surface(surface);
+			if (m_gpu_tex.format() != pixel_format::r8g8b8a8_unorm)
+			{
+				throw std::invalid_argument("Updating from SDL_Surface requires an RGBA8 texture");
+			}
+
+			const uint32_t width = static_cast<uint32_t>(converted->w);
+			const uint32_t height = static_cast<uint32_t>(converted->h);
+			if (m_gpu_tex.width() != width || m_gpu_tex.height() != height)
+			{
+				throw std::invalid_argument(
+					"SDL_Surface dimensions must match the texture dimensions");
+			}
+
+			upload_rows(
+				m_gpu_tex,
+				cmd,
+				converted->pixels,
+				static_cast<std::size_t>(width) * 4,
+				static_cast<std::size_t>(converted->pitch),
+				height
+			);
+			m_hit_test_frame.reset();
+		}
+
+		void update_from_surface(gpu::command_buffer& cmd, const mngl::surface& source)
+		{
+			update_from_surface(cmd, source.raw());
+		}
+
+		void update_from_surface(const gpu::device& dev, SDL_Surface* surface)
+		{
+			if (!valid())
+			{
+				throw std::logic_error("Cannot update an invalid texture from SDL_Surface");
+			}
+			if (m_gpu_tex.device_raw() != dev.raw())
+			{
+				throw std::invalid_argument("Texture and GPU device do not match");
+			}
+
+			gpu::command_buffer cmd(dev);
+			update_from_surface(cmd, surface);
+			cmd.submit();
+		}
+
+		void update_from_surface(const gpu::device& dev, const mngl::surface& source)
+		{
+			update_from_surface(dev, source.raw());
+		}
+
+		void update_from_surface(SDL_Surface* surface)
+		{
+			if (!valid())
+			{
+				throw std::logic_error("Cannot update an invalid texture from SDL_Surface");
+			}
+			update_from_surface(gpu::device::global(), surface);
+		}
+
+		void update_from_surface(const mngl::surface& source)
+		{
+			update_from_surface(source.raw());
 		}
 
 		// Размер данных должен точно соответствовать размеру текстуры в её формате
@@ -242,6 +313,33 @@ namespace mngl
 			static_assert(std::is_trivially_copyable_v<T>, "Pixel data must be trivially copyable!");
 			upload_raw(m_gpu_tex, cmd, pixels.data(), pixels.size_bytes());
 			m_hit_test_frame.reset();
+		}
+
+		template<typename T>
+		void update_pixels(const gpu::device& dev, std::span<const T> pixels)
+		{
+			if (!valid())
+			{
+				throw std::logic_error("Cannot update an invalid texture");
+			}
+			if (m_gpu_tex.device_raw() != dev.raw())
+			{
+				throw std::invalid_argument("Texture and GPU device do not match");
+			}
+
+			gpu::command_buffer cmd(dev);
+			update_pixels(cmd, pixels);
+			cmd.submit();
+		}
+
+		template<typename T>
+		void update_pixels(std::span<const T> pixels)
+		{
+			if (!valid())
+			{
+				throw std::logic_error("Cannot update an invalid texture");
+			}
+			update_pixels(gpu::device::global(), pixels);
 		}
 
 		[[nodiscard]] bool valid() const noexcept { return m_gpu_tex.valid(); }
@@ -342,35 +440,97 @@ namespace mngl
 		[[nodiscard]] gpu::texture& raw_gpu_texture() noexcept { return m_gpu_tex; }
 
 		void clear(const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f));
-		void draw(const sprite& value);
-		void draw(const two_d::circle& value);
-		void draw(const two_d::ellipse& value);
-		void draw(const two_d::rounded_rectangle& value);
-		void draw(
-			const rectangle& bounds,
-			const color& tint = color(1.0f, 1.0f, 1.0f, 1.0f)
-		);
-		void draw(
-			const rectangle& bounds,
-			const color& tint,
-			const two_d::transform& transform
-		);
-		// The source is borrowed until display() submits the target texture's frame.
-		void draw(
-			const texture& source,
-			const rectangle& bounds,
-			const color& tint = color(1.0f, 1.0f, 1.0f, 1.0f)
-		);
-		void draw(
-			const texture& source,
-			const rectangle& bounds,
-			const color& tint,
-			const two_d::transform& transform
-		);
+		void draw(const drawable& value);
 		template<typename DrawFunction>
 			requires std::invocable<DrawFunction, two_d::Frame2D&>
 		void draw(DrawFunction&& draw_function);
+		void prepare(const drawable& value);
+		[[nodiscard]] two_d::recording_context create_recording_context(
+			std::size_t expected_draw_count = 0);
+		void merge(two_d::recording_context&& context);
 		void display();
+
+		class frame_scope
+		{
+		public:
+			frame_scope(const frame_scope&) = delete;
+			frame_scope& operator=(const frame_scope&) = delete;
+			frame_scope(frame_scope&&) = delete;
+			frame_scope& operator=(frame_scope&&) = delete;
+
+			~frame_scope() noexcept
+			{
+				cancel();
+			}
+
+			void draw(const drawable& value)
+			{
+				ensure_active();
+				m_owner->draw(value);
+			}
+
+			template<typename DrawFunction>
+				requires std::invocable<DrawFunction, two_d::Frame2D&>
+			void draw(DrawFunction&& draw_function)
+			{
+				ensure_active();
+				m_owner->draw(std::forward<DrawFunction>(draw_function));
+			}
+
+			void prepare(const drawable& value)
+			{
+				ensure_active();
+				m_owner->prepare(value);
+			}
+
+			[[nodiscard]] two_d::recording_context create_recording_context(
+				std::size_t expected_draw_count = 0);
+			void merge(two_d::recording_context&& context);
+
+			void display()
+			{
+				ensure_active();
+				m_owner->display();
+				m_owner = nullptr;
+			}
+
+		private:
+			friend class texture;
+
+			explicit frame_scope(texture& owner, const color& clear_color)
+				: m_owner(&owner)
+			{
+				owner.clear(clear_color);
+				m_generation = owner.m_active_frame_generation;
+			}
+
+			void ensure_active() const
+			{
+				if (!m_owner || m_generation == 0 ||
+					m_owner->m_active_frame_generation != m_generation)
+				{
+					throw std::logic_error("Texture frame scope is no longer active");
+				}
+			}
+
+			void cancel() noexcept
+			{
+				if (auto* owner = std::exchange(m_owner, nullptr))
+				{
+					owner->cancel_active_frame(m_generation);
+				}
+			}
+
+			texture* m_owner;
+			std::uint64_t m_generation = 0;
+		};
+
+		[[nodiscard]] frame_scope frame(
+			const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f)
+		)
+		{
+			return frame_scope(*this, clear_color);
+		}
 
 	private:
 		friend class render_window;
@@ -395,10 +555,33 @@ namespace mngl
 		std::shared_ptr<const detail::hit_test_frame> m_hit_test_frame;
 		std::unique_ptr<detail::texture_render_session> m_render_session;
 		bool m_external_render_active = false;
+		std::uint64_t m_next_frame_generation = 0;
+		std::uint64_t m_active_frame_generation = 0;
 
 		explicit texture(gpu::texture&& texture) noexcept
 			: m_gpu_tex(std::move(texture))
 		{ }
+
+		static detail::surface_ptr convert_surface(SDL_Surface* surface)
+		{
+			if (!surface)
+			{
+				throw std::invalid_argument("Cannot create texture from null SDL_Surface!");
+			}
+
+			// RGBA32 keeps byte order R,G,B,A regardless of endianness.
+			detail::surface_ptr converted(SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32));
+			if (!converted)
+			{
+				throw sdl_error("Failed to convert surface format: ");
+			}
+			if (converted->w <= 0 || converted->h <= 0 ||
+				!converted->pixels || converted->pitch < converted->w * 4)
+			{
+				throw std::invalid_argument("SDL_Surface has invalid dimensions or pixel data");
+			}
+			return converted;
+		}
 
 		void begin_external_render()
 		{
@@ -521,4 +704,135 @@ namespace mngl
 			SDL_EndGPUCopyPass(copy_pass);
 		}
 	};
+
+	inline void texture::reset_active_frame() noexcept
+	{
+		m_render_session.reset();
+		m_active_frame_generation = 0;
+	}
+
+	inline void texture::cancel_active_frame(std::uint64_t generation) noexcept
+	{
+		if (generation != 0 && generation == m_active_frame_generation)
+		{
+			reset_active_frame();
+		}
+	}
+
+	class animated_texture
+	{
+	public:
+		explicit animated_texture(
+			const std::string& path,
+			uint32_t usage = texture::default_upload_usage
+		);
+
+		animated_texture(const animated_texture&) = delete;
+		animated_texture& operator=(const animated_texture&) = delete;
+		animated_texture(animated_texture&&) noexcept;
+		animated_texture& operator=(animated_texture&&) noexcept;
+		~animated_texture();
+
+		[[nodiscard]] const texture& as_texture() const;
+
+	private:
+		struct state;
+		std::unique_ptr<state> m_state;
+	};
+
+	struct animated_texture::state
+	{
+		struct update_hook final : Iupdatable
+		{
+			explicit update_hook(state& owner) noexcept
+				: m_owner(&owner)
+			{ }
+
+			void update(double) override;
+
+		private:
+			state* m_owner;
+		};
+
+		state(const std::string& path, uint32_t texture_usage)
+			: m_source(path)
+			, m_texture(m_source, texture_usage)
+			, m_usage(texture_usage)
+			, m_uploaded_frame(m_source.raw())
+			, m_update_hook(*this)
+		{ }
+
+		void synchronize()
+		{
+			if (!m_source.animated())
+			{
+				return;
+			}
+
+			SDL_Surface* current_frame = m_source.raw();
+			if (!current_frame)
+			{
+				throw std::logic_error("Animated texture has no current frame");
+			}
+			if (current_frame == m_uploaded_frame)
+			{
+				return;
+			}
+			if (m_texture.rendering())
+			{
+				throw std::logic_error(
+					"Cannot update an animated texture while it is being rendered to");
+			}
+
+			auto& device = gpu::device::global();
+			gpu::command_buffer cmd(device);
+			const bool same_size =
+				current_frame->w > 0 &&
+				current_frame->h > 0 &&
+				m_texture.width() == static_cast<uint32_t>(current_frame->w) &&
+				m_texture.height() == static_cast<uint32_t>(current_frame->h);
+
+			if (same_size)
+			{
+				m_texture.update_from_surface(cmd, current_frame);
+			}
+			else
+			{
+				m_texture.load_from_surface(device, cmd, current_frame, m_usage);
+			}
+			cmd.submit();
+			m_uploaded_frame = current_frame;
+		}
+
+		surface m_source;
+		texture m_texture;
+		uint32_t m_usage;
+		SDL_Surface* m_uploaded_frame;
+		// Register after the source so a changed frame uploads in the same update tick.
+		update_hook m_update_hook;
+	};
+
+	inline void animated_texture::state::update_hook::update(double)
+	{
+		m_owner->synchronize();
+	}
+
+	inline animated_texture::animated_texture(const std::string& path, uint32_t usage)
+		: m_state(std::make_unique<state>(path, usage))
+	{ }
+
+	inline animated_texture::animated_texture(animated_texture&&) noexcept = default;
+
+	inline animated_texture& animated_texture::operator=(animated_texture&&) noexcept = default;
+
+	inline animated_texture::~animated_texture() = default;
+
+	inline const texture& animated_texture::as_texture() const
+	{
+		if (!m_state)
+		{
+			throw std::logic_error("Cannot access a moved-from animated texture");
+		}
+		return m_state->m_texture;
+	}
 }
