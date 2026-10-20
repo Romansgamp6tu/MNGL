@@ -35,4 +35,8 @@ nav:
       - Compute shaders: gpu/compute.md
       - Pipeline и render pass: gpu/pipelines-and-passes.md
       - Граф кадра: gpu/frame-graph.md
+  - Моды:
+      - Контракт: mods/api-contract.md
+      - Создание и отладка: mods/creating-and-debugging.md
+      - Среда и CI/CD: mods/automation.md
   - Справочник по модулям: reference/index.md

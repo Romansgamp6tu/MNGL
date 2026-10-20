@@ -1,0 +1,143 @@
+name: Package MNGL for Windows
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-package:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Choose package version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $version = $env:GITHUB_REF_NAME.Substring(1)
+          } else {
+            $version = "0.0.0+ci.$env:GITHUB_RUN_NUMBER"
+          }
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$') {
+            throw "Expected a semantic version such as 1.2.3; got: $version"
+          }
+          [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "value=$version`n", [System.Text.UTF8Encoding]::new($false))
+
+      - name: Configure Windows package
+        env:
+          MNGL_PACKAGE_VERSION: ${{ steps.version.outputs.value }}
+          MNGL_PACKAGE_BRANCH: ${{ github.ref_type == 'branch' && github.ref_name || 'main' }}
+        run: >-
+          cmake -S . -B build -A x64
+          -DMNGL_BUILD_WINDOWS_DEVEL_PACKAGE=ON
+          "-DMNGL_PACKAGE_VERSION=$env:MNGL_PACKAGE_VERSION"
+          "-DMNGL_PACKAGE_BRANCH=$env:MNGL_PACKAGE_BRANCH"
+
+      - name: Build ImGui DLL
+        run: cmake --build build --config Release --target mngl_imgui --parallel 4
+
+      - name: Create Windows development ZIP
+        run: cpack --config build/CPackConfig.cmake -C Release -G ZIP
+
+      - name: Save package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mngl-devel-windows-x64-${{ steps.version.outputs.value }}
+          path: build/packages/*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-release:
+    needs: build-package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Windows package
+        uses: actions/download-artifact@v4
+        with:
+          name: mngl-devel-windows-x64-${{ needs.build-package.outputs.version }}
+          path: release-assets
+
+      - name: Publish package on GitHub Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("node:fs");
+            const path = require("node:path");
+            const { owner, repo } = context.repo;
+            const tag_name = context.ref.replace("refs/tags/", "");
+            const files = fs.readdirSync("release-assets").filter((name) => name.endsWith(".zip"));
+            if (files.length !== 1) {
+              throw new Error(`Expected one .zip package, found ${files.length}`);
+            }
+
+            let release;
+            for (let attempt = 0; attempt < 20; attempt++) {
+              try {
+                ({ data: release } = await github.rest.repos.getReleaseByTag({ owner, repo, tag: tag_name }));
+                break;
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                try {
+                  ({ data: release } = await github.rest.repos.createRelease({
+                    owner,
+                    repo,
+                    tag_name,
+                    name: `MNGL ${tag_name}`,
+                    draft: false,
+                    prerelease: tag_name.includes("-"),
+                  }));
+                  break;
+                } catch (createError) {
+                  if (createError.status !== 422 || attempt === 19) throw createError;
+                  await new Promise((resolve) => setTimeout(resolve, 1000));
+                }
+              }
+            }
+            if (!release) throw new Error(`Could not find or create release ${tag_name}`);
+            ({ data: release } = await github.rest.repos.updateRelease({
+              owner,
+              repo,
+              release_id: release.id,
+              name: `MNGL ${tag_name}`,
+              prerelease: tag_name.includes("-"),
+            }));
+
+            const assetName = files[0];
+            const existingAssets = await github.paginate(github.rest.repos.listReleaseAssets, {
+              owner,
+              repo,
+              release_id: release.id,
+            });
+            const existing = existingAssets.find((asset) => asset.name === assetName);
+            if (existing) {
+              await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: existing.id });
+            }
+
+            const assetPath = path.join("release-assets", assetName);
+            const data = fs.readFileSync(assetPath);
+            await github.rest.repos.uploadReleaseAsset({
+              owner,
+              repo,
+              release_id: release.id,
+              name: assetName,
+              data,
+              headers: {
+                "content-type": "application/zip",
+                "content-length": String(data.length),
+              },
+            });
