@@ -62,6 +62,11 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
+      - name: Fetch pinned glslang dependencies
+        shell: pwsh
+        working-directory: upstream/glslang
+        run: python update_glslang_sources.py
+
       - name: Set up SDL3 and SDL3_image
         id: sdl
         uses: libsdl-org/setup-sdl@afd98199e97f9c2aa739474be7e0886d149a5e47
@@ -114,6 +119,11 @@ jobs:
           path: upstream/SDL_shadercross
           submodules: recursive
           persist-credentials: false
+
+      - name: Fetch pinned glslang dependencies
+        shell: bash
+        working-directory: upstream/glslang
+        run: python3 update_glslang_sources.py
 
       - name: Build runtime package on the self-hosted Ubuntu runner
         shell: bash
