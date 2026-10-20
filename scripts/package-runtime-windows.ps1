@@ -27,7 +27,7 @@ cmake -S $repo -B $mnglBuild -A x64
 cmake --build $mnglBuild --config Release --target mngl_imgui --parallel 4
 
 cmake -S (Join-Path $repo 'upstream/glslang') -B $glslangBuild -A x64 -DCMAKE_BUILD_TYPE=Release -DENABLE_GLSLANG_BINARIES=ON
-cmake --build $glslangBuild --config Release --target glslangValidator --parallel 4
+cmake --build $glslangBuild --config Release --target glslang-standalone --parallel 4
 $glslangExe = Get-ChildItem -LiteralPath $glslangBuild -Filter glslangValidator.exe -File -Recurse |
 	Sort-Object Length -Descending | Select-Object -First 1
 if (-not $glslangExe) {
