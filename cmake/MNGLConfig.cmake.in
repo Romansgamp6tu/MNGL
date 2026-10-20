@@ -1,4 +1,7 @@
 @PACKAGE_INIT@
 
+@MNGL_CONFIG_FIND_DEPENDENCIES@
+
 include("${CMAKE_CURRENT_LIST_DIR}/MNGLTargets.cmake")
 check_required_components(MNGL)
+
