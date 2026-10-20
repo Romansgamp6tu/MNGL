@@ -172,4 +172,3 @@ EOF
 
 archive="$repo/mngl-runtime-linux-x64-$PACKAGE_VERSION.tar.gz"
 tar -C "$stage" -czf "$archive" .
-
