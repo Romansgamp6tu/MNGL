@@ -90,15 +90,30 @@ namespace mngl::two_d
 
 	struct tree_layout_node
 	{
-		glm::vec2 center{};
+		// Keep absolute positions precise until the camera origin is subtracted.
+		glm::dvec2 center{};
 		glm::vec2 size{};
 		std::vector<float> cell_widths;
 	};
 
 	struct tree_layout
 	{
-		glm::vec2 size{};
+		glm::dvec2 size{};
 		std::vector<tree_layout_node> nodes;
+	};
+
+	struct tree_draw_area
+	{
+		glm::dvec2 pos{};
+		glm::dvec2 size{};
+
+		tree_draw_area() = default;
+		tree_draw_area(glm::dvec2 position, glm::dvec2 dimensions)
+			: pos(position), size(dimensions) {}
+		tree_draw_area(double x, double y, double width, double height)
+			: pos(x, y), size(width, height) {}
+		tree_draw_area(const ::mngl::rectangle& area)
+			: pos(area.pos), size(area.size) {}
 	};
 
 	struct tree_draw_options
@@ -126,6 +141,9 @@ namespace mngl::two_d
 		const tree_draw_visibility* visibility = nullptr;
 		std::span<const std::size_t> highlighted_nodes{};
 		bool show_node_text = true;
+		// Model rendering: world-space camera origin and viewport. GPU data stays FP32.
+		glm::dvec2 coordinate_origin{};
+		std::optional<tree_draw_area> clip_bounds;
 	};
 
 	using binary_tree_draw_options = tree_draw_options;
@@ -485,6 +503,15 @@ namespace mngl::two_d
 			return static_cast<float>(value);
 		}
 
+		[[nodiscard]] inline double checked_tree_world_coordinate(double value)
+		{
+			if (!std::isfinite(value))
+			{
+				throw std::length_error("Tree layout exceeds the CPU coordinate range");
+			}
+			return value;
+		}
+
 		[[nodiscard]] inline bool finite_color(const color& value) noexcept
 		{
 			const glm::vec4 channels = value.rgba_glsl();
@@ -494,7 +521,7 @@ namespace mngl::two_d
 				std::isfinite(channels.w);
 		}
 
-		inline void validate_tree_draw_area(const ::mngl::rectangle& area)
+		inline void validate_tree_draw_area(const tree_draw_area& area)
 		{
 			if (!std::isfinite(area.pos.x) ||
 				!std::isfinite(area.pos.y) ||
@@ -513,6 +540,15 @@ namespace mngl::two_d
 		inline void validate_tree_draw_options(
 			const tree_draw_options& options)
 		{
+			if (!std::isfinite(options.coordinate_origin.x) ||
+				!std::isfinite(options.coordinate_origin.y))
+			{
+				throw std::invalid_argument("Tree coordinate origin must be finite");
+			}
+			if (options.clip_bounds)
+			{
+				validate_tree_draw_area(*options.clip_bounds);
+			}
 			if (!std::isfinite(options.node_size.x) ||
 				!std::isfinite(options.node_size.y) ||
 				options.node_size.x <= 0.0f ||
@@ -555,11 +591,65 @@ namespace mngl::two_d
 		}
 
 		inline void validate_tree_draw_options(
-			const ::mngl::rectangle& area,
+			const tree_draw_area& area,
 			const tree_draw_options& options)
 		{
 			validate_tree_draw_area(area);
 			validate_tree_draw_options(options);
+		}
+
+		[[nodiscard]] inline glm::dvec2 tree_layout_offset(
+			const tree_layout& layout, const tree_draw_area& area)
+		{
+			return {
+				area.pos.x + std::max(0.0, (area.size.x - layout.size.x) * 0.5),
+				area.pos.y + area.size.y - layout.size.y
+			};
+		}
+
+		[[nodiscard]] inline glm::vec2 tree_local_position(
+			glm::dvec2 world, glm::dvec2 origin)
+		{
+			const glm::dvec2 local = world - origin;
+			return { checked_tree_coordinate(local.x), checked_tree_coordinate(local.y) };
+		}
+
+		// Liang-Barsky clipping happens in double before narrowing long edges to float.
+		[[nodiscard]] inline bool clip_tree_segment(
+			glm::dvec2& start, glm::dvec2& end,
+			const tree_draw_area& viewport, double padding = 0.0) noexcept
+		{
+			const glm::dvec2 delta = end - start;
+			const glm::dvec2 lower = viewport.pos - glm::dvec2(padding);
+			const glm::dvec2 upper = viewport.pos + viewport.size + glm::dvec2(padding);
+			double enter = 0.0;
+			double leave = 1.0;
+			for (int axis = 0; axis < 2; ++axis)
+			{
+				if (delta[axis] == 0.0)
+				{
+					if (start[axis] < lower[axis] || start[axis] > upper[axis])
+					{
+						return false;
+					}
+					continue;
+				}
+				double first = (lower[axis] - start[axis]) / delta[axis];
+				double last = (upper[axis] - start[axis]) / delta[axis];
+				if (first > last)
+				{
+					std::swap(first, last);
+				}
+				enter = std::max(enter, first);
+				leave = std::min(leave, last);
+				if (enter > leave)
+				{
+					return false;
+				}
+			}
+			end = start + delta * leave;
+			start += delta * enter;
+			return true;
 		}
 
 		[[nodiscard]] inline std::string_view tree_node_annotation_text(
@@ -684,14 +774,28 @@ namespace mngl::two_d
 			const float angle = static_cast<float>(
 				std::atan2(delta_y, delta_x));
 			::mngl::rectangle bounds{
-				start.x,
-				start.y - width * 0.5f,
+				0.0f,
+				-width * 0.5f,
 				segment_length,
 				width
 			};
 			transform edge_transform;
-			edge_transform.rotate(angle, start);
+			edge_transform.translate(start).rotate(angle);
 			frame.draw(rectangle_shape(bounds, tint, edge_transform));
+		}
+
+		inline void draw_tree_world_segment(
+			Frame2D& frame, glm::dvec2 start, glm::dvec2 end,
+			float width, const color& tint, const tree_draw_options& options)
+		{
+			if (options.clip_bounds &&
+				!clip_tree_segment(start, end, *options.clip_bounds, width * 0.5))
+			{
+				return;
+			}
+			draw_tree_segment(frame,
+				tree_local_position(start, options.coordinate_origin),
+				tree_local_position(end, options.coordinate_origin), width, tint);
 		}
 
 		inline void draw_tree_snapshot(
@@ -2024,8 +2128,8 @@ namespace mngl::two_d
 			const double height =
 				node_height + static_cast<double>(maximum_depth) * vertical_step;
 			result.size = {
-				checked_tree_coordinate(subtree_widths[model.root]),
-				checked_tree_coordinate(height)
+				checked_tree_world_coordinate(subtree_widths[model.root]),
+				checked_tree_world_coordinate(height)
 			};
 
 			struct placement
@@ -2043,9 +2147,9 @@ namespace mngl::two_d
 				const auto& node = model.nodes[current.index];
 				auto& layout_node = result.nodes[current.index];
 				layout_node.center = {
-					checked_tree_coordinate(
+					checked_tree_world_coordinate(
 						current.left + subtree_widths[current.index] * 0.5),
-					checked_tree_coordinate(
+					checked_tree_world_coordinate(
 						height - node_height * 0.5 -
 						static_cast<double>(depths[current.index]) *
 							vertical_step)
@@ -2084,44 +2188,45 @@ namespace mngl::two_d
 			return result;
 		}
 
-		inline void draw_tree_arrow(
+		inline void draw_tree_world_arrow(
 			Frame2D& frame,
-			glm::vec2 start,
-			glm::vec2 end,
+			glm::dvec2 start,
+			glm::dvec2 end,
 			float width,
 			float arrow_size,
-			const color& tint)
+			const color& tint,
+			const tree_draw_options& options)
 		{
-			const glm::vec2 delta = end - start;
-			const float length = glm::length(delta);
+			const glm::dvec2 delta = end - start;
+			const double length = std::hypot(delta.x, delta.y);
 			if (!std::isfinite(length) || length <= 0.0f)
 			{
 				return;
 			}
-			const glm::vec2 direction = delta / length;
-			const glm::vec2 perpendicular{ -direction.y, direction.x };
-			const float head_size = std::min(arrow_size, length * 0.45f);
-			const glm::vec2 base = end - direction * head_size;
-			draw_tree_segment(frame, start, end, width, tint);
-			draw_tree_segment(
+			const glm::dvec2 direction = delta / length;
+			const glm::dvec2 perpendicular{ -direction.y, direction.x };
+			const double head_size = std::min(static_cast<double>(arrow_size), length * 0.45);
+			const glm::dvec2 base = end - direction * head_size;
+			draw_tree_world_segment(frame, start, end, width, tint, options);
+			draw_tree_world_segment(
 				frame,
 				end,
-				base + perpendicular * (head_size * 0.55f),
+				base + perpendicular * (head_size * 0.55),
 				width,
-				tint);
-			draw_tree_segment(
+				tint, options);
+			draw_tree_world_segment(
 				frame,
 				end,
-				base - perpendicular * (head_size * 0.55f),
+				base - perpendicular * (head_size * 0.55),
 				width,
-				tint);
+				tint, options);
 		}
 
 		inline void draw_tree_model_snapshot(
 			Frame2D& frame,
 			font& value_font,
 			const tree_draw_model& model,
-			const ::mngl::rectangle& area,
+			const tree_draw_area& area,
 			const tree_draw_options& options,
 			const tree_layout* precomputed_layout = nullptr,
 			bool allow_parallel_recording = false)
@@ -2149,32 +2254,14 @@ namespace mngl::two_d
 				parallel_recording_minimum_nodes /
 				parallel_recording_initial_worker_count;
 
-			const glm::vec2 offset{
-				checked_tree_coordinate(
-					static_cast<double>(area.pos.x) +
-					std::max(
-						0.0,
-						(static_cast<double>(area.size.x) -
-							layout.size.x) * 0.5)),
-				checked_tree_coordinate(
-					static_cast<double>(area.pos.y) +
-					area.size.y - layout.size.y)
-			};
+			const glm::dvec2 offset = tree_layout_offset(layout, area);
 			const auto center_at = [&layout, &offset](std::size_t index)
 			{
 				if (index >= layout.nodes.size())
 				{
-					throw std::logic_error(
-						"Tree visibility contains an invalid node index");
+					throw std::logic_error("Tree visibility contains an invalid node index");
 				}
-				return glm::vec2{
-					checked_tree_coordinate(
-						static_cast<double>(layout.nodes[index].center.x) +
-						offset.x),
-					checked_tree_coordinate(
-						static_cast<double>(layout.nodes[index].center.y) +
-						offset.y)
-				};
+				return layout.nodes[index].center + offset;
 			};
 
 			if (options.edge_width > 0.0f)
@@ -2192,16 +2279,16 @@ namespace mngl::two_d
 							"Tree visibility contains an invalid edge");
 					}
 					const auto& node = model.nodes[parent];
-					const glm::vec2 parent_center = center_at(parent);
-					const glm::vec2 child_center = center_at(child);
-					const float node_left =
+					const glm::dvec2 parent_center = center_at(parent);
+					const glm::dvec2 child_center = center_at(child);
+					const double node_left =
 						parent_center.x -
 						layout.nodes[parent].size.x * 0.5f;
 					const float fraction = node.children.size() > 1
 						? static_cast<float>(child_slot) /
 							static_cast<float>(node.children.size() - 1)
 						: 0.5f;
-					draw_tree_segment(
+					draw_tree_world_segment(
 						frame,
 						{
 							node_left +
@@ -2215,7 +2302,7 @@ namespace mngl::two_d
 								options.node_size.y * 0.5f
 						},
 						options.edge_width,
-						options.edge_color);
+						options.edge_color, options);
 				};
 
 				if (options.visibility != nullptr)
@@ -2268,9 +2355,9 @@ namespace mngl::two_d
 							throw std::logic_error(
 								"Tree leaf link contains an invalid node index");
 						}
-						const glm::vec2 source_center = center_at(index);
-						const glm::vec2 target_center = center_at(next);
-						const float link_y =
+						const glm::dvec2 source_center = center_at(index);
+						const glm::dvec2 target_center = center_at(next);
+						const double link_y =
 							source_center.y -
 							options.node_size.y * 0.5f -
 							std::min(
@@ -2278,12 +2365,12 @@ namespace mngl::two_d
 								std::max(
 									options.node_size.y * 0.12f,
 									options.horizontal_gap * 0.20f));
-						glm::vec2 start{
+						glm::dvec2 start{
 							source_center.x +
 								layout.nodes[index].size.x * 0.5f,
 							link_y
 						};
-						glm::vec2 end{
+						glm::dvec2 end{
 							target_center.x -
 								layout.nodes[next].size.x * 0.5f,
 							link_y
@@ -2301,7 +2388,7 @@ namespace mngl::two_d
 									options.node_size.y * 0.5f
 							};
 						}
-						draw_tree_arrow(
+						draw_tree_world_arrow(
 							frame,
 							start,
 							end,
@@ -2309,7 +2396,7 @@ namespace mngl::two_d
 							std::max(
 								options.node_size.y * 0.08f,
 								options.edge_width * 2.5f),
-							options.leaf_link_color);
+							options.leaf_link_color, options);
 					};
 
 					if (options.visibility != nullptr)
@@ -2390,7 +2477,7 @@ namespace mngl::two_d
 				const auto& node = model.nodes[index];
 				const auto& layout_node = layout.nodes[index];
 				const ::mngl::rectangle node_bounds{
-					center_at(index) - layout_node.size * 0.5f,
+					tree_local_position(center_at(index), options.coordinate_origin) - layout_node.size * 0.5f,
 					layout_node.size
 				};
 				const float node_radius = std::min(
@@ -2697,6 +2784,17 @@ namespace mngl::two_d
 		return detail::build_tree_layout(model, options);
 	}
 
+	// Double-precision placement for large worlds; set coordinate_origin to the
+	// camera center and use a matching, centered Frame2D projection.
+	inline void draw_tree_model_parallel(
+		Frame2D& frame, font& value_font,
+		const tree_draw_model& model, const tree_layout& layout,
+		const tree_draw_area& area, const tree_draw_options& options = {})
+	{
+		detail::draw_tree_model_snapshot(
+			frame, value_font, model, area, options, &layout, true);
+	}
+
 	class tree_draw_culler
 	{
 	public:
@@ -2724,8 +2822,8 @@ namespace mngl::two_d
 		[[nodiscard]] tree_draw_visibility cull(
 			const tree_draw_model& model,
 			const tree_layout& layout,
-			const ::mngl::rectangle& area,
-			const ::mngl::rectangle& viewport,
+			const tree_draw_area& area,
+			const tree_draw_area& viewport,
 			const tree_draw_options& options)
 		{
 			std::lock_guard call_lock(m_call_mutex);
@@ -2882,8 +2980,8 @@ namespace mngl::two_d
 			const std::shared_ptr<const Snapshot>& source,
 			const tree_draw_model& model,
 			const tree_layout& layout,
-			const ::mngl::rectangle& area,
-			const ::mngl::rectangle& viewport,
+			const tree_draw_area& area,
+			const tree_draw_area& viewport,
 			const tree_draw_options& options)
 		{
 			if (!source)
@@ -2951,8 +3049,8 @@ namespace mngl::two_d
 			std::shared_ptr<const void> source;
 			const tree_draw_model* model = nullptr;
 			const tree_layout* layout = nullptr;
-			::mngl::rectangle area;
-			::mngl::rectangle viewport;
+			tree_draw_area area;
+			tree_draw_area viewport;
 			tree_draw_options options;
 			std::size_t begin = 0;
 			std::size_t end = 0;
@@ -2960,9 +3058,9 @@ namespace mngl::two_d
 		};
 
 		[[nodiscard]] static bool intersects_view(
-			glm::vec2 first,
-			glm::vec2 second,
-			const ::mngl::rectangle& viewport,
+			glm::dvec2 first,
+			glm::dvec2 second,
+			const tree_draw_area& viewport,
 			float padding) noexcept
 		{
 			const double left = viewport.pos.x;
@@ -2979,39 +3077,21 @@ namespace mngl::two_d
 		static void collect_visible_range(
 			const tree_draw_model& model,
 			const tree_layout& layout,
-			const ::mngl::rectangle& area,
-			const ::mngl::rectangle& viewport,
+			const tree_draw_area& area,
+			const tree_draw_area& viewport,
 			const tree_draw_options& options,
 			std::size_t begin,
 			std::size_t end,
 			tree_draw_visibility& result)
 		{
-			const glm::vec2 offset{
-				detail::checked_tree_coordinate(
-					static_cast<double>(area.pos.x) +
-					std::max(
-						0.0,
-						(static_cast<double>(area.size.x) -
-							layout.size.x) * 0.5)),
-				detail::checked_tree_coordinate(
-					static_cast<double>(area.pos.y) +
-					area.size.y - layout.size.y)
-			};
+			const glm::dvec2 offset = detail::tree_layout_offset(layout, area);
 			const auto center_at = [&layout, &offset](std::size_t index)
 			{
 				if (index >= layout.nodes.size())
 				{
-					throw std::logic_error(
-						"Tree culling encountered an invalid node index");
+					throw std::logic_error("Tree visibility contains an invalid node index");
 				}
-				return glm::vec2{
-					detail::checked_tree_coordinate(
-						static_cast<double>(layout.nodes[index].center.x) +
-						offset.x),
-					detail::checked_tree_coordinate(
-						static_cast<double>(layout.nodes[index].center.y) +
-						offset.y)
-				};
+				return layout.nodes[index].center + offset;
 			};
 
 			const std::size_t count = model.nodes.size();
@@ -3031,11 +3111,11 @@ namespace mngl::two_d
 				[&](std::size_t index, tree_draw_visibility& output)
 			{
 				const auto& node = model.nodes[index];
-				const glm::vec2 center = center_at(index);
-				const glm::vec2 size = layout.nodes[index].size;
+				const glm::dvec2 center = center_at(index);
+				const glm::dvec2 size = layout.nodes[index].size;
 				if (intersects_view(
-					center - size * 0.5f,
-					center + size * 0.5f,
+					center - size * 0.5,
+					center + size * 0.5,
 					viewport,
 					node_padding))
 				{
@@ -3046,7 +3126,7 @@ namespace mngl::two_d
 				{
 					return;
 				}
-				const float node_left = center.x - size.x * 0.5f;
+				const double node_left = center.x - size.x * 0.5;
 				for (std::size_t child_slot = 0;
 					child_slot < node.children.size();
 					++child_slot)
@@ -3065,14 +3145,14 @@ namespace mngl::two_d
 						? static_cast<float>(child_slot) /
 							static_cast<float>(node.children.size() - 1)
 						: 0.5f;
-					const glm::vec2 start{
+					const glm::dvec2 start{
 						node_left + size.x * fraction,
-						center.y - options.node_size.y * 0.5f
+						center.y - options.node_size.y * 0.5
 					};
-					const glm::vec2 child_center = center_at(child);
-					const glm::vec2 finish{
+					const glm::dvec2 child_center = center_at(child);
+					const glm::dvec2 finish{
 						child_center.x,
-						child_center.y + options.node_size.y * 0.5f
+						child_center.y + options.node_size.y * 0.5
 					};
 					if (intersects_view(
 						start,
@@ -3096,27 +3176,27 @@ namespace mngl::two_d
 					throw std::logic_error(
 						"Tree culling encountered an invalid leaf link");
 				}
-				const glm::vec2 next_center = center_at(next);
-				const float link_y =
-					center.y - options.node_size.y * 0.5f -
+				const glm::dvec2 next_center = center_at(next);
+				const double link_y =
+					center.y - options.node_size.y * 0.5 -
 					leaf_link_y_offset;
-				glm::vec2 start{
-					center.x + size.x * 0.5f,
+				glm::dvec2 start{
+					center.x + size.x * 0.5,
 					link_y
 				};
-				glm::vec2 finish{
-					next_center.x - layout.nodes[next].size.x * 0.5f,
+				glm::dvec2 finish{
+					next_center.x - layout.nodes[next].size.x * 0.5,
 					link_y
 				};
 				if (finish.x <= start.x)
 				{
 					start = {
 						center.x,
-						center.y - options.node_size.y * 0.5f
+						center.y - options.node_size.y * 0.5
 					};
 					finish = {
 						next_center.x,
-						next_center.y - options.node_size.y * 0.5f
+						next_center.y - options.node_size.y * 0.5
 					};
 				}
 				if (intersects_view(

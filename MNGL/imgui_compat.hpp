@@ -921,7 +921,8 @@ namespace mngl
 				imgui_context& owner,
 				std::string_view title,
 				std::optional<ImGuiID> dockspace_id = std::nullopt,
-				bool* open = nullptr);
+				bool* open = nullptr,
+				ImGuiWindowFlags flags = 0);
 
 			imgui_context* owner;
 			bool visible;
@@ -1023,6 +1024,9 @@ namespace mngl
 
 			[[nodiscard]] main_menu_bar_scope main_menu_bar() const;
 			[[nodiscard]] window_scope window(std::string_view title) const;
+			[[nodiscard]] window_scope window(
+				std::string_view title,
+				ImGuiWindowFlags flags) const;
 
 		private:
 			friend class imgui_context;
@@ -1546,7 +1550,8 @@ namespace mngl
 		imgui_context& owner,
 		std::string_view title,
 		std::optional<ImGuiID> dockspace_id,
-		bool* open
+		bool* open,
+		ImGuiWindowFlags flags
 	)
 		: owner(&owner)
 		, visible(false)
@@ -1564,7 +1569,7 @@ namespace mngl
 				ImGuiCond_FirstUseEver);
 		}
 		const std::string terminated_title(title);
-		visible = ImGui::Begin(terminated_title.c_str(), open);
+		visible = ImGui::Begin(terminated_title.c_str(), open, flags);
 	}
 
 	inline imgui_context::main_menu_bar_scope::main_menu_bar_scope(
@@ -2620,6 +2625,18 @@ namespace mngl
 			throw std::logic_error("Cannot create an ImGui window from an inactive frame scope");
 		}
 		return window_scope(*owner, title);
+	}
+
+	inline imgui_context::window_scope imgui_context::frame_scope::window(
+		std::string_view title,
+		ImGuiWindowFlags flags
+	) const
+	{
+		if (!owner)
+		{
+			throw std::logic_error("Cannot create an ImGui window from an inactive frame scope");
+		}
+		return window_scope(*owner, title, std::nullopt, nullptr, flags);
 	}
 
 	inline imgui_context::menu_scope

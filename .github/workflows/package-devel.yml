@@ -1,0 +1,123 @@
+name: Package MNGL development files
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-package:
+    runs-on: [self-hosted, linux, x64, mngl-linux]
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Choose package version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.0.0+ci.${GITHUB_RUN_NUMBER}"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-][0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Expected a semantic version (for example 1.2.3), got: $version"
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Configure package
+        env:
+          MNGL_PACKAGE_VERSION: ${{ steps.version.outputs.value }}
+        run: >-
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          -DMNGL_BUILD_DEVEL_PACKAGE=ON
+          "-DMNGL_PACKAGE_VERSION=${MNGL_PACKAGE_VERSION}"
+
+      - name: Build ImGui support library
+        run: cmake --build build --target mngl_imgui --parallel
+
+      - name: Create Debian package
+        run: cpack --config build/CPackConfig.cmake -G DEB
+
+      - name: Save package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libmngl-dev-${{ steps.version.outputs.value }}
+          path: build/packages/*.deb
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-release:
+    needs: build-package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: [self-hosted, linux, x64, mngl-linux]
+    permissions:
+      contents: write
+    steps:
+      - name: Download package
+        uses: actions/download-artifact@v4
+        with:
+          name: libmngl-dev-${{ needs.build-package.outputs.version }}
+          path: release-assets
+
+      - name: Publish package on GitHub Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("node:fs");
+            const path = require("node:path");
+            const { owner, repo } = context.repo;
+            const tag_name = context.ref.replace("refs/tags/", "");
+            const files = fs.readdirSync("release-assets").filter((name) => name.endsWith(".deb"));
+            if (files.length !== 1) {
+              throw new Error(`Expected one .deb package, found ${files.length}`);
+            }
+
+            let release;
+            try {
+              ({ data: release } = await github.rest.repos.getReleaseByTag({ owner, repo, tag: tag_name }));
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              ({ data: release } = await github.rest.repos.createRelease({
+                owner,
+                repo,
+                tag_name,
+                name: tag_name,
+                draft: false,
+                prerelease: tag_name.includes("-"),
+              }));
+            }
+
+            const assetName = files[0];
+            const existingAssets = await github.paginate(github.rest.repos.listReleaseAssets, {
+              owner,
+              repo,
+              release_id: release.id,
+            });
+            const existing = existingAssets.find((asset) => asset.name === assetName);
+            if (existing) {
+              await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: existing.id });
+            }
+
+            const assetPath = path.join("release-assets", assetName);
+            const data = fs.readFileSync(assetPath);
+            await github.rest.repos.uploadReleaseAsset({
+              owner,
+              repo,
+              release_id: release.id,
+              name: assetName,
+              data,
+              headers: {
+                "content-type": "application/vnd.debian.binary-package",
+                "content-length": String(data.length),
+              },
+            });

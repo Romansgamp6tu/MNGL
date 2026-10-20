@@ -2,9 +2,15 @@
 
 ## Статус проекта
 
-MNGL — header-oriented C++23 библиотека, но текущие Visual Studio и CMake
-проекты собирают `mngl_demo`, а не устанавливаемую библиотеку. Готового
-`install()`/package target для сторонних приложений пока нет.
+MNGL — header-oriented C++23 библиотека. Обычная сборка CMake по умолчанию
+собирает `mngl_demo`. Для Linux доступен отдельный development package target:
+он устанавливает заголовки, CMake config и статическую библиотеку Dear ImGui
+с SDL3/SDL_GPU backend-ами, но не включает демо.
+
+Пакет экспортирует CMake targets `MNGL::MNGL` (заголовки) и `MNGL::ImGui`
+(статическая библиотека ImGui). GitHub Actions собирает `.deb` на self-hosted
+runner при push; для тега `vX.Y.Z` пакет дополнительно прикладывается к GitHub
+Release.
 
 Демо проверяет окно, ввод, GPU-рендерер 2D и Dear ImGui. Оно также требует
 файлы шейдеров и шрифт, которые сборочные конфигурации копируют в выходную
@@ -70,6 +76,29 @@ Win32-конфигурация Visual Studio и x86 CMake-сборка ищут 
 `libs/x86/` и копируют оттуда runtime DLL. Пока эти файлы не добавлены, x86
 линковка/сборка не пройдёт. AVX2 не включается для Win32-конфигураций.
 
+### Проверка координат больших деревьев
+
+Для регрессионных проверок раскладки, отсечения и координат относительно
+камеры включите дополнительную CMake-цель:
+
+```powershell
+cmake -S . -B build -A x64 -DMNGL_BUILD_TESTS=ON
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+```
+
+Проверка строит сбалансированное и вырожденное дерево по 1 000 000 узлов
+и не требует GPU. Отдельно можно сравнить реальные кадры около начала
+координат и после сдвига мира на 100 миллионов единиц:
+
+```powershell
+.\build\Release\mngl_tree_precision.exe --render render-checks
+```
+
+Этот режим требует доступного GPU-бэкенда и совместимых шейдеров; при успехе
+он сохраняет PNG для визуального просмотра. В комплекте находятся DXIL-шейдеры
+для D3D12.
+
 ### macOS
 
 Нужны Xcode Command Line Tools, CMake и SDL3/SDL3_image/FreeType. Например,
@@ -89,8 +118,9 @@ MoltenVK для этого не нужен. Для текущего демо в�
 ### Linux
 
 Установите CMake, C++23-компилятор и development-пакеты SDL3, SDL3_image и
-FreeType. CMake должен находить их package-конфигурации; для нестандартного
-префикса используйте `CMAKE_PREFIX_PATH`.
+FreeType. Для development package также нужен GLM. CMake должен находить
+package-конфигурации зависимостей; для нестандартного префикса используйте
+`CMAKE_PREFIX_PATH`.
 
 ```sh
 cmake -S . -B build
@@ -101,6 +131,25 @@ cmake --build build --parallel
 по умолчанию использует SPIR-V, который собирается из HLSL на старте.
 Использование SDL GPU через Vulkan также требует подходящего Vulkan loader и
 драйвера GPU.
+
+#### Debian development package
+
+На Ubuntu установите системные development-зависимости и соберите пакет
+отдельной конфигурацией. Эта цель собирает только статическую ImGui-библиотеку;
+демо не компилируется и не попадает в `.deb`.
+
+```sh
+sudo apt install libsdl3-dev libsdl3-image-dev libfreetype-dev libglm-dev
+cmake -S . -B build-package -DCMAKE_BUILD_TYPE=Release \
+  -DMNGL_BUILD_DEVEL_PACKAGE=ON -DMNGL_PACKAGE_VERSION=1.2.3
+cmake --build build-package --target mngl_imgui --parallel
+cpack --config build-package/CPackConfig.cmake -G DEB
+```
+
+Артефакт появится в `build-package/packages/`. В проекте-потребителе подключите
+пакет через `find_package(MNGL CONFIG REQUIRED)` и свяжите приложение с
+`MNGL::MNGL`; если используется поставляемая ImGui-библиотека, добавьте также
+`MNGL::ImGui` в `target_link_libraries()`.
 
 Кроссплатформенные сборки CMake и реальные GPU-бэкенды пока не проверяются
 автоматически; приведённые команды — начальная конфигурация для тестирования.
