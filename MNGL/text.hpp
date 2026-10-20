@@ -85,6 +85,12 @@ namespace mngl::two_d
 		[[nodiscard]] float ascent() const noexcept;
 		[[nodiscard]] float descent() const noexcept;
 		[[nodiscard]] float line_height() const noexcept;
+		[[nodiscard]] float measure_text_line_width(
+			std::string_view text,
+			float height);
+		[[nodiscard]] float measure_text_line_width_prepared(
+			std::string_view text,
+			float height) const;
 
 	private:
 		friend class renderer;
@@ -835,6 +841,147 @@ namespace mngl::two_d
 
 			return invalid();
 		}
+	}
+
+	inline float font::measure_text_line_width(
+		std::string_view text,
+		float height)
+	{
+		if (!m_implementation)
+		{
+			throw std::logic_error("Cannot use a moved-from font");
+		}
+		if (!std::isfinite(height) || height <= 0.0f)
+		{
+			throw std::invalid_argument(
+				"Measured text height must be finite and positive");
+		}
+		if (text.find_first_of("\r\n") != std::string_view::npos)
+		{
+			throw std::invalid_argument(
+				"Text line measurement does not accept line breaks");
+		}
+
+		const float scale = height / raster_height_pixels();
+		if (!std::isfinite(scale) || scale <= 0.0f)
+		{
+			throw std::invalid_argument(
+				"Font metrics cannot be scaled to the requested text height");
+		}
+
+		float pen_x = 0.0f;
+		uint32_t previous_codepoint = 0;
+		const float tab_width = glyph(' ', false).advance * scale * 4.0f;
+
+		for (std::size_t offset = 0; offset < text.size();)
+		{
+			uint32_t codepoint = 0;
+			(void)detail::next_utf8_codepoint(text, offset, codepoint);
+			if (codepoint == '\t')
+			{
+				if (tab_width > 0.0f)
+				{
+					pen_x =
+						(std::floor(pen_x / tab_width) + 1.0f) *
+						tab_width;
+				}
+				if (!std::isfinite(pen_x))
+				{
+					throw std::length_error(
+						"Measured text exceeds the renderer's coordinate range");
+				}
+				previous_codepoint = 0;
+				continue;
+			}
+
+			const auto metrics = glyph(codepoint, false);
+			if (previous_codepoint != 0)
+			{
+				pen_x += kerning(
+					previous_codepoint,
+					metrics.codepoint) * scale;
+			}
+			pen_x += metrics.advance * scale;
+			if (!std::isfinite(pen_x))
+			{
+				throw std::length_error(
+					"Measured text exceeds the renderer's coordinate range");
+			}
+			previous_codepoint = metrics.codepoint;
+		}
+
+		return pen_x;
+	}
+
+	inline float font::measure_text_line_width_prepared(
+		std::string_view text,
+		float height) const
+	{
+		if (!m_implementation)
+		{
+			throw std::logic_error("Cannot use a moved-from font");
+		}
+		if (!std::isfinite(height) || height <= 0.0f)
+		{
+			throw std::invalid_argument(
+				"Measured text height must be finite and positive");
+		}
+		if (text.find_first_of("\r\n") != std::string_view::npos)
+		{
+			throw std::invalid_argument(
+				"Text line measurement does not accept line breaks");
+		}
+
+		const float scale = height / raster_height_pixels();
+		if (!std::isfinite(scale) || scale <= 0.0f)
+		{
+			throw std::invalid_argument(
+				"Font metrics cannot be scaled to the requested text height");
+		}
+
+		float pen_x = 0.0f;
+		uint32_t previous_codepoint = 0;
+		const float tab_width =
+			glyph_prepared(' ').advance * scale * 4.0f;
+
+		for (std::size_t offset = 0; offset < text.size();)
+		{
+			uint32_t codepoint = 0;
+			(void)detail::next_utf8_codepoint(text, offset, codepoint);
+			if (codepoint == '\t')
+			{
+				if (tab_width > 0.0f)
+				{
+					pen_x =
+						(std::floor(pen_x / tab_width) + 1.0f) *
+						tab_width;
+				}
+				if (!std::isfinite(pen_x))
+				{
+					throw std::length_error(
+						"Measured text exceeds the renderer's coordinate range");
+				}
+				previous_codepoint = 0;
+				continue;
+			}
+
+			const auto metrics = glyph_prepared(codepoint);
+			if (previous_codepoint != 0)
+			{
+				pen_x += kerning_prepared(
+					previous_codepoint,
+					metrics.codepoint) * scale;
+			}
+			pen_x += metrics.advance * scale;
+			if (!std::isfinite(pen_x))
+			{
+				throw std::length_error(
+					"Measured text exceeds the renderer's coordinate range");
+			}
+			previous_codepoint = metrics.codepoint;
+		}
+
+		return pen_x;
 	}
 
 	inline void font::prepare_glyphs(std::string_view text)
