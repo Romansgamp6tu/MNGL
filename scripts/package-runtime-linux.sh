@@ -6,7 +6,7 @@ if [[ -z "${PACKAGE_VERSION:-}" ]]; then
 	exit 1
 fi
 
-for tool in cmake ninja git pkg-config bison patchelf readelf; do
+for tool in cmake ninja git pkg-config bison flex patchelf readelf; do
 	if ! command -v "$tool" >/dev/null 2>&1; then
 		printf 'Missing runner prerequisite: %s\n' "$tool" >&2
 		exit 1
@@ -14,7 +14,7 @@ for tool in cmake ninja git pkg-config bison patchelf readelf; do
 done
 
 if ! perl -MJSON -e 1 >/dev/null 2>&1; then
-	printf '%s\\n' 'Missing runner prerequisite: libjson-perl.' >&2
+	printf '%s\n' 'Missing runner prerequisite: libjson-perl.' >&2
 	exit 1
 fi
 

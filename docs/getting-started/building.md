@@ -117,7 +117,7 @@ Workflow `Package MNGL runtime` собирает Windows x64 на GitHub-hosted 
 ```sh
 sudo apt update
 sudo apt install build-essential cmake ninja-build git pkg-config bison patchelf binutils \
-  libxrandr-dev libjson-perl libvulkan1 libsdl3-dev libsdl3-image-dev libfreetype-dev
+  libxrandr-dev flex libjson-perl libvulkan1 libsdl3-dev libsdl3-image-dev libfreetype-dev
 ```
 
 На push в `main` или ручной запуск workflow runtime ZIP/tar.gz доступен как
