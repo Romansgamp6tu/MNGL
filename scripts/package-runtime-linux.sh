@@ -40,7 +40,7 @@ cp -a "$mngl_library" "$stage/lib/"
 cmake -S "$repo/upstream/glslang" -B "$glslang_build" -GNinja \
 	-DCMAKE_BUILD_TYPE=Release -DENABLE_GLSLANG_BINARIES=ON
 cmake --build "$glslang_build" --target glslang-standalone --parallel 4
-glslang_exe=$(find "$glslang_build" -type f -name glslangValidator -perm -u+x -print -quit)
+glslang_exe=$(find -L "$glslang_build" -type f -name glslangValidator -perm -u+x -print -quit)
 if [[ -z "$glslang_exe" ]]; then
 	printf '%s\n' 'glslangValidator was not produced.' >&2
 	exit 1
