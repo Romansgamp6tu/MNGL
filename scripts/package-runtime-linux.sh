@@ -13,6 +13,11 @@ for tool in cmake ninja git pkg-config bison patchelf readelf; do
 	fi
 done
 
+if ! perl -MJSON -e 1 >/dev/null 2>&1; then
+	printf '%s\\n' 'Missing runner prerequisite: libjson-perl.' >&2
+	exit 1
+fi
+
 repo=$(pwd)
 work="$repo/build-runtime"
 stage="$work/stage"
