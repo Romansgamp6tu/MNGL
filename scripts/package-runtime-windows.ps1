@@ -38,7 +38,7 @@ Copy-Item -LiteralPath $glslangExe.FullName -Destination $bin
 $shadercrossSource = Join-Path $repo 'upstream/SDL_shadercross'
 cmake -DCMAKE_SYSTEM_NAME=Windows -P (Join-Path $shadercrossSource 'build-scripts/download-prebuilt-DirectXShaderCompiler.cmake')
 
-cmake -S (Join-Path $shadercrossSource 'external/SPIRV-Cross') -B $spirvBuild -G 'Visual Studio 17 2022' -A x64 `
+cmake -S (Join-Path $shadercrossSource 'external/SPIRV-Cross') -B $spirvBuild -G 'Visual Studio 18 2026' -A x64 `
 	-DCMAKE_BUILD_TYPE=Release `
 	-DSPIRV_CROSS_SHARED=ON `
 	-DSPIRV_CROSS_STATIC=OFF `
@@ -50,7 +50,7 @@ cmake --install $spirvBuild --config Release
 
 $dxcRoot = Join-Path $shadercrossSource 'external/DirectXShaderCompiler-binaries/windows'
 $env:spirv_cross_c_shared_ROOT = "$spirvPrefix;$spirvPrefix/share/spirv_cross_c_shared"
-cmake -S $shadercrossSource -B $shadercrossBuild -G 'Visual Studio 17 2022' -A x64 `
+cmake -S $shadercrossSource -B $shadercrossBuild -G 'Visual Studio 18 2026' -A x64 `
 	-DCMAKE_BUILD_TYPE=Release `
 	-DSDLSHADERCROSS_DXC=ON `
 	-DSDLSHADERCROSS_SHARED=ON `
