@@ -27,10 +27,9 @@ mkdir -p "$work"
 rm -rf "$stage" "$mngl_build" "$glslang_build" "$spirv_build" "$spirv_prefix" "$shadercross_build" "$shadercross_prefix"
 mkdir -p "$stage/bin" "$stage/lib"
 
-# Build the sample locally so its linked SDL3_image and FreeType runtime
-# dependencies can be collected. The executable itself is not staged.
+# Build only the runtime library; the runtime archive does not contain the demo.
 cmake -S "$repo" -B "$mngl_build" -GNinja -DCMAKE_BUILD_TYPE=Release
-cmake --build "$mngl_build" --target mngl_demo --parallel 4
+cmake --build "$mngl_build" --target mngl_imgui --parallel 4
 mngl_library=$(find "$mngl_build" -maxdepth 2 -type f -name 'libmngl_imgui.so*' -print -quit)
 if [[ -z "$mngl_library" ]]; then
 	printf '%s\n' 'libmngl_imgui.so was not produced.' >&2
@@ -105,7 +104,7 @@ declare -A visited=()
 queue=(
 	"$glslang_exe"
 	"$shadercross_prefix/bin/shadercross"
-	"$mngl_build/mngl_demo"
+	"$mngl_library"
 )
 while ((${#queue[@]})); do
 	current=${queue[0]}
@@ -168,3 +167,4 @@ EOF
 
 archive="$repo/mngl-runtime-linux-x64-$PACKAGE_VERSION.tar.gz"
 tar -C "$stage" -czf "$archive" .
+
