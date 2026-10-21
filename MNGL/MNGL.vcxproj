@@ -213,6 +213,7 @@
     <ClInclude Include="iupdate.h" />
     <ClInclude Include="line.hpp" />
     <ClInclude Include="logger.h" />
+    <ClInclude Include="console.hpp" />
     <ClInclude Include="mod_loader.hpp" />
     <ClInclude Include="mods.hpp" />
     <ClInclude Include="pixel_format.hpp" />
