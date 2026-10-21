@@ -191,6 +191,8 @@ context.replace_factory<tree_base>("mngl.demo.tree", "mngl.demo.tree.bst", [] {
 });
 ```
 
+Host может перечислить `tree_classes.implementations()`: каждый элемент содержит ID реализации, ID зарегистрировавшего её мода и флаг `builtin`. Список обновляется при добавлении и удалении реализаций и подходит для UI, который показывает только доступные фабрики.
+
 `REGISTER_MODDABLE_*` — макросы host-деклараций, а не регистрации внутри DLL мода. `registry.remove_mod(id)` снимает runtime-регистрации и overrides указанного мода, но самостоятельно не управляет DLL. Для нативной загрузки host подключает `mngl/mod_loader.hpp`, создаёт `mod_loader` после `registry` и вызывает `load_package` или `load_all`. API header-only; host и мод должны использовать совместимый C++ ABI, совпадающий с `binary_abi`.
 
 ```cpp

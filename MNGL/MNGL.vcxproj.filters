@@ -170,6 +170,12 @@
     <ClInclude Include="tree_practicum_ui.hpp">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
+    <ClInclude Include="tree_custom_command_api.hpp">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="tree_invariant_api.hpp">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
     <ClInclude Include="tree_practicum_storage.hpp">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>

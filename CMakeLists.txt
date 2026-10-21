@@ -131,7 +131,369 @@ option(MNGL_BUILD_MOD_EXAMPLE "Build the native mod host and example module" ON)
 include(cmake/MNGLMods.cmake)
 mngl_add_mod_targets("${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
 
+option(MNGL_BUILD_TREAP_TREE_MOD
+	"Build and stage the Treap tree-algorithm mod for mngl_demo" ON)
+if(MNGL_BUILD_TREAP_TREE_MOD)
+	add_library(mngl_treap_tree_mod MODULE
+		examples/mods/treap_tree_mod.cpp
+	)
+	target_compile_features(mngl_treap_tree_mod PRIVATE cxx_std_23)
+	target_include_directories(mngl_treap_tree_mod PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}"
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
+		"${CMAKE_CURRENT_SOURCE_DIR}/include"
+	)
+	if(MSVC)
+		target_compile_options(mngl_treap_tree_mod PRIVATE /utf-8)
+	endif()
+	set_target_properties(mngl_treap_tree_mod PROPERTIES
+		PREFIX ""
+		OUTPUT_NAME "mngl_treap_tree_mod"
+		LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tree-treap-module/$<CONFIG>"
+		RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tree-treap-module/$<CONFIG>"
+	)
+
+	add_executable(mngl_tree_mod_manifest_writer
+		examples/mods/write_treap_manifest.cpp
+	)
+	target_compile_features(mngl_tree_mod_manifest_writer PRIVATE cxx_std_23)
+	target_include_directories(mngl_tree_mod_manifest_writer PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
+		"${CMAKE_CURRENT_SOURCE_DIR}/include"
+	)
+	if(MSVC)
+		target_compile_options(mngl_tree_mod_manifest_writer PRIVATE /utf-8)
+	endif()
+	set_target_properties(mngl_tree_mod_manifest_writer PROPERTIES
+		RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tree-mod-tools/$<CONFIG>"
+	)
+	add_custom_target(mngl_treap_tree_mod_package
+		COMMAND "${CMAKE_COMMAND}" -E make_directory
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.treap/bin"
+		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+			"${CMAKE_CURRENT_BINARY_DIR}/tree-treap-module/$<CONFIG>/mngl_treap_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.treap/bin/mngl_treap_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+		COMMAND "${CMAKE_CURRENT_BINARY_DIR}/tree-mod-tools/$<CONFIG>/mngl_tree_mod_manifest_writer${CMAKE_EXECUTABLE_SUFFIX}"
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.treap"
+			"mngl_treap_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+		DEPENDS mngl_treap_tree_mod mngl_tree_mod_manifest_writer
+		VERBATIM
+	)
+	add_dependencies(mngl_demo mngl_treap_tree_mod_package)
+
+	if(BUILD_TESTING)
+		add_executable(mngl_treap_tree_mod_integration
+			tests/mods/treap_tree_integration.cpp
+		)
+		target_compile_features(mngl_treap_tree_mod_integration PRIVATE cxx_std_23)
+		target_include_directories(mngl_treap_tree_mod_integration PRIVATE
+			"${CMAKE_CURRENT_SOURCE_DIR}"
+			"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
+			"${CMAKE_CURRENT_SOURCE_DIR}/include"
+		)
+		if(MSVC)
+			target_link_directories(mngl_treap_tree_mod_integration PRIVATE
+				"${MNGL_LIBRARY_DIRECTORY}")
+			target_link_libraries(mngl_treap_tree_mod_integration PRIVATE SDL3.lib)
+		else()
+			target_link_libraries(mngl_treap_tree_mod_integration PRIVATE SDL3::SDL3)
+		endif()
+		add_dependencies(mngl_treap_tree_mod_integration mngl_demo)
+		add_test(NAME mngl_treap_tree_mod_integration
+			COMMAND "$<TARGET_FILE:mngl_treap_tree_mod_integration>"
+				"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.treap")
+		set_tests_properties(mngl_treap_tree_mod_integration PROPERTIES TIMEOUT 30)
+	endif()
+endif()
+
+option(MNGL_BUILD_SPLAY_TREE_MOD
+	"Build and stage the Splay tree-algorithm mod for mngl_demo" ON)
+if(MNGL_BUILD_SPLAY_TREE_MOD)
+	add_library(mngl_splay_tree_mod MODULE
+		examples/mods/splay_tree_mod.cpp
+	)
+	target_compile_features(mngl_splay_tree_mod PRIVATE cxx_std_23)
+	target_include_directories(mngl_splay_tree_mod PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}"
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
+		"${CMAKE_CURRENT_SOURCE_DIR}/include"
+	)
+	if(MSVC)
+		target_compile_options(mngl_splay_tree_mod PRIVATE /utf-8)
+	endif()
+	set_target_properties(mngl_splay_tree_mod PROPERTIES
+		PREFIX ""
+		OUTPUT_NAME "mngl_splay_tree_mod"
+		LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tree-splay-module/$<CONFIG>"
+		RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tree-splay-module/$<CONFIG>"
+	)
+
+	add_executable(mngl_splay_mod_manifest_writer
+		examples/mods/write_splay_manifest.cpp
+	)
+	target_compile_features(mngl_splay_mod_manifest_writer PRIVATE cxx_std_23)
+	target_include_directories(mngl_splay_mod_manifest_writer PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
+		"${CMAKE_CURRENT_SOURCE_DIR}/include"
+	)
+	if(MSVC)
+		target_compile_options(mngl_splay_mod_manifest_writer PRIVATE /utf-8)
+	endif()
+	set_target_properties(mngl_splay_mod_manifest_writer PROPERTIES
+		RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/splay-mod-tools/$<CONFIG>"
+	)
+	add_custom_target(mngl_splay_tree_mod_package
+		COMMAND "${CMAKE_COMMAND}" -E make_directory
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.splay/bin"
+		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+			"${CMAKE_CURRENT_BINARY_DIR}/tree-splay-module/$<CONFIG>/mngl_splay_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.splay/bin/mngl_splay_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+		COMMAND "${CMAKE_CURRENT_BINARY_DIR}/splay-mod-tools/$<CONFIG>/mngl_splay_mod_manifest_writer${CMAKE_EXECUTABLE_SUFFIX}"
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.splay"
+			"mngl_splay_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+		DEPENDS mngl_splay_tree_mod mngl_splay_mod_manifest_writer
+		VERBATIM
+	)
+	add_dependencies(mngl_demo mngl_splay_tree_mod_package)
+
+	if(BUILD_TESTING)
+		add_executable(mngl_splay_tree_mod_integration
+			tests/mods/splay_tree_integration.cpp
+		)
+		target_compile_features(mngl_splay_tree_mod_integration PRIVATE cxx_std_23)
+		target_include_directories(mngl_splay_tree_mod_integration PRIVATE
+			"${CMAKE_CURRENT_SOURCE_DIR}"
+			"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
+			"${CMAKE_CURRENT_SOURCE_DIR}/include"
+		)
+		if(MSVC)
+			target_link_directories(mngl_splay_tree_mod_integration PRIVATE
+				"${MNGL_LIBRARY_DIRECTORY}")
+			target_link_libraries(mngl_splay_tree_mod_integration PRIVATE SDL3.lib)
+		else()
+			target_link_libraries(mngl_splay_tree_mod_integration PRIVATE SDL3::SDL3)
+		endif()
+		add_dependencies(mngl_splay_tree_mod_integration mngl_demo)
+		add_test(NAME mngl_splay_tree_mod_integration
+			COMMAND "$<TARGET_FILE:mngl_splay_tree_mod_integration>"
+				"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.splay")
+		set_tests_properties(mngl_splay_tree_mod_integration PROPERTIES TIMEOUT 30)
+	endif()
+endif()
+
+option(MNGL_BUILD_AVL_TREE_MOD
+	"Build and stage the AVL tree-algorithm mod for mngl_demo" ON)
+if(MNGL_BUILD_AVL_TREE_MOD)
+	add_library(mngl_avl_tree_mod MODULE
+		examples/mods/avl_tree_mod.cpp
+	)
+	target_compile_features(mngl_avl_tree_mod PRIVATE cxx_std_23)
+	target_include_directories(mngl_avl_tree_mod PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}"
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
+		"${CMAKE_CURRENT_SOURCE_DIR}/include"
+	)
+	if(MSVC)
+		target_compile_options(mngl_avl_tree_mod PRIVATE /utf-8)
+	endif()
+	set_target_properties(mngl_avl_tree_mod PROPERTIES
+		PREFIX ""
+		OUTPUT_NAME "mngl_avl_tree_mod"
+		LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tree-avl-module/$<CONFIG>"
+		RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tree-avl-module/$<CONFIG>"
+	)
+
+	add_executable(mngl_avl_mod_manifest_writer
+		examples/mods/write_avl_manifest.cpp
+	)
+	target_compile_features(mngl_avl_mod_manifest_writer PRIVATE cxx_std_23)
+	target_include_directories(mngl_avl_mod_manifest_writer PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
+		"${CMAKE_CURRENT_SOURCE_DIR}/include"
+	)
+	if(MSVC)
+		target_compile_options(mngl_avl_mod_manifest_writer PRIVATE /utf-8)
+	endif()
+	set_target_properties(mngl_avl_mod_manifest_writer PROPERTIES
+		RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/avl-mod-tools/$<CONFIG>"
+	)
+	add_custom_target(mngl_avl_tree_mod_package
+		COMMAND "${CMAKE_COMMAND}" -E make_directory
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.avl/bin"
+		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+			"${CMAKE_CURRENT_BINARY_DIR}/tree-avl-module/$<CONFIG>/mngl_avl_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.avl/bin/mngl_avl_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+		COMMAND "${CMAKE_CURRENT_BINARY_DIR}/avl-mod-tools/$<CONFIG>/mngl_avl_mod_manifest_writer${CMAKE_EXECUTABLE_SUFFIX}"
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.avl"
+			"mngl_avl_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+		DEPENDS mngl_avl_tree_mod mngl_avl_mod_manifest_writer
+		VERBATIM
+	)
+	add_dependencies(mngl_demo mngl_avl_tree_mod_package)
+endif()
+
+option(MNGL_BUILD_RED_BLACK_TREE_MOD
+	"Build and stage the red-black tree-algorithm mod for mngl_demo" ON)
+if(MNGL_BUILD_RED_BLACK_TREE_MOD)
+	add_library(mngl_red_black_tree_mod MODULE
+		examples/mods/red_black_tree_mod.cpp
+	)
+	target_compile_features(mngl_red_black_tree_mod PRIVATE cxx_std_23)
+	target_include_directories(mngl_red_black_tree_mod PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}"
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
+		"${CMAKE_CURRENT_SOURCE_DIR}/include"
+	)
+	if(MSVC)
+		target_compile_options(mngl_red_black_tree_mod PRIVATE /utf-8)
+	endif()
+	set_target_properties(mngl_red_black_tree_mod PROPERTIES
+		PREFIX ""
+		OUTPUT_NAME "mngl_red_black_tree_mod"
+		LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tree-red-black-module/$<CONFIG>"
+		RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tree-red-black-module/$<CONFIG>"
+	)
+
+	add_executable(mngl_red_black_mod_manifest_writer
+		examples/mods/write_red_black_manifest.cpp
+	)
+	target_compile_features(mngl_red_black_mod_manifest_writer PRIVATE cxx_std_23)
+	target_include_directories(mngl_red_black_mod_manifest_writer PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
+		"${CMAKE_CURRENT_SOURCE_DIR}/include"
+	)
+	if(MSVC)
+		target_compile_options(mngl_red_black_mod_manifest_writer PRIVATE /utf-8)
+	endif()
+	set_target_properties(mngl_red_black_mod_manifest_writer PROPERTIES
+		RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/red-black-mod-tools/$<CONFIG>"
+	)
+	add_custom_target(mngl_red_black_tree_mod_package
+		COMMAND "${CMAKE_COMMAND}" -E make_directory
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.red-black/bin"
+		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+			"${CMAKE_CURRENT_BINARY_DIR}/tree-red-black-module/$<CONFIG>/mngl_red_black_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.red-black/bin/mngl_red_black_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+		COMMAND "${CMAKE_CURRENT_BINARY_DIR}/red-black-mod-tools/$<CONFIG>/mngl_red_black_mod_manifest_writer${CMAKE_EXECUTABLE_SUFFIX}"
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.red-black"
+			"mngl_red_black_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+		DEPENDS mngl_red_black_tree_mod mngl_red_black_mod_manifest_writer
+		VERBATIM
+	)
+	add_dependencies(mngl_demo mngl_red_black_tree_mod_package)
+endif()
+
+option(MNGL_BUILD_B_PLUS_TREE_MOD
+	"Build and stage the B+ tree-algorithm mod for mngl_demo" ON)
+if(MNGL_BUILD_B_PLUS_TREE_MOD)
+	add_library(mngl_b_plus_tree_mod MODULE
+		examples/mods/b_plus_tree_mod.cpp
+	)
+	target_compile_features(mngl_b_plus_tree_mod PRIVATE cxx_std_23)
+	target_include_directories(mngl_b_plus_tree_mod PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}"
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
+		"${CMAKE_CURRENT_SOURCE_DIR}/include"
+	)
+	if(MSVC)
+		target_compile_options(mngl_b_plus_tree_mod PRIVATE /utf-8)
+	endif()
+	set_target_properties(mngl_b_plus_tree_mod PROPERTIES
+		PREFIX ""
+		OUTPUT_NAME "mngl_b_plus_tree_mod"
+		LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tree-b-plus-module/$<CONFIG>"
+		RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tree-b-plus-module/$<CONFIG>"
+	)
+
+	add_executable(mngl_b_plus_mod_manifest_writer
+		examples/mods/write_b_plus_manifest.cpp
+	)
+	target_compile_features(mngl_b_plus_mod_manifest_writer PRIVATE cxx_std_23)
+	target_include_directories(mngl_b_plus_mod_manifest_writer PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
+		"${CMAKE_CURRENT_SOURCE_DIR}/include"
+	)
+	if(MSVC)
+		target_compile_options(mngl_b_plus_mod_manifest_writer PRIVATE /utf-8)
+	endif()
+	set_target_properties(mngl_b_plus_mod_manifest_writer PROPERTIES
+		RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/b-plus-mod-tools/$<CONFIG>"
+	)
+	add_custom_target(mngl_b_plus_tree_mod_package
+		COMMAND "${CMAKE_COMMAND}" -E make_directory
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.b-plus/bin"
+		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+			"${CMAKE_CURRENT_BINARY_DIR}/tree-b-plus-module/$<CONFIG>/mngl_b_plus_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.b-plus/bin/mngl_b_plus_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+		COMMAND "${CMAKE_CURRENT_BINARY_DIR}/b-plus-mod-tools/$<CONFIG>/mngl_b_plus_mod_manifest_writer${CMAKE_EXECUTABLE_SUFFIX}"
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.b-plus"
+			"mngl_b_plus_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+		DEPENDS mngl_b_plus_tree_mod mngl_b_plus_mod_manifest_writer
+		VERBATIM
+	)
+	add_dependencies(mngl_demo mngl_b_plus_tree_mod_package)
+endif()
+
+option(MNGL_BUILD_BITWISE_TRIE_MOD
+	"Build and stage the Bitwise Trie tree-algorithm mod for mngl_demo" ON)
+if(MNGL_BUILD_BITWISE_TRIE_MOD)
+	add_library(mngl_bitwise_trie_mod MODULE
+		examples/mods/bitwise_trie_mod.cpp
+	)
+	target_compile_features(mngl_bitwise_trie_mod PRIVATE cxx_std_23)
+	target_include_directories(mngl_bitwise_trie_mod PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}"
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
+		"${CMAKE_CURRENT_SOURCE_DIR}/include"
+	)
+	if(MSVC)
+		target_compile_options(mngl_bitwise_trie_mod PRIVATE /utf-8)
+	endif()
+	set_target_properties(mngl_bitwise_trie_mod PROPERTIES
+		PREFIX ""
+		OUTPUT_NAME "mngl_bitwise_trie_mod"
+		LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tree-bitwise-trie-module/$<CONFIG>"
+		RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tree-bitwise-trie-module/$<CONFIG>"
+	)
+
+	add_executable(mngl_bitwise_trie_mod_manifest_writer
+		examples/mods/write_bitwise_trie_manifest.cpp
+	)
+	target_compile_features(mngl_bitwise_trie_mod_manifest_writer PRIVATE cxx_std_23)
+	target_include_directories(mngl_bitwise_trie_mod_manifest_writer PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
+		"${CMAKE_CURRENT_SOURCE_DIR}/include"
+	)
+	if(MSVC)
+		target_compile_options(mngl_bitwise_trie_mod_manifest_writer PRIVATE /utf-8)
+	endif()
+	set_target_properties(mngl_bitwise_trie_mod_manifest_writer PROPERTIES
+		RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bitwise-trie-mod-tools/$<CONFIG>"
+	)
+	add_custom_target(mngl_bitwise_trie_mod_package
+		COMMAND "${CMAKE_COMMAND}" -E make_directory
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.bitwise-trie/bin"
+		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+			"${CMAKE_CURRENT_BINARY_DIR}/tree-bitwise-trie-module/$<CONFIG>/mngl_bitwise_trie_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.bitwise-trie/bin/mngl_bitwise_trie_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+			"${CMAKE_CURRENT_SOURCE_DIR}/examples/mods/bitwise_trie_commands.json"
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.bitwise-trie/commands.json"
+		COMMAND "${CMAKE_CURRENT_BINARY_DIR}/bitwise-trie-mod-tools/$<CONFIG>/mngl_bitwise_trie_mod_manifest_writer${CMAKE_EXECUTABLE_SUFFIX}"
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.bitwise-trie"
+			"mngl_bitwise_trie_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+		DEPENDS mngl_bitwise_trie_mod mngl_bitwise_trie_mod_manifest_writer
+		VERBATIM
+	)
+	add_dependencies(mngl_demo mngl_bitwise_trie_mod_package)
+endif()
+
 add_custom_command(TARGET mngl_demo POST_BUILD
+	COMMAND "${CMAKE_COMMAND}" -E make_directory
+		"$<TARGET_FILE_DIR:mngl_demo>/data"
+	COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+		"${CMAKE_CURRENT_SOURCE_DIR}/data/tree_commands.json"
+		"$<TARGET_FILE_DIR:mngl_demo>/data/tree_commands.json"
 	COMMAND "${CMAKE_COMMAND}" -E copy_directory
 		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/shaders"
 		"$<TARGET_FILE_DIR:mngl_demo>/shaders"
@@ -140,6 +502,9 @@ add_custom_command(TARGET mngl_demo POST_BUILD
 	COMMAND "${CMAKE_COMMAND}" -E copy_if_different
 		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui/misc/fonts/Roboto-Medium.ttf"
 		"$<TARGET_FILE_DIR:mngl_demo>/imgui/misc/fonts/Roboto-Medium.ttf"
+	COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui/misc/fonts/Cousine-Regular.ttf"
+		"$<TARGET_FILE_DIR:mngl_demo>/imgui/misc/fonts/Cousine-Regular.ttf"
 	VERBATIM
 )
 

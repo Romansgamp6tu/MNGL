@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "commands": [
+    {
+      "algorithm_id": "mngl.tree.bitwise-trie",
+      "name": "find",
+      "signature": "find(key: int64_t) [F]",
+      "description": "Проверяет ключ по битам и подсвечивает пройденные ветви Patricia-бора. Для отрицательных и положительных int64_t используется порядок с преобразованным знаковым битом."
+    },
+    {
+      "algorithm_id": "mngl.tree.bitwise-trie",
+      "name": "insert",
+      "signature": "insert(key: int64_t) [A / Ins]",
+      "description": "Добавляет уникальный int64_t ключ как лист. Сжатая структура строится по старшим различающимся битам; внутренние узлы не хранят пользовательские ключи."
+    },
+    {
+      "algorithm_id": "mngl.tree.bitwise-trie",
+      "name": "erase",
+      "signature": "erase(key: int64_t) [D / Del]",
+      "description": "Удаляет лист с ключом и пересобирает Patricia-ветви для оставшихся ключей. Несуществующий ключ ничего не меняет."
+    },
+    {
+      "algorithm_id": "mngl.tree.bitwise-trie",
+      "name": "insert_random",
+      "signature": "insert_random(count: uint64_t) [R]",
+      "description": "Добавляет указанное число случайных уникальных int64_t ключей без анимации. За один вызов можно добавить не более 100000 ключей."
+    },
+    {
+      "algorithm_id": "mngl.tree.bitwise-trie",
+      "name": "prefix_search",
+      "signature": "prefix_search(prefix: bit_string)",
+      "description": "Находит ключи по старшим битам преобразованного int64_t представления. 0 означает отрицательную половину диапазона, 1 — неотрицательную. Подсвечивает ветви и листья совпадений.",
+      "parameters": [
+        {
+          "name": "prefix",
+          "label": "Битовый префикс",
+          "type": "bit_string",
+          "hint": "1–64 бита, например 10"
+        }
+      ]
+    }
+  ]
+}

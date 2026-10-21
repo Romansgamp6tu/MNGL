@@ -1095,10 +1095,36 @@ namespace mngl::mods
     public:
         using factory = std::function<std::unique_ptr<Base>()>;
 
+        struct implementation_info
+        {
+            std::string id;
+            std::string owner_mod_id;
+            bool builtin = false;
+        };
+
         class_registry(const class_registry&) = delete;
         class_registry& operator=(const class_registry&) = delete;
 
         [[nodiscard]] const std::string& id() const noexcept { return m_id; }
+
+        [[nodiscard]] std::vector<implementation_info> implementations() const
+        {
+            std::vector<implementation_info> result;
+            std::lock_guard lock(m_mutex);
+            result.reserve(m_implementations.size());
+            for (const auto& [implementation_id, implementation] : m_implementations)
+            {
+                result.push_back({
+                    implementation_id,
+                    implementation.owner,
+                    implementation.owner.empty()
+                });
+            }
+            std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) {
+                return left.id < right.id;
+            });
+            return result;
+        }
 
         template<class F>
             requires std::constructible_from<factory, F>

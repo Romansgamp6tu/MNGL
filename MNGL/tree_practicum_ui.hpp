@@ -3,18 +3,19 @@
 #include "event.hpp"
 #include "imgui_compat.hpp"
 #include "logger.h"
+#include "mod_command_catalog.hpp"
+#include "mod_loader.hpp"
 #include "render_window.hpp"
+#include "tree_algorithm_api.hpp"
+#include "tree_custom_command_api.hpp"
+#include "tree_invariant_api.hpp"
 #include "tree_practicum_storage.hpp"
 #include "tree_renderer.hpp"
 #include "undo_redo_stack.hpp"
-#include "../tree/avl.hpp"
-#include "../tree/b_plus_tree.hpp"
 #include "../tree/bst.hpp"
-#include "../tree/rb_tree.hpp"
-#include "../tree/splay_tree.hpp"
-#include "../tree/treap.hpp"
 
 #include <SDL3/SDL_dialog.h>
+#include <SDL3/SDL_filesystem.h>
 
 #include <algorithm>
 #include <array>
@@ -56,12 +57,29 @@ namespace tree_practicum
 			bool snapshot;
 		};
 
+		struct owned_function_entry
+		{
+			std::string algorithm_id;
+			std::string name;
+			std::string signature;
+			std::string description;
+			std::vector<mngl::mods::command_catalog::parameter> parameters;
+			bool from_shared_catalog = false;
+			bool custom = false;
+		};
+
 		struct function_entry
 		{
-			std::size_t tree_index;
+			tree_practicum::mods::tree_id algorithm_id;
 			std::string_view name;
 			std::string_view signature;
 			std::string_view description;
+			const owned_function_entry* definition = nullptr;
+		};
+
+		struct tree_type_descriptor
+		{
+			tree_practicum::mods::algorithm_info algorithm;
 		};
 
 		struct explorer_entry
@@ -107,6 +125,40 @@ namespace tree_practicum
 			split
 		};
 
+		[[nodiscard]] static tree_practicum::mods::operation
+			tree_operation_capability(tree_tool_operation operation) noexcept
+		{
+			switch (operation)
+			{
+			case tree_tool_operation::find:
+				return tree_practicum::mods::operation::find;
+			case tree_tool_operation::insert:
+				return tree_practicum::mods::operation::insert;
+			case tree_tool_operation::random_insert:
+				return tree_practicum::mods::operation::random_insert;
+			case tree_tool_operation::erase:
+				return tree_practicum::mods::operation::erase;
+			case tree_tool_operation::merge:
+				return tree_practicum::mods::operation::merge;
+			case tree_tool_operation::split:
+				return tree_practicum::mods::operation::split;
+			}
+			return tree_practicum::mods::operation::find;
+		}
+
+		[[nodiscard]] static std::optional<tree_tool_operation>
+			tree_tool_for_function(std::string_view function_name) noexcept
+		{
+			if (function_name == "find") return tree_tool_operation::find;
+			if (function_name == "insert") return tree_tool_operation::insert;
+			if (function_name == "insert_random")
+				return tree_tool_operation::random_insert;
+			if (function_name == "erase") return tree_tool_operation::erase;
+			if (function_name == "merge") return tree_tool_operation::merge;
+			if (function_name == "split") return tree_tool_operation::split;
+			return std::nullopt;
+		}
+
 		struct pending_workspace_action
 		{
 			workspace_action_kind kind = workspace_action_kind::none;
@@ -134,7 +186,7 @@ namespace tree_practicum
 		};
 
 		inline static constexpr std::size_t no_visual_node =
-			std::numeric_limits<std::size_t>::max();
+			tree_practicum::mods::no_tree_node;
 		inline static constexpr float visual_node_width = 156.0f;
 		inline static constexpr float visual_node_height = 54.0f;
 		inline static constexpr std::size_t maximum_animated_tree_nodes = 512;
@@ -142,43 +194,14 @@ namespace tree_practicum
 		inline static constexpr float tree_animation_step_seconds = 0.14f;
 		inline static constexpr float tree_layout_animation_seconds = 0.38f;
 
-		struct visual_key
+		using visual_key = tree_practicum::mods::key;
+		using visual_node = tree_practicum::mods::node;
+		using visual_tree = tree_practicum::mods::tree;
+
+		struct demo_tree_entry
 		{
-			struct big_integer_text
-			{
-				std::string decimal;
-			};
-
-			using value_type = std::variant<
-				std::string,
-				double,
-				std::int64_t,
-				big_integer_text>;
-
-			value_type value;
-			std::string detail;
-			bool unquoted_serialized_value = false;
-		};
-
-		struct visual_node
-		{
-			std::vector<visual_key> keys;
-			std::vector<std::size_t> children;
-			std::array<std::size_t, 2> binary_children{
-				no_visual_node,
-				no_visual_node
-			};
-			bool leaf = false;
-			bool red = false;
-			std::size_t next_leaf = no_visual_node;
-		};
-
-		struct visual_tree
-		{
-			std::vector<visual_node> nodes;
-			std::size_t root = 0;
-			std::size_t fanout = 0;
-			bool b_plus = false;
+			tree_practicum::mods::tree_id algorithm_id;
+			visual_tree value;
 		};
 
 		struct tree_preview_geometry
@@ -189,7 +212,7 @@ namespace tree_practicum
 			std::uint64_t revision = 0;
 			std::uint64_t source_tree_signature = 0;
 			std::size_t animation_step = 0;
-			int tree_index = -1;
+			std::string algorithm_id;
 			double tree_width = 0.0;
 			double tree_height = 0.0;
 			float leaf_link_space = 0.0f;
@@ -202,7 +225,7 @@ namespace tree_practicum
 			std::optional<mngl::texture> texture;
 			std::optional<visual_key> context_menu_key;
 			std::optional<std::size_t> context_menu_node;
-			int tree_index = -1;
+			std::string algorithm_id;
 			double zoom = 1.0;
 			glm::dvec2 pan{};
 			bool view_initialized = false;
@@ -213,7 +236,7 @@ namespace tree_practicum
 		{
 			std::string archive_member_path;
 			std::optional<visual_tree> tree;
-			std::size_t tree_index = 0;
+			std::string algorithm_id;
 			tree_canvas_view_state canvas;
 		};
 
@@ -232,73 +255,12 @@ namespace tree_practicum
 			mngl::two_d::tree_draw_culler culler;
 		};
 
-		struct tree_visual_event
-		{
-			enum class kind
-			{
-				insert_node,
-				rotate_node_up
-			};
-
-			kind action;
-			std::size_t node_index;
-			std::size_t parent_index = no_visual_node;
-			std::size_t grandparent_index = no_visual_node;
-			std::size_t side = 0;
-			visual_node inserted_node;
-
-			tree_visual_event(
-				kind action,
-				std::size_t node,
-				std::size_t parent = no_visual_node,
-				std::size_t grandparent = no_visual_node,
-				std::size_t child_side = 0,
-				visual_node added_node = {})
-				: action(action),
-				node_index(node),
-				parent_index(parent),
-				grandparent_index(grandparent),
-				side(child_side),
-				inserted_node(std::move(added_node))
-			{
-			}
-		};
-
-		struct tree_operation_result
-		{
-			bool inserted = false;
-			bool changed = false;
-			bool animation_events_complete = true;
-			std::vector<tree_visual_event> events;
-		};
-
-		struct tree_bulk_insert_result
-		{
-			std::uint64_t inserted_count = 0;
-			std::optional<std::string> serialization;
-		};
-
-		struct tree_erase_result
-		{
-			bool erased = false;
-			bool changed = false;
-		};
-
-		struct tree_find_result
-		{
-			bool found = false;
-			bool changed = false;
-			std::size_t visited_nodes = 0;
-			std::vector<std::size_t> path;
-		};
-
-		enum class search_tree_key_kind
-		{
-			text,
-			floating_point,
-			signed_integer,
-			big_integer
-		};
+		using tree_visual_event = tree_practicum::mods::visual_event;
+		using tree_operation_result = tree_practicum::mods::operation_result;
+		using tree_bulk_insert_result = tree_practicum::mods::bulk_insert_result;
+		using tree_erase_result = tree_practicum::mods::erase_result;
+		using tree_find_result = tree_practicum::mods::find_result;
+		using search_tree_key_kind = tree_practicum::mods::key_kind;
 
 		struct tree_native_change_result
 		{
@@ -330,19 +292,19 @@ namespace tree_practicum
 
 		enum class tree_animation_mode : unsigned char
 		{
-			splay_steps,
+			step_events,
 			layout_transition
 		};
 
 		struct tree_animation_state
 		{
-			tree_animation_mode mode = tree_animation_mode::splay_steps;
+			tree_animation_mode mode = tree_animation_mode::step_events;
 			visual_tree tree;
 			std::vector<tree_visual_event> events;
 			std::vector<glm::dvec2> transition_start_centers;
 			glm::dvec2 transition_start_layout_size{};
 			std::optional<std::size_t> emphasized_node;
-			int tree_index = -1;
+			std::string algorithm_id;
 			std::size_t next_event = 0;
 			float elapsed_seconds = 0.0f;
 			std::optional<tree_visual_event> active_event;
@@ -382,7 +344,8 @@ namespace tree_practicum
 		struct interface_state
 		{
 			int selected_workspace = 0;
-			int active_tree = 0;
+			std::string selected_tree_id =
+				std::string(tree_practicum::mods::ids::bst);
 			std::array<char, 1024> key_input{};
 			std::uint64_t random_count = 0;
 
@@ -390,7 +353,7 @@ namespace tree_practicum
 
 			[[nodiscard]] std::size_t history_bytes() const noexcept
 			{
-				return sizeof(*this);
+				return sizeof(*this) + selected_tree_id.size();
 			}
 		};
 
@@ -412,8 +375,9 @@ namespace tree_practicum
 			std::optional<search_tree_key_kind> split_result_key_kind;
 			std::shared_ptr<const archive_entry_history_delta> archive_entry_delta;
 			std::uint64_t document_state_id = 0;
-			int active_tree = 0;
-			int loaded_tree_index = -1;
+			std::string active_tree_id =
+				std::string(tree_practicum::mods::ids::bst);
+			std::string loaded_tree_id;
 			bool loaded_search_tree_valid = false;
 			bool archive_entries_present = false;
 
@@ -433,6 +397,8 @@ namespace tree_practicum
 				add(current_archive_member_path.size());
 				add(merge_source_archive_path.size());
 				add(split_pivot_label.size());
+				add(active_tree_id.size());
+				add(loaded_tree_id.size());
 				add(current_tree_path.native().size() *
 					sizeof(std::filesystem::path::value_type));
 				for (const auto& path : split_result_member_paths)
@@ -526,7 +492,7 @@ namespace tree_practicum
 			128u * 1024u * 1024u;
 		inline static constexpr std::string_view history_file_magic =
 			"MNGL-HTREE";
-		inline static constexpr std::uint32_t history_file_version = 1;
+		inline static constexpr std::uint32_t history_file_version = 2;
 		using history_stack_type = undo_redo_stack<
 			history_state,
 			undo_history_limit,
@@ -690,22 +656,187 @@ namespace tree_practicum
 			std::size_t offset = 0;
 		};
 
-		inline static constexpr std::array<std::string_view, 6> tree_names{
-			"BST",
-			"AVL",
-			"Красно-чёрное",
-			"Splay",
-			"Декартово (Treap)",
-			"B+ tree"
-		};
-		inline static constexpr std::array<std::string_view, 6> tree_file_stems{
-			"bst",
-			"avl",
-			"red-black",
-			"splay",
-			"treap",
-			"b-plus"
-		};
+		inline static constexpr tree_practicum::mods::operation_mask all_tree_operations =
+			static_cast<tree_practicum::mods::operation_mask>(
+				tree_practicum::mods::operation::find) |
+			tree_practicum::mods::operation::insert |
+			tree_practicum::mods::operation::random_insert |
+			tree_practicum::mods::operation::erase |
+			tree_practicum::mods::operation::merge |
+			tree_practicum::mods::operation::split;
+		inline static constexpr auto numeric_key_kinds =
+			tree_practicum::mods::key_kind_bit(
+				tree_practicum::mods::key_kind::signed_integer) |
+			tree_practicum::mods::key_kind_bit(
+				tree_practicum::mods::key_kind::floating_point);
+		inline static constexpr auto layout_transition_operations =
+			static_cast<tree_practicum::mods::operation_mask>(
+				tree_practicum::mods::operation::insert) |
+			tree_practicum::mods::operation::erase |
+			tree_practicum::mods::operation::merge |
+			tree_practicum::mods::operation::split;
+		inline static constexpr auto bitwise_trie_operations =
+			static_cast<tree_practicum::mods::operation_mask>(
+				tree_practicum::mods::operation::find) |
+				tree_practicum::mods::operation::insert |
+				tree_practicum::mods::operation::random_insert |
+				tree_practicum::mods::operation::erase;
+		inline static constexpr auto bitwise_trie_layout_operations =
+			static_cast<tree_practicum::mods::operation_mask>(
+				tree_practicum::mods::operation::insert) |
+				tree_practicum::mods::operation::erase;
+		inline static constexpr std::array<tree_type_descriptor, 7> tree_types{{
+			{ { tree_practicum::mods::ids::bst, "BST", "bst", "bst{",
+				numeric_key_kinds, all_tree_operations,
+				{ layout_transition_operations, 0 } } },
+			{ { tree_practicum::mods::ids::avl, "AVL", "avl", "avl{",
+				numeric_key_kinds, all_tree_operations,
+				{ layout_transition_operations, 0 } } },
+			{ { tree_practicum::mods::ids::red_black, "Красно-чёрное", "red-black", "rb_tree{",
+				numeric_key_kinds, all_tree_operations,
+				{ layout_transition_operations, 0 } } },
+			{ { tree_practicum::mods::ids::splay, "Splay", "splay", "splay{",
+				numeric_key_kinds, all_tree_operations,
+				{ layout_transition_operations,
+					static_cast<tree_practicum::mods::operation_mask>(
+						tree_practicum::mods::operation::insert) } } },
+			{ { tree_practicum::mods::ids::treap, "Декартово (Treap)", "treap", "treap{",
+				numeric_key_kinds, all_tree_operations,
+				{ layout_transition_operations, 0 } } },
+			{ { tree_practicum::mods::ids::b_plus, "B+ tree", "b-plus", "b_plus_tree[",
+				numeric_key_kinds, all_tree_operations,
+				{ layout_transition_operations, 0 } } },
+			{ { tree_practicum::mods::ids::bitwise_trie, "Битовый бор (Patricia)",
+				"bitwise-trie", "bitwise_trie{",
+				tree_practicum::mods::key_kind_bit(
+					tree_practicum::mods::key_kind::signed_integer),
+				bitwise_trie_operations,
+				{ bitwise_trie_layout_operations, 0 } } }
+		}};
+
+		[[nodiscard]] static const tree_type_descriptor* tree_type_for(
+			tree_practicum::mods::tree_id id) noexcept
+		{
+			const auto found = std::find_if(
+				tree_types.begin(),
+				tree_types.end(),
+				[id](const auto& type) { return type.algorithm.id == id; });
+			return found == tree_types.end() ? nullptr : std::addressof(*found);
+		}
+
+		[[nodiscard]] const tree_type_descriptor* available_tree_type_for(
+			tree_practicum::mods::tree_id id) const noexcept
+		{
+			const auto found = std::find_if(
+				m_available_tree_types.begin(),
+				m_available_tree_types.end(),
+				[id](const auto& type) { return type.algorithm.id == id; });
+			return found == m_available_tree_types.end()
+				? nullptr
+				: std::addressof(*found);
+		}
+
+		[[nodiscard]] const tree_type_descriptor*
+			available_tree_type_for_serialization(
+				std::string_view source) const noexcept
+		{
+			while (!source.empty() &&
+				(source.front() == ' ' || source.front() == '\t' ||
+					source.front() == '\r' || source.front() == '\n'))
+			{
+				source.remove_prefix(1);
+			}
+
+			const tree_type_descriptor* match = nullptr;
+			for (const auto& type : m_available_tree_types)
+			{
+				const auto prefix = type.algorithm.serialization_prefix;
+				const bool legacy_escaped_prefix =
+					(type.algorithm.id == tree_practicum::mods::ids::red_black &&
+						source.starts_with("rb\\_tree{")) ||
+					(type.algorithm.id == tree_practicum::mods::ids::b_plus &&
+						source.starts_with("b\\_plus\\_tree["));
+				if ((!prefix.empty() && source.starts_with(prefix)) ||
+					legacy_escaped_prefix)
+				{
+					if (!match || prefix.size() >
+						match->algorithm.serialization_prefix.size())
+					{
+						match = std::addressof(type);
+					}
+				}
+			}
+			return match;
+		}
+
+		[[nodiscard]] std::string_view tree_name_for(
+			tree_practicum::mods::tree_id id) const noexcept
+		{
+			const auto* type = available_tree_type_for(id);
+			return type ? type->algorithm.display_name : id;
+		}
+
+		[[nodiscard]] static bool valid_tree_algorithm_id(
+			std::string_view id) noexcept
+		{
+			if (id.empty())
+			{
+				return false;
+			}
+			const auto valid_character = [](char character)
+			{
+				return (character >= 'a' && character <= 'z') ||
+					(character >= '0' && character <= '9') ||
+					character == '.' || character == '_' || character == '-';
+			};
+			return ((id.front() >= 'a' && id.front() <= 'z') ||
+				(id.front() >= '0' && id.front() <= '9')) &&
+				std::all_of(id.begin(), id.end(), valid_character);
+		}
+
+		[[nodiscard]] static bool safe_tree_file_stem(
+			std::string_view stem) noexcept
+		{
+			return !stem.empty() &&
+				std::all_of(stem.begin(), stem.end(), [](char character)
+				{
+					return (character >= 'a' && character <= 'z') ||
+						(character >= 'A' && character <= 'Z') ||
+						(character >= '0' && character <= '9') ||
+						character == '_' || character == '-';
+				});
+		}
+
+		[[nodiscard]] static search_tree_key_kind default_tree_key_kind(
+			const tree_practicum::mods::algorithm_info& info)
+		{
+			if (tree_practicum::mods::supports(
+				info.supported_key_kinds,
+				tree_practicum::mods::key_kind::signed_integer))
+			{
+				return tree_practicum::mods::key_kind::signed_integer;
+			}
+			if (tree_practicum::mods::supports(
+				info.supported_key_kinds,
+				tree_practicum::mods::key_kind::floating_point))
+			{
+				return tree_practicum::mods::key_kind::floating_point;
+			}
+			if (tree_practicum::mods::supports(
+				info.supported_key_kinds,
+				tree_practicum::mods::key_kind::text))
+			{
+				return tree_practicum::mods::key_kind::text;
+			}
+			if (tree_practicum::mods::supports(
+				info.supported_key_kinds,
+				tree_practicum::mods::key_kind::big_integer))
+			{
+				return tree_practicum::mods::key_kind::big_integer;
+			}
+			throw std::invalid_argument(
+				"Алгоритм дерева не поддерживает ни один тип ключей.");
+		}
 
 		inline static constexpr std::array<workspace_entry, 4> workspace_entries{ {
 			{ "Черновик", "Текущая рабочая область", false },
@@ -714,55 +845,101 @@ namespace tree_practicum
 			{ "После split", "Снимок результата", true }
 		} };
 
-		inline static constexpr std::array<function_entry, 36> functions{ {
-			{ 0, "find", "find(key: int64_t | double) [F]", "Находит точный ключ и подсвечивает путь до узла. BST не меняется." },
-			{ 0, "insert", "insert(key: int64_t | double) [A / Ins]", "Добавляет уникальный ключ, не меняя порядок BST. Дерево не балансируется, поэтому стоимость зависит от высоты; дубликат не добавляется." },
-			{ 0, "erase", "erase(key: int64_t | double) [D / Del]", "Удаляет ключ, заменяя узел с двумя потомками его следующим ключом по порядку. Структура остаётся BST, но балансировка не выполняется." },
-			{ 0, "merge", "merge(source: .tree) [M]", "Добавляет в текущее BST все ключи выбранного дерева-источника. Тип дерева и тип ключей должны совпадать, а каждый ключ текущего дерева должен быть меньше каждого ключа источника. Источник сохраняется." },
-			{ 0, "split", "split(pivot: int64_t | double) [C]", "Разделяет BST без повторной вставки: левая часть содержит ключи < pivot, правая — ключи >= pivot. Обе части сохраняются и открываются отдельными вкладками." },
-			{ 0, "insert_random", "insert_random(count: uint64_t) [R]", "Добавляет указанное число уникальных случайных ключей без анимации. Алиасы: mass insert, random test, mass random insert." },
-			{ 1, "find", "find(key: int64_t | double) [F]", "Находит точный ключ и подсвечивает путь до узла. AVL не меняется." },
-			{ 1, "insert", "insert(key: int64_t | double) [A / Ins]", "Добавляет уникальный ключ в AVL и обновляет высоты с поворотами, чтобы для каждого узла разница высот поддеревьев была не больше единицы." },
-			{ 1, "erase", "erase(key: int64_t | double) [D / Del]", "Удаляет ключ и перебалансирует AVL на пути к корню; сохранённые высоты и условие балансировки обновляются." },
-			{ 1, "merge", "merge(source: .tree) [M]", "Объединяет текущее AVL с выбранным источником за счёт join-операции. Нужны тот же тип дерева и ключей и диапазоны max(current) < min(source); источник остаётся в архиве." },
-			{ 1, "split", "split(pivot: int64_t | double) [C]", "Делит AVL с сохранением баланса: левая часть содержит ключи < pivot, правая — ключи >= pivot. Результаты сохраняются и показываются отдельными вкладками." },
-			{ 1, "insert_random", "insert_random(count: uint64_t) [R]", "Добавляет указанное число уникальных случайных ключей без анимации. Алиасы: mass insert, random test, mass random insert." },
-			{ 2, "find", "find(key: int64_t | double) [F]", "Находит точный ключ и подсвечивает путь до узла. Красно-чёрное дерево не меняется." },
-			{ 2, "insert", "insert(key: int64_t | double) [A / Ins]", "Добавляет уникальный ключ в красно-чёрное дерево, перекрашивает узлы и выполняет повороты для сохранения чёрной высоты и ограничения на красные узлы." },
-			{ 2, "erase", "erase(key: int64_t | double) [D / Del]", "Удаляет ключ и выполняет fix-up: восстанавливает чёрную высоту, цвета и баланс красно-чёрного дерева." },
-			{ 2, "merge", "merge(source: .tree) [M]", "Объединяет два красно-чёрных дерева с непересекающимися упорядоченными диапазонами: max(current) < min(source). Источник не изменяется." },
-			{ 2, "split", "split(pivot: int64_t | double) [C]", "Разделяет красно-чёрное дерево с восстановлением цветов и чёрной высоты: слева < pivot, справа >= pivot. Части доступны в отдельных вкладках." },
-			{ 2, "insert_random", "insert_random(count: uint64_t) [R]", "Добавляет указанное число уникальных случайных ключей без анимации. Алиасы: mass insert, random test, mass random insert." },
-			{ 3, "find", "find(key: int64_t | double) [F]", "Находит ключ и подсвечивает путь. Найденный или последний посещённый узел перемещается в корень Splay." },
-			{ 3, "insert", "insert(key: int64_t | double) [A / Ins]", "Добавляет уникальный ключ и поднимает его в корень последовательностью zig, zig-zig и zig-zag. Повторный ключ не добавляется, но тоже может быть поднят в корень." },
-			{ 3, "erase", "erase(key: int64_t | double) [D / Del]", "Удаляет ключ. При успешном удалении левое и правое поддеревья соединяются через максимальный узел левой части; поиск может изменить форму Splay даже если ключа нет." },
-			{ 3, "merge", "merge(source: .tree) [M]", "Соединяет упорядоченные Splay-деревья, подняв максимум левой части и присоединив справа источник. Требуется max(current) < min(source); источник сохраняется." },
-			{ 3, "split", "split(pivot: int64_t | double) [C]", "Разделяет Splay-дерево по границе < pivot / >= pivot. Каждая часть сохраняет корректную структуру поиска и открывается отдельной вкладкой." },
-			{ 3, "insert_random", "insert_random(count: uint64_t) [R]", "Добавляет указанное число уникальных случайных ключей без анимации. Алиасы: mass insert, random test, mass random insert." },
-			{ 4, "find", "find(key: int64_t | double) [F]", "Находит точный ключ и подсвечивает путь до узла. Treap не меняется." },
-			{ 4, "insert", "insert(key: int64_t | double) [A / Ins]", "Добавляет уникальный ключ с новым случайным приоритетом и поворотами восстанавливает min-heap порядок Treap поверх порядка BST." },
-			{ 4, "erase", "erase(key: int64_t | double) [D / Del]", "Удаляет ключ поворотами вниз по приоритетам, сохраняя одновременно BST-порядок и min-heap инвариант Treap." },
-			{ 4, "merge", "merge(source: .tree) [M]", "Объединяет Treap линейным слиянием по приоритетам при условии max(current) < min(source). Приоритеты существующих узлов сохраняются; источник остаётся доступен." },
-			{ 4, "split", "split(pivot: int64_t | double) [C]", "Разделяет Treap на ключи < pivot и >= pivot без повторной генерации приоритетов; обе части сохраняют BST- и heap-инварианты." },
-			{ 4, "insert_random", "insert_random(count: uint64_t) [R]", "Добавляет указанное число уникальных случайных ключей без анимации. Алиасы: mass insert, random test, mass random insert." },
-			{ 5, "find", "find(key: int64_t | double) [F]", "Ищет точный ключ в листьях B+ дерева и подсвечивает путь через узлы-разделители. Дерево не меняется." },
-			{ 5, "insert", "insert(key: int64_t | double) [A / Ins]", "Добавляет уникальный ключ в лист B+ дерева. При переполнении лист разделяется, а разделители и связи листьев обновляются." },
-			{ 5, "erase", "erase(key: int64_t | double) [D / Del]", "Удаляет ключ из листа. Недозаполненные узлы заимствуют ключи у соседей или объединяются; родительские разделители пересчитываются." },
-			{ 5, "merge", "merge(source: .tree) [M]", "Перестраивает B+ дерево из ключей текущего дерева и источника, если max(current) < min(source). Fanout текущего дерева сохраняется, исходная запись остаётся нетронутой." },
-			{ 5, "split", "split(pivot: int64_t | double) [C]", "Перестраивает две B+ структуры с тем же fanout: листья слева содержат ключи < pivot, справа — ключи >= pivot. Результаты сохраняются в отдельных вкладках." },
-			{ 5, "insert_random", "insert_random(count: uint64_t) [R]", "Добавляет указанное число уникальных случайных ключей без анимации. Алиасы: mass insert, random test, mass random insert." }
-		} };
+
+
+		[[nodiscard]] std::vector<function_entry> available_functions() const
+		{
+			std::vector<function_entry> result;
+			for (const auto& function : m_command_functions)
+			{
+				if (available_tree_type_for(function->algorithm_id))
+				{
+					result.push_back({
+						function->algorithm_id,
+						function->name,
+						function->signature,
+						function->description,
+						function.get() });
+				}
+			}
+
+			constexpr std::array generic_operations{
+				std::pair{
+					tree_practicum::mods::operation::find,
+					function_entry{
+						{}, "find", "find(key)",
+						"Ищет ключ и возвращает путь к нему." } },
+				std::pair{
+					tree_practicum::mods::operation::insert,
+					function_entry{
+						{}, "insert", "insert(key)",
+						"Вставляет ключ в дерево." } },
+				std::pair{
+					tree_practicum::mods::operation::random_insert,
+					function_entry{
+						{}, "insert_random", "insert_random(count)",
+						"Добавляет указанное число случайных ключей." } },
+				std::pair{
+					tree_practicum::mods::operation::erase,
+					function_entry{
+						{}, "erase", "erase(key)",
+						"Удаляет ключ из дерева." } },
+				std::pair{
+					tree_practicum::mods::operation::merge,
+					function_entry{
+						{}, "merge", "merge(source)",
+						"Объединяет текущее дерево с источником." } },
+				std::pair{
+					tree_practicum::mods::operation::split,
+					function_entry{
+						{}, "split", "split(pivot)",
+						"Разделяет дерево по опорному ключу." } }
+			};
+
+			for (const auto& type : m_available_tree_types)
+			{
+				if (!supports_numeric_input(type))
+				{
+					continue;
+				}
+				for (const auto& [operation, generic] : generic_operations)
+				{
+					if (!tree_practicum::mods::supports(
+						type.algorithm.supported_operations,
+						operation))
+					{
+						continue;
+					}
+					const bool already_documented = std::any_of(
+						result.begin(), result.end(),
+						[&](const auto& function)
+						{
+							return function.algorithm_id == type.algorithm.id &&
+								function.name == generic.name;
+						});
+					if (!already_documented)
+					{
+						auto function = generic;
+						function.algorithm_id = type.algorithm.id;
+						result.push_back(function);
+					}
+				}
+			}
+			return result;
+		}
 
 	public:
 		tree_practicum_ui(
 			mngl::render_window& render_window,
 			mngl::two_d::font& tree_font,
 			SDL_Window* native_window = nullptr)
-			: m_render_window(render_window)
+			: m_mod_loader(m_mod_registry)
+			, m_render_window(render_window)
 			, m_tree_font(tree_font)
 			, m_native_window(
 				native_window ? native_window : render_window.raw())
 		{
+			initialize_tree_mods();
 			register_tree_animation_queue();
 			register_file_drop_listener();
 			std::error_code error;
@@ -880,11 +1057,11 @@ namespace tree_practicum
 		}
 
 	private:
-		[[nodiscard]] interface_state current_interface_state() const noexcept
+		[[nodiscard]] interface_state current_interface_state() const
 		{
 			return {
 				m_selected_workspace,
-				m_new_tree_type,
+				m_new_tree_id,
 				m_key_input,
 				m_random_count
 			};
@@ -895,9 +1072,7 @@ namespace tree_practicum
 			if (state.selected_workspace < 0 ||
 				static_cast<std::size_t>(state.selected_workspace) >=
 					workspace_entries.size() ||
-				state.active_tree < 0 ||
-				static_cast<std::size_t>(state.active_tree) >=
-					tree_names.size() ||
+				!valid_tree_algorithm_id(state.selected_tree_id) ||
 				std::find(
 					state.key_input.begin(),
 					state.key_input.end(),
@@ -928,19 +1103,34 @@ namespace tree_practicum
 		{
 			validate_interface_state(state);
 			writer.write_signed(state.selected_workspace);
-			writer.write_signed(state.active_tree);
+			writer.write_string(state.selected_tree_id);
 			writer.write_bytes(std::string_view(
 				state.key_input.data(),
 				state.key_input.size()));
 			writer.write_unsigned(state.random_count);
 		}
 
+		[[nodiscard]] static std::string tree_id_from_legacy_index(int index)
+		{
+			if (index < 0 ||
+				static_cast<std::size_t>(index) >= tree_types.size())
+			{
+				throw std::invalid_argument(
+					"Undo history contains an invalid legacy tree index");
+			}
+			return std::string(
+				tree_types[static_cast<std::size_t>(index)].algorithm.id);
+		}
+
 		[[nodiscard]] static interface_state read_interface_state(
-			history_binary_reader& reader)
+			history_binary_reader& reader,
+			std::uint32_t version)
 		{
 			interface_state state;
 			state.selected_workspace = reader.read_signed();
-			state.active_tree = reader.read_signed();
+			state.selected_tree_id = version == 1
+				? tree_id_from_legacy_index(reader.read_signed())
+				: reader.read_string();
 			reader.read_bytes(
 				state.key_input.data(),
 				state.key_input.size());
@@ -982,14 +1172,11 @@ namespace tree_practicum
 		static void validate_tree_history_snapshot(
 			const tree_history_snapshot& state)
 		{
-			if (state.active_tree < 0 ||
-				static_cast<std::size_t>(state.active_tree) >=
-					tree_names.size() ||
-				state.loaded_tree_index < -1 ||
-				state.loaded_tree_index >=
-					static_cast<int>(tree_names.size()) ||
+			if (!valid_tree_algorithm_id(state.active_tree_id) ||
+				(!state.loaded_tree_id.empty() &&
+					!valid_tree_algorithm_id(state.loaded_tree_id)) ||
 				(state.loaded_search_tree_valid &&
-					state.loaded_tree_index < 0) ||
+					state.loaded_tree_id.empty()) ||
 				(state.archive_entries_present &&
 					!state.archive_entry_delta))
 			{
@@ -1048,8 +1235,8 @@ namespace tree_practicum
 			write_key_kind(writer, state.loaded_search_tree_key_kind);
 			write_key_kind(writer, state.split_result_key_kind);
 			writer.write_unsigned(state.document_state_id);
-			writer.write_signed(state.active_tree);
-			writer.write_signed(state.loaded_tree_index);
+			writer.write_string(state.active_tree_id);
+			writer.write_string(state.loaded_tree_id);
 			writer.write_bool(state.loaded_search_tree_valid);
 			writer.write_bool(state.archive_entries_present);
 			writer.write_bool(static_cast<bool>(state.archive_entry_delta));
@@ -1068,7 +1255,9 @@ namespace tree_practicum
 		}
 
 		[[nodiscard]] static tree_history_snapshot
-			read_tree_history_snapshot(history_binary_reader& reader)
+			read_tree_history_snapshot(
+				history_binary_reader& reader,
+				std::uint32_t version)
 		{
 			tree_history_snapshot state;
 			state.current_tree_name = reader.read_string();
@@ -1085,8 +1274,20 @@ namespace tree_practicum
 			state.split_result_key_kind = read_key_kind(reader);
 			state.document_state_id =
 				reader.read_unsigned<std::uint64_t>();
-			state.active_tree = reader.read_signed();
-			state.loaded_tree_index = reader.read_signed();
+			if (version == 1)
+			{
+				state.active_tree_id = tree_id_from_legacy_index(
+					reader.read_signed());
+				const int loaded_index = reader.read_signed();
+				state.loaded_tree_id = loaded_index < 0
+					? std::string{}
+					: tree_id_from_legacy_index(loaded_index);
+			}
+			else
+			{
+				state.active_tree_id = reader.read_string();
+				state.loaded_tree_id = reader.read_string();
+			}
 			state.loaded_search_tree_valid = reader.read_bool();
 			state.archive_entries_present = reader.read_bool();
 			if (reader.read_bool())
@@ -1143,12 +1344,14 @@ namespace tree_practicum
 		}
 
 		[[nodiscard]] static history_state read_history_state(
-			history_binary_reader& reader)
+			history_binary_reader& reader,
+			std::uint32_t version)
 		{
 			const auto kind = reader.read_unsigned<std::uint8_t>();
 			if (kind == 0)
 			{
-				return history_state{ read_interface_state(reader) };
+				return history_state{
+					read_interface_state(reader, version) };
 			}
 			if (kind != 1)
 			{
@@ -1159,8 +1362,8 @@ namespace tree_practicum
 			tree_history_state state;
 			state.is_after = reader.read_bool();
 			auto transition = std::make_shared<tree_history_transition>();
-			transition->before = read_tree_history_snapshot(reader);
-			transition->after = read_tree_history_snapshot(reader);
+			transition->before = read_tree_history_snapshot(reader, version);
+			transition->after = read_tree_history_snapshot(reader, version);
 			if (transition->before.document_state_id ==
 				transition->after.document_state_id)
 			{
@@ -1248,7 +1451,7 @@ namespace tree_practicum
 					"Undo history file has an invalid signature");
 			}
 			const auto version = reader.read_unsigned<std::uint32_t>();
-			if (version != history_file_version)
+			if (version != 1 && version != history_file_version)
 			{
 				throw std::invalid_argument(
 					"Undo history file version is not supported");
@@ -1262,9 +1465,9 @@ namespace tree_practicum
 			document.current_tree_checksum =
 				reader.read_unsigned<std::uint64_t>();
 			document.current_interface =
-				read_interface_state(reader);
+				read_interface_state(reader, version);
 			document.current_tree =
-				read_tree_history_snapshot(reader);
+				read_tree_history_snapshot(reader, version);
 			if (!document.current_tree.current_tree_serialization.empty() ||
 				document.current_tree.document_state_id !=
 					document.current_document_state_id)
@@ -1283,7 +1486,8 @@ namespace tree_practicum
 			document.undo_states.reserve(undo_count);
 			for (std::uint32_t i = 0; i < undo_count; ++i)
 			{
-				document.undo_states.push_back(read_history_state(reader));
+				document.undo_states.push_back(
+					read_history_state(reader, version));
 			}
 
 			const auto redo_count =
@@ -1296,7 +1500,8 @@ namespace tree_practicum
 			document.redo_states.reserve(redo_count);
 			for (std::uint32_t i = 0; i < redo_count; ++i)
 			{
-				document.redo_states.push_back(read_history_state(reader));
+				document.redo_states.push_back(
+					read_history_state(reader, version));
 			}
 			if (!reader.finished())
 			{
@@ -1426,7 +1631,7 @@ namespace tree_practicum
 				if (step.node_index != tree.nodes.size())
 				{
 					throw std::logic_error(
-						"Индекс нового узла в анимации Splay не совпадает с размером дерева.");
+						"Индекс нового узла в анимации не совпадает с размером дерева.");
 				}
 				if (step.parent_index == no_visual_node)
 				{
@@ -1436,7 +1641,7 @@ namespace tree_practicum
 						step.inserted_node.binary_children[1] != no_visual_node)
 					{
 						throw std::logic_error(
-							"Некорректный шаг вставки корня в анимации Splay.");
+							"Некорректный шаг вставки корня в анимации дерева.");
 					}
 					tree.nodes.push_back(step.inserted_node);
 					tree.root = step.node_index;
@@ -1451,7 +1656,7 @@ namespace tree_practicum
 					step.inserted_node.binary_children[1] != no_visual_node)
 				{
 					throw std::logic_error(
-						"Некорректный шаг вставки узла в анимации Splay.");
+					"Некорректный шаг вставки узла в анимации дерева.");
 				}
 				tree.nodes.push_back(step.inserted_node);
 				set_binary_child(
@@ -1468,7 +1673,7 @@ namespace tree_practicum
 					step.grandparent_index >= tree.nodes.size()))
 			{
 				throw std::logic_error(
-					"Splay-анимация содержит ссылку на отсутствующий узел.");
+					"Анимация дерева содержит ссылку на отсутствующий узел.");
 			}
 			rotate_splay_node_up(
 				tree,
@@ -1477,13 +1682,15 @@ namespace tree_practicum
 				step.grandparent_index);
 		}
 
-		void advance_tree_animation(int tree_index, float delta_time)
+		void advance_tree_animation(
+			std::string_view algorithm_id,
+			float delta_time)
 		{
 			if (!m_tree_animation.has_value())
 			{
 				return;
 			}
-			if (m_tree_animation->tree_index != tree_index)
+			if (m_tree_animation->algorithm_id != algorithm_id)
 			{
 				cancel_tree_animation();
 				return;
@@ -1529,10 +1736,10 @@ namespace tree_practicum
 			catch (const std::exception& error)
 			{
 				m_tree_operation_error = std::format(
-					"Анимация Splay остановлена: {}",
+					"Анимация дерева остановлена: {}",
 					error.what());
 				logger.error(
-					"Unable to process a Splay animation event: ",
+					"Unable to process a tree animation event: ",
 					error.what());
 				cancel_tree_animation();
 			}
@@ -1541,7 +1748,7 @@ namespace tree_practicum
 		void restore_interface_state(const interface_state& state)
 		{
 			m_selected_workspace = state.selected_workspace;
-			m_new_tree_type = state.active_tree;
+			m_new_tree_id = state.selected_tree_id;
 			clear_tree_find_result();
 			m_key_input = state.key_input;
 			m_random_count = state.random_count;
@@ -1572,8 +1779,8 @@ namespace tree_practicum
 				m_loaded_search_tree_key_kind;
 			state.split_result_key_kind = m_split_result_key_kind;
 			state.document_state_id = m_current_document_state_id;
-			state.active_tree = m_active_tree;
-			state.loaded_tree_index = m_loaded_tree_index;
+			state.active_tree_id = m_active_tree_id;
+			state.loaded_tree_id = m_loaded_tree_id;
 			state.loaded_search_tree_valid =
 				m_loaded_search_tree_valid;
 			return state;
@@ -1706,8 +1913,8 @@ namespace tree_practicum
 				state.split_result_member_paths;
 			m_split_result_key_kind = state.split_result_key_kind;
 			m_split_pivot_label = state.split_pivot_label;
-			m_active_tree = state.active_tree;
-			m_loaded_tree_index = state.loaded_tree_index;
+			m_active_tree_id = state.active_tree_id;
+			m_loaded_tree_id = state.loaded_tree_id;
 			m_loaded_search_tree_key_kind =
 				state.loaded_search_tree_key_kind;
 			m_loaded_search_tree_valid =
@@ -1883,15 +2090,16 @@ namespace tree_practicum
 			}
 		}
 
-		void select_tree(int tree_index)
+		void select_tree(std::string_view algorithm_id)
 		{
-			if (tree_index == m_new_tree_type)
+			if (!available_tree_type_for(algorithm_id) ||
+				algorithm_id == m_new_tree_id)
 			{
 				return;
 			}
 			commit_pending_input_edits();
 			const auto previous = current_interface_state();
-			m_new_tree_type = tree_index;
+			m_new_tree_id = algorithm_id;
 			record_interface_change(previous);
 		}
 
@@ -1899,7 +2107,7 @@ namespace tree_practicum
 		{
 			m_tree_find_path.clear();
 			m_tree_find_status.clear();
-			m_tree_find_tree_index = -1;
+			m_tree_find_tree_id.clear();
 			m_tree_find_result_valid = false;
 			m_tree_find_found = false;
 		}
@@ -2204,14 +2412,16 @@ namespace tree_practicum
 
 			if (ImGui::BeginMenu("Тип нового дерева"))
 			{
-				for (std::size_t i = 0; i < tree_names.size(); ++i)
+				for (const auto& type : m_available_tree_types)
 				{
+					const std::string display_name(
+						type.algorithm.display_name);
 					if (ImGui::MenuItem(
-						tree_names[i].data(),
+						display_name.c_str(),
 						nullptr,
-						m_new_tree_type == static_cast<int>(i)))
+						m_new_tree_id == type.algorithm.id))
 					{
-						select_tree(static_cast<int>(i));
+						select_tree(type.algorithm.id);
 					}
 				}
 				ImGui::EndMenu();
@@ -2219,13 +2429,11 @@ namespace tree_practicum
 
 			if (ImGui::BeginMenu("Инструменты"))
 			{
-				const bool can_operate =
-					can_insert_into_selected_search_tree();
 				if (ImGui::MenuItem(
 					"Найти ключ",
 					"F",
 					false,
-					can_operate))
+					supports_tool_operation(tree_tool_operation::find)))
 				{
 					invoke_tree_tool(tree_tool_operation::find);
 				}
@@ -2233,7 +2441,7 @@ namespace tree_practicum
 					"Вставить ключ",
 					"A / Ins",
 					false,
-					can_operate))
+					supports_tool_operation(tree_tool_operation::insert)))
 				{
 					invoke_tree_tool(tree_tool_operation::insert);
 				}
@@ -2241,7 +2449,7 @@ namespace tree_practicum
 					"Случайная вставка",
 					"R",
 					false,
-					can_operate))
+					supports_tool_operation(tree_tool_operation::random_insert)))
 				{
 					invoke_tree_tool(
 						tree_tool_operation::random_insert);
@@ -2250,7 +2458,7 @@ namespace tree_practicum
 					"Удалить ключ",
 					"D / Del",
 					false,
-					can_operate))
+					supports_tool_operation(tree_tool_operation::erase)))
 				{
 					invoke_tree_tool(tree_tool_operation::erase);
 				}
@@ -2258,7 +2466,7 @@ namespace tree_practicum
 					"Разделить дерево",
 					"C",
 					false,
-					can_operate))
+					supports_tool_operation(tree_tool_operation::split)))
 				{
 					invoke_tree_tool(tree_tool_operation::split);
 				}
@@ -2266,11 +2474,11 @@ namespace tree_practicum
 					"Объединить с источником",
 					"M",
 					false,
-					can_operate))
+					supports_tool_operation(tree_tool_operation::merge)))
 				{
 					invoke_tree_tool(tree_tool_operation::merge);
 				}
-				if (!can_operate)
+				if (!can_insert_into_selected_search_tree())
 				{
 					ImGui::TextDisabled(
 						"Для операций выберите корректное дерево с ключами int64_t или double.");
@@ -2282,7 +2490,7 @@ namespace tree_practicum
 			{
 				ImGui::MenuItem("Прототип интерфейса", nullptr, false, false);
 				ImGui::MenuItem(
-					"Find, insert, random insert, erase, merge и split доступны для шести типов деревьев",
+					"Доступные операции зависят от выбранного алгоритма дерева",
 					nullptr,
 					false,
 					false);
@@ -2478,9 +2686,9 @@ namespace tree_practicum
 			return false;
 		}
 
-		static bool function_matches_query(
+		bool function_matches_query(
 			const function_entry& function,
-			std::string_view query) noexcept
+			std::string_view query) const noexcept
 		{
 			if (function_has_alias(function.name, query))
 			{
@@ -2489,7 +2697,7 @@ namespace tree_practicum
 
 			return contains_text(function.name, query) ||
 				contains_text(function.signature, query) ||
-				contains_text(tree_names[function.tree_index], query) ||
+				contains_text(tree_name_for(function.algorithm_id), query) ||
 				contains_text(function.description, query);
 		}
 
@@ -3664,35 +3872,28 @@ namespace tree_practicum
 		void create_new_tree()
 		{
 			sync_comparison_pane_with_active_tree(true);
-			if (m_new_tree_type < 0 ||
-				static_cast<std::size_t>(m_new_tree_type) >=
-					tree_file_stems.size())
+			const auto* type = available_tree_type_for(m_new_tree_id);
+			if (!type)
 			{
 				throw std::logic_error(
 					"Нельзя создать дерево неизвестного типа.");
 			}
 			const auto* algorithm =
-				search_tree_algorithm_for(m_new_tree_type);
+				tree_algorithm_for(m_new_tree_id);
 			if (!algorithm)
 			{
 				throw std::logic_error(
 					"Для выбранного типа дерева не найден алгоритм.");
 			}
 
-			visual_tree empty_tree;
-			empty_tree.root = no_visual_node;
-			if (m_new_tree_type == 5)
-			{
-				empty_tree.b_plus = true;
-				empty_tree.fanout =
-					b_plus_tree<std::int64_t>::default_max_children;
-			}
+			auto empty_tree = algorithm->create_empty(
+				default_tree_key_kind(type->algorithm));
 			const std::string serialization =
 				algorithm->serialize(empty_tree);
 			remember_active_tree_document();
 			auto previous_state = capture_tree_history_state();
 			const auto archive_member_path = add_tree_to_session(
-				tree_file_stems[static_cast<std::size_t>(m_new_tree_type)],
+				type->algorithm.file_stem,
 				serialization);
 
 			const auto separator = archive_member_path.find_last_of('/');
@@ -3909,8 +4110,8 @@ namespace tree_practicum
 			m_loaded_visual_tree.reset();
 			m_loaded_search_tree_key_kind.reset();
 			m_loaded_search_tree_valid = false;
-			m_loaded_tree_index = -1;
-			m_tree_canvas_tree_index = -1;
+			m_loaded_tree_id.clear();
+			m_tree_canvas_tree_id.clear();
 			m_tree_canvas_view_initialized = false;
 			m_tree_canvas_fit_requested = true;
 			m_tree_parse_error.clear();
@@ -4153,64 +4354,50 @@ namespace tree_practicum
 			m_loaded_search_tree_key_kind.reset();
 			m_loaded_search_tree_valid = false;
 			m_tree_operation_error.clear();
-			m_loaded_tree_index = -1;
+			m_loaded_tree_id.clear();
 			m_tree_parse_error.clear();
-			m_tree_canvas_tree_index = -1;
+			m_tree_canvas_tree_id.clear();
 			m_tree_canvas_view_initialized = false;
 			m_tree_canvas_fit_requested = true;
-			if (serialization.starts_with("bst{"))
-			{
-				m_active_tree = 0;
-			}
-			else if (serialization.starts_with("avl{"))
-			{
-				m_active_tree = 1;
-			}
-			else if (serialization.starts_with("rb_tree{"))
-			{
-				m_active_tree = 2;
-			}
-			else if (serialization.starts_with("splay{"))
-			{
-				m_active_tree = 3;
-			}
-			else if (serialization.starts_with("treap{"))
-			{
-				m_active_tree = 4;
-			}
-			else if (serialization.starts_with("b_plus_tree["))
-			{
-				m_active_tree = 5;
-			}
-
 			try
 			{
-				std::size_t parsed_tree_index = 0;
-				auto parsed_tree = parse_tree_serialization(
-					m_current_tree_serialization,
-					parsed_tree_index);
-				if (const auto* algorithm =
-					search_tree_algorithm_for(
-						static_cast<int>(parsed_tree_index)))
+				const auto* type = available_tree_type_for_serialization(
+					m_current_tree_serialization);
+				if (!type)
 				{
-					try
-					{
-						m_loaded_search_tree_key_kind =
-							infer_search_tree_key_kind(parsed_tree);
-						algorithm->validate(
-							parsed_tree,
-							m_loaded_search_tree_key_kind.value_or(
-								search_tree_key_kind::text));
-						m_loaded_search_tree_valid = true;
-					}
-					catch (const std::exception& error)
-					{
-						m_tree_operation_error = error.what();
-					}
+					throw tree_serialization_error(
+						"неизвестный тип дерева");
 				}
-				m_active_tree = static_cast<int>(parsed_tree_index);
-				m_loaded_tree_index = m_active_tree;
-				m_loaded_visual_tree = std::move(parsed_tree);
+				const auto* algorithm =
+					tree_algorithm_for(type->algorithm.id);
+				if (!algorithm)
+				{
+					throw tree_serialization_error(
+						"для этого типа дерева не загружен алгоритм");
+				}
+				auto document = algorithm->deserialize(
+					m_current_tree_serialization);
+				if (document.algorithm_id != type->algorithm.id)
+				{
+					throw tree_serialization_error(
+						"Алгоритм вернул документ с другим ID дерева.");
+				}
+				m_active_tree_id = document.algorithm_id;
+				m_loaded_tree_id = m_active_tree_id;
+				m_loaded_search_tree_key_kind = document.keys;
+				try
+				{
+					algorithm->validate(
+						document.value,
+						document.keys.value_or(
+							search_tree_key_kind::text));
+					m_loaded_search_tree_valid = true;
+				}
+				catch (const std::exception& error)
+				{
+					m_tree_operation_error = error.what();
+				}
+				m_loaded_visual_tree = std::move(document.value);
 				m_last_action = std::format(
 					"Загружено дерево «{}»: {} узлов.",
 					tree_name,
@@ -4233,20 +4420,72 @@ namespace tree_practicum
 			}
 		}
 
-		[[nodiscard]] bool can_insert_into_selected_search_tree() const noexcept
+		[[nodiscard]] bool has_loaded_numeric_tree() const
 		{
-			const bool numeric_key_type =
-				!m_loaded_search_tree_key_kind.has_value() ||
-				*m_loaded_search_tree_key_kind ==
-					search_tree_key_kind::signed_integer ||
-				*m_loaded_search_tree_key_kind ==
-					search_tree_key_kind::floating_point;
-			return !m_current_tree_name.empty() &&
-				m_loaded_visual_tree.has_value() &&
-				m_loaded_search_tree_valid &&
-				m_loaded_tree_index == m_active_tree &&
-				numeric_key_type &&
-				search_tree_algorithm_for(m_active_tree) != nullptr;
+			const auto* type = available_tree_type_for(m_active_tree_id);
+			if (!type || !tree_algorithm_for(m_active_tree_id) ||
+				m_current_tree_name.empty() ||
+				!m_loaded_visual_tree.has_value() ||
+				!m_loaded_search_tree_valid ||
+				m_loaded_tree_id != m_active_tree_id)
+			{
+				return false;
+			}
+
+			if (m_loaded_search_tree_key_kind)
+			{
+				const auto kind = *m_loaded_search_tree_key_kind;
+				return (kind == search_tree_key_kind::signed_integer ||
+					kind == search_tree_key_kind::floating_point) &&
+					tree_practicum::mods::supports(
+						type->algorithm.supported_key_kinds,
+						kind);
+			}
+
+			return tree_practicum::mods::supports(
+					type->algorithm.supported_key_kinds,
+					search_tree_key_kind::signed_integer) ||
+				tree_practicum::mods::supports(
+					type->algorithm.supported_key_kinds,
+					search_tree_key_kind::floating_point);
+		}
+
+		[[nodiscard]] bool supports_current_tree_operation(
+			tree_practicum::mods::operation operation) const
+		{
+			const auto* type = available_tree_type_for(m_active_tree_id);
+			return has_loaded_numeric_tree() && type &&
+				tree_practicum::mods::supports(
+					type->algorithm.supported_operations,
+					operation);
+		}
+
+		[[nodiscard]] bool supports_tool_operation(
+			tree_tool_operation operation) const
+		{
+			return supports_current_tree_operation(
+				tree_operation_capability(operation));
+		}
+
+		[[nodiscard]] bool can_insert_into_selected_search_tree() const
+		{
+			if (!has_loaded_numeric_tree())
+			{
+				return false;
+			}
+			const auto* type = available_tree_type_for(m_active_tree_id);
+			return type && type->algorithm.supported_operations != 0;
+		}
+
+		[[nodiscard]] bool supports_numeric_input(
+			const tree_type_descriptor& type) const noexcept
+		{
+			return tree_practicum::mods::supports(
+					type.algorithm.supported_key_kinds,
+					search_tree_key_kind::signed_integer) ||
+				tree_practicum::mods::supports(
+					type.algorithm.supported_key_kinds,
+					search_tree_key_kind::floating_point);
 		}
 
 		[[nodiscard]] const tree_practicum::archive_entry*
@@ -4272,7 +4511,8 @@ namespace tree_practicum
 
 		[[nodiscard]] bool can_merge_selected_search_tree() const
 		{
-			return can_insert_into_selected_search_tree() &&
+			return supports_current_tree_operation(
+				tree_practicum::mods::operation::merge) &&
 				selected_merge_source() != nullptr;
 		}
 
@@ -4369,10 +4609,10 @@ namespace tree_practicum
 			{
 				pane.archive_member_path.clear();
 				pane.tree.reset();
-				pane.tree_index = 0;
+				pane.algorithm_id.clear();
 				pane.canvas.context_menu_key.reset();
 				pane.canvas.context_menu_node.reset();
-				pane.canvas.tree_index = -1;
+				pane.canvas.algorithm_id.clear();
 				pane.canvas.zoom = 1.0f;
 				pane.canvas.pan = {};
 				pane.canvas.view_initialized = false;
@@ -4416,8 +4656,7 @@ namespace tree_practicum
 				if (snapshot_active_tree && m_loaded_visual_tree)
 				{
 					pane.tree = *m_loaded_visual_tree;
-					pane.tree_index =
-						static_cast<std::size_t>(m_active_tree);
+					pane.algorithm_id = m_active_tree_id;
 				}
 				return;
 			}
@@ -4435,8 +4674,8 @@ namespace tree_practicum
 						m_tree_comparison_panes.size() - 1)))];
 			pane.archive_member_path = m_current_archive_member_path;
 			pane.tree = *m_loaded_visual_tree;
-			pane.tree_index = static_cast<std::size_t>(m_active_tree);
-			pane.canvas.tree_index = -1;
+			pane.algorithm_id = m_active_tree_id;
+			pane.canvas.algorithm_id.clear();
 			pane.canvas.context_menu_key.reset();
 			pane.canvas.context_menu_node.reset();
 			pane.canvas.view_initialized = false;
@@ -4493,20 +4732,8 @@ namespace tree_practicum
 					"Добавьте второе дерево .tree в рабочую область для сравнения.");
 			}
 
-			std::size_t primary_tree_index = 0;
-			auto primary_tree = parse_tree_serialization(
-				primary->contents,
-				primary_tree_index);
-			std::size_t secondary_tree_index = 0;
-			auto secondary_tree = parse_tree_serialization(
-				secondary->contents,
-				secondary_tree_index);
-			if (primary_tree_index >= tree_names.size() ||
-				secondary_tree_index >= tree_names.size())
-			{
-				throw std::logic_error(
-					"У рабочего дерева неизвестный тип.");
-			}
+			auto primary_document = deserialize_tree_document(primary->contents);
+			auto secondary_document = deserialize_tree_document(secondary->contents);
 
 			const std::string primary_path = primary->path;
 			const std::string secondary_path = secondary->path;
@@ -4518,14 +4745,14 @@ namespace tree_practicum
 			reset_tree_comparison();
 			auto& primary_pane = m_tree_comparison_panes[0];
 			primary_pane.archive_member_path = primary_path;
-			primary_pane.tree = std::move(primary_tree);
-			primary_pane.tree_index = primary_tree_index;
+			primary_pane.tree = std::move(primary_document.value);
+			primary_pane.algorithm_id = std::move(primary_document.algorithm_id);
 			primary_pane.canvas.fit_requested = true;
 
 			auto& secondary_pane = m_tree_comparison_panes[1];
 			secondary_pane.archive_member_path = secondary_path;
-			secondary_pane.tree = std::move(secondary_tree);
-			secondary_pane.tree_index = secondary_tree_index;
+			secondary_pane.tree = std::move(secondary_document.value);
+			secondary_pane.algorithm_id = std::move(secondary_document.algorithm_id);
 			secondary_pane.canvas.fit_requested = true;
 
 			m_tree_comparison_mode = true;
@@ -4564,18 +4791,10 @@ namespace tree_practicum
 			auto& pane = m_tree_comparison_panes[pane_index];
 			const bool tree_changed =
 				pane.archive_member_path != selected_path;
-			std::optional<visual_tree> parsed_tree;
-			std::size_t parsed_tree_index = pane.tree_index;
+			std::optional<tree_practicum::mods::document> parsed_document;
 			if (tree_changed)
 			{
-				parsed_tree = parse_tree_serialization(
-					entry->contents,
-					parsed_tree_index);
-				if (parsed_tree_index >= tree_names.size())
-				{
-					throw std::logic_error(
-						"У рабочего дерева неизвестный тип.");
-				}
+				parsed_document = deserialize_tree_document(entry->contents);
 			}
 
 			if (m_current_archive_member_path != selected_path)
@@ -4586,9 +4805,9 @@ namespace tree_practicum
 			if (tree_changed)
 			{
 				pane.archive_member_path = selected_path;
-				pane.tree = std::move(parsed_tree);
-				pane.tree_index = parsed_tree_index;
-				pane.canvas.tree_index = -1;
+				pane.algorithm_id = parsed_document->algorithm_id;
+				pane.tree = std::move(parsed_document->value);
+				pane.canvas.algorithm_id.clear();
 				pane.canvas.context_menu_key.reset();
 				pane.canvas.context_menu_node.reset();
 				pane.canvas.view_initialized = false;
@@ -4726,7 +4945,7 @@ namespace tree_practicum
 						}
 						bool canvas_clicked = false;
 						draw_tree_preview(
-							pane.tree_index,
+							pane.algorithm_id,
 							&pane.canvas,
 							tree_to_draw,
 							pane.archive_member_path,
@@ -4810,14 +5029,14 @@ namespace tree_practicum
 			m_loaded_visual_tree = std::move(updated_tree);
 			m_loaded_search_tree_key_kind = key_kind;
 			m_loaded_search_tree_valid = true;
-			m_loaded_tree_index = m_active_tree;
+			m_loaded_tree_id = m_active_tree_id;
 			record_tree_history_change(std::move(previous_state));
 		}
 
 		void perform_search_tree_find()
 		{
 			clear_tree_find_result();
-			if (!can_insert_into_selected_search_tree())
+			if (!supports_tool_operation(tree_tool_operation::find))
 			{
 				m_last_action =
 					"Поиск доступен для загруженного дерева с ключами int64_t или double.";
@@ -4837,7 +5056,7 @@ namespace tree_practicum
 						search_tree_key_kind_for_value(key.value));
 				const std::string key_text = full_visual_value(key.value);
 				const auto* algorithm =
-					search_tree_algorithm_for(m_active_tree);
+					tree_algorithm_for(m_active_tree_id);
 				if (!algorithm)
 				{
 					throw std::logic_error(
@@ -4860,7 +5079,7 @@ namespace tree_practicum
 				}
 
 				m_tree_find_path = std::move(result.path);
-				m_tree_find_tree_index = m_active_tree;
+				m_tree_find_tree_id = m_active_tree_id;
 				m_tree_find_result_valid = true;
 				m_tree_find_found = result.found;
 				m_tree_find_status = result.found
@@ -4876,7 +5095,9 @@ namespace tree_practicum
 						result.visited_nodes);
 				if (result.changed)
 				{
-					m_tree_find_status += " Splay перестроил дерево.";
+					m_tree_find_status += std::format(
+						" {} изменил структуру дерева.",
+						algorithm->name());
 				}
 				m_last_action = m_tree_find_status;
 				if (result.found)
@@ -4916,7 +5137,7 @@ namespace tree_practicum
 		void perform_search_tree_insert()
 		{
 			clear_tree_find_result();
-			if (!can_insert_into_selected_search_tree())
+			if (!supports_tool_operation(tree_tool_operation::insert))
 			{
 				m_last_action =
 					"Операция недоступна: выберите корректное числовое дерево с ключами int64_t или double.";
@@ -4936,7 +5157,7 @@ namespace tree_practicum
 						search_tree_key_kind_for_value(key.value));
 				const auto inserted_value = full_visual_value(key.value);
 				const auto* algorithm =
-					search_tree_algorithm_for(m_active_tree);
+					tree_algorithm_for(m_active_tree_id);
 				if (!algorithm)
 				{
 					throw std::logic_error(
@@ -4947,9 +5168,16 @@ namespace tree_practicum
 				const bool tree_is_small_enough_to_animate =
 					updated_tree.nodes.size() <
 						maximum_animated_tree_nodes;
-				const bool capture_splay_animation =
+				const bool collect_animation_events =
 					tree_is_small_enough_to_animate &&
 					algorithm->supports_animation();
+				const auto* algorithm_type =
+					available_tree_type_for(m_active_tree_id);
+				const bool supports_layout_transition = algorithm_type &&
+					tree_practicum::mods::supports(
+						algorithm_type->algorithm.animations
+							.layout_transition_operations,
+						tree_practicum::mods::operation::insert);
 				std::optional<visual_tree> animation_start;
 				if (tree_is_small_enough_to_animate)
 				{
@@ -4974,8 +5202,8 @@ namespace tree_practicum
 							m_tree_preview_revision &&
 						pre_operation_geometry->source_tree_signature ==
 							tree_animation_tree_signature(updated_tree) &&
-						pre_operation_geometry->tree_index ==
-							m_active_tree &&
+						pre_operation_geometry->algorithm_id ==
+							m_active_tree_id &&
 						pre_operation_geometry->current_tree_loaded &&
 						!pre_operation_geometry->showing_animation &&
 						pre_operation_geometry->layout.nodes.size() ==
@@ -4984,7 +5212,7 @@ namespace tree_practicum
 					updated_tree,
 					std::move(key),
 					effective_key_kind,
-					capture_splay_animation);
+					collect_animation_events);
 				if (!operation.changed)
 				{
 					m_last_action = std::format(
@@ -5005,6 +5233,7 @@ namespace tree_practicum
 				const bool capture_layout_transition =
 					animation_start.has_value() &&
 					!has_step_animation &&
+					supports_layout_transition &&
 					has_pre_operation_layout;
 				std::vector<glm::dvec2> transition_start_centers;
 				glm::dvec2 transition_start_layout_size{};
@@ -5045,7 +5274,7 @@ namespace tree_practicum
 				m_loaded_visual_tree = std::move(updated_tree);
 				m_loaded_search_tree_key_kind = effective_key_kind;
 				m_loaded_search_tree_valid = true;
-				m_loaded_tree_index = m_active_tree;
+				m_loaded_tree_id = m_active_tree_id;
 				record_tree_history_change(std::move(previous_state));
 				if (animation_start.has_value() && has_step_animation)
 				{
@@ -5058,22 +5287,22 @@ namespace tree_practicum
 							operation.events.size())
 						{
 							throw std::logic_error(
-								"Event queue size does not match the Splay operation.");
+								"Animation event queue size does not match the tree operation.");
 						}
 						tree_animation_state animation;
 						animation.tree = std::move(animation_start.value());
 						animation.events = std::move(received_events);
-						animation.tree_index = m_active_tree;
+						animation.algorithm_id = m_active_tree_id;
 						m_tree_animation = std::move(animation);
 					}
 					catch (const std::exception& error)
 					{
 						cancel_tree_animation();
 						m_tree_operation_error = std::format(
-							"Анимацию Splay не удалось запустить: {}",
+							"Анимацию дерева не удалось запустить: {}",
 							error.what());
 						logger.error(
-							"Unable to start Splay animation: ",
+							"Unable to start tree animation: ",
 							error.what());
 					}
 				}
@@ -5093,7 +5322,7 @@ namespace tree_practicum
 						find_animation_key_node(
 							animation.tree,
 							animation_key);
-					animation.tree_index = m_active_tree;
+					animation.algorithm_id = m_active_tree_id;
 					m_tree_animation = std::move(animation);
 				}
 				if (operation.inserted)
@@ -5111,10 +5340,10 @@ namespace tree_practicum
 				else
 				{
 					m_last_action = std::format(
-						"Ключ «{}» уже был в дереве; он перемещён в корень Splay. Сохраните изменения через Ctrl+S.",
+						"Ключ «{}» уже был в дереве; структура дерева изменилась. Сохраните изменения через Ctrl+S.",
 						inserted_value);
 					logger.info(
-						"Duplicate key accessed and splayed to root: ",
+						"Duplicate key changed the tree structure: ",
 						inserted_value);
 				}
 				if (!tree_is_small_enough_to_animate)
@@ -5136,7 +5365,7 @@ namespace tree_practicum
 		void perform_search_tree_random_insert()
 		{
 			clear_tree_find_result();
-			if (!can_insert_into_selected_search_tree())
+			if (!supports_tool_operation(tree_tool_operation::random_insert))
 			{
 				m_last_action =
 					"Операция недоступна: выберите корректное числовое дерево с ключами int64_t или double.";
@@ -5166,7 +5395,7 @@ namespace tree_practicum
 						type_probe.value);
 				}
 				const auto* algorithm =
-					search_tree_algorithm_for(m_active_tree);
+					tree_algorithm_for(m_active_tree_id);
 				if (!algorithm)
 				{
 					throw std::logic_error(
@@ -5203,7 +5432,7 @@ namespace tree_practicum
 				m_loaded_visual_tree = std::move(updated_tree);
 				m_loaded_search_tree_key_kind = *key_kind;
 				m_loaded_search_tree_valid = true;
-				m_loaded_tree_index = m_active_tree;
+				m_loaded_tree_id = m_active_tree_id;
 				record_tree_history_change(std::move(previous_state));
 				m_last_action = std::format(
 					"Добавлено {} случайных уникальных ключей в {} без анимации. Сохраните изменения через Ctrl+S.",
@@ -5232,7 +5461,7 @@ namespace tree_practicum
 			std::optional<visual_key> hovered_key = std::nullopt)
 		{
 			clear_tree_find_result();
-			if (!can_insert_into_selected_search_tree())
+			if (!supports_tool_operation(tree_tool_operation::erase))
 			{
 				m_last_action =
 					"Удаление недоступно: выберите корректное дерево с ключами int64_t или double.";
@@ -5253,7 +5482,7 @@ namespace tree_practicum
 					search_tree_key_kind_for_value(key.value));
 				const std::string key_text = full_visual_value(key.value);
 				const auto* algorithm =
-					search_tree_algorithm_for(m_active_tree);
+					tree_algorithm_for(m_active_tree_id);
 				if (!algorithm)
 				{
 					throw std::logic_error(
@@ -5289,7 +5518,7 @@ namespace tree_practicum
 						key_text,
 						algorithm->name())
 					: std::format(
-						"Ключ «{}» не найден; Splay перестроил путь поиска. Сохраните изменения через Ctrl+S.",
+						"Ключ «{}» не удалён; структура дерева изменилась. Сохраните изменения через Ctrl+S.",
 						key_text);
 				if (result.erased)
 				{
@@ -5302,7 +5531,8 @@ namespace tree_practicum
 				else
 				{
 					logger.info(
-						"Splay adjusted after an unsuccessful erase: ",
+						algorithm->name(),
+						" changed tree structure after an unsuccessful erase: ",
 						key_text);
 				}
 			}
@@ -5339,18 +5569,16 @@ namespace tree_practicum
 				}
 				const std::string source_path = source_entry->path;
 
-				std::size_t source_tree_index = 0;
-				auto source_tree = parse_tree_serialization(
-					source_entry->contents,
-					source_tree_index);
-				if (source_tree_index != static_cast<std::size_t>(m_active_tree))
+				auto source_document = deserialize_tree_document(
+					source_entry->contents);
+				if (source_document.algorithm_id != m_active_tree_id)
 				{
 					throw std::invalid_argument(
 						"Для merge выберите дерево того же типа, что и текущее.");
 				}
 
-				const auto source_key_kind =
-					infer_search_tree_key_kind(source_tree);
+				auto& source_tree = source_document.value;
+				const auto source_key_kind = source_document.keys;
 				if (source_key_kind &&
 					*source_key_kind != search_tree_key_kind::signed_integer &&
 					*source_key_kind != search_tree_key_kind::floating_point)
@@ -5369,7 +5597,7 @@ namespace tree_practicum
 					source_key_kind.value_or(
 						search_tree_key_kind::signed_integer));
 				const auto* algorithm =
-					search_tree_algorithm_for(m_active_tree);
+					tree_algorithm_for(m_active_tree_id);
 				if (!algorithm)
 				{
 					throw std::logic_error(
@@ -5420,7 +5648,7 @@ namespace tree_practicum
 			std::optional<visual_key> hovered_key = std::nullopt)
 		{
 			clear_tree_find_result();
-			if (!can_insert_into_selected_search_tree())
+			if (!supports_tool_operation(tree_tool_operation::split))
 			{
 				m_last_action =
 					"Split недоступен: выберите корректное дерево с ключами int64_t или double.";
@@ -5441,7 +5669,7 @@ namespace tree_practicum
 					search_tree_key_kind_for_value(pivot.value));
 				const std::string pivot_text = full_visual_value(pivot.value);
 				const auto* algorithm =
-					search_tree_algorithm_for(m_active_tree);
+					tree_algorithm_for(m_active_tree_id);
 				if (!algorithm)
 				{
 					throw std::logic_error(
@@ -5713,7 +5941,7 @@ namespace tree_practicum
 			}
 			else
 			{
-				m_active_tree = current_tree.active_tree;
+				m_active_tree_id = current_tree.active_tree_id;
 				clear_current_tree_state();
 			}
 			restore_interface_state(document.current_interface);
@@ -5805,10 +6033,10 @@ namespace tree_practicum
 			m_loaded_visual_tree.reset();
 			m_loaded_search_tree_key_kind.reset();
 			m_loaded_search_tree_valid = false;
-			m_loaded_tree_index = -1;
+			m_loaded_tree_id.clear();
 			m_tree_operation_error.clear();
 			m_tree_parse_error.clear();
-			m_tree_canvas_tree_index = -1;
+			m_tree_canvas_tree_id.clear();
 			m_tree_canvas_view_initialized = false;
 			m_tree_canvas_fit_requested = true;
 			m_selected_archive_entry = -1;
@@ -7097,7 +7325,7 @@ namespace tree_practicum
 				(m_tree_dirty || any_tree_document_is_dirty())
 					? "Есть несохранённые изменения · Ctrl+S"
 					: m_loaded_visual_tree.has_value() &&
-						m_loaded_tree_index == m_active_tree
+						m_loaded_tree_id == m_active_tree_id
 					? can_insert_into_selected_search_tree()
 						? "Загруженное дерево · операции int64_t/double доступны"
 					: "Операции доступны только для int64_t и double"
@@ -7189,8 +7417,6 @@ namespace tree_practicum
 			}
 			ImGui::NewLine();
 
-			const bool can_operate =
-				can_insert_into_selected_search_tree();
 			ImGui::PushStyleColor(
 				ImGuiCol_Button,
 				{ 0.10f, 0.29f, 0.39f, 1.0f });
@@ -7200,7 +7426,6 @@ namespace tree_practicum
 			ImGui::PushStyleColor(
 				ImGuiCol_ButtonActive,
 				{ 0.08f, 0.23f, 0.32f, 1.0f });
-			ImGui::BeginDisabled(!can_operate);
 			if (ImGui::BeginTable(
 				"TreeOperations",
 				2,
@@ -7211,46 +7436,63 @@ namespace tree_practicum
 					0.0f
 				};
 				ImGui::TableNextColumn();
+				ImGui::BeginDisabled(!supports_tool_operation(
+					tree_tool_operation::find));
 				if (ImGui::Button("Найти [F]", operation_button_size))
 				{
 					invoke_tree_tool(tree_tool_operation::find);
 				}
+				ImGui::EndDisabled();
 				ImGui::TableNextColumn();
+				ImGui::BeginDisabled(!supports_tool_operation(
+					tree_tool_operation::insert));
 				if (ImGui::Button("Вставить [A / Ins]", operation_button_size))
 				{
 					invoke_tree_tool(tree_tool_operation::insert);
 				}
+				ImGui::EndDisabled();
 				ImGui::TableNextRow();
 				ImGui::TableNextColumn();
+				ImGui::BeginDisabled(!supports_tool_operation(
+					tree_tool_operation::erase));
 				if (ImGui::Button("Удалить [D / Del]", operation_button_size))
 				{
 					invoke_tree_tool(tree_tool_operation::erase);
 				}
+				ImGui::EndDisabled();
 				ImGui::TableNextColumn();
+				ImGui::BeginDisabled(!supports_tool_operation(
+					tree_tool_operation::split));
 				if (ImGui::Button("Split [C]", operation_button_size))
 				{
 					invoke_tree_tool(tree_tool_operation::split);
 				}
+				ImGui::EndDisabled();
 				ImGui::TableNextRow();
 				ImGui::TableNextColumn();
+				ImGui::BeginDisabled(!supports_tool_operation(
+					tree_tool_operation::random_insert));
 				if (ImGui::Button("Случайная вставка [R]", operation_button_size))
 				{
 					invoke_tree_tool(tree_tool_operation::random_insert);
 				}
+				ImGui::EndDisabled();
 				ImGui::TableNextColumn();
+				ImGui::BeginDisabled(!supports_tool_operation(
+					tree_tool_operation::merge));
 				if (ImGui::Button("Объединить [M]", operation_button_size))
 				{
 					invoke_tree_tool(tree_tool_operation::merge);
 				}
+				ImGui::EndDisabled();
 				ImGui::EndTable();
 			}
-			ImGui::EndDisabled();
 			ImGui::PopStyleColor(3);
 			ImGui::TextDisabled(
 				"Параметры операций открываются в отдельном окне.");
 
 			if (m_tree_find_result_valid &&
-				m_tree_find_tree_index == m_active_tree)
+				m_tree_find_tree_id == m_active_tree_id)
 			{
 				ImGui::PushStyleColor(
 					ImGuiCol_Text,
@@ -7318,7 +7560,7 @@ namespace tree_practicum
 
 			const tree_tool_operation operation = *m_active_tree_tool;
 			const bool can_operate =
-				can_insert_into_selected_search_tree();
+				supports_tool_operation(operation);
 			const char* operation_name = "";
 			const char* action_label = "Выполнить";
 			bool submit_on_enter = false;
@@ -7425,7 +7667,7 @@ namespace tree_practicum
 			if (!can_operate)
 			{
 				ImGui::TextDisabled(
-					"Откройте дерево с ключами int64_t или double.");
+					"Эта операция недоступна для выбранного алгоритма или типа ключа.");
 			}
 
 			const bool can_apply = operation == tree_tool_operation::merge
@@ -7477,7 +7719,7 @@ namespace tree_practicum
 			else
 			{
 				draw_tree_preview(
-					static_cast<std::size_t>(m_active_tree));
+					m_active_tree_id);
 			}
 		}
 
@@ -7953,7 +8195,7 @@ namespace tree_practicum
 
 			std::string_view source;
 			std::size_t position = 0;
-			std::size_t tree_index = 0;
+		std::string algorithm_id;
 			bool has_metadata = false;
 			visual_tree result;
 
@@ -7962,50 +8204,12 @@ namespace tree_practicum
 			{
 			}
 
-			[[nodiscard]] visual_tree parse(std::size_t& parsed_tree_index)
+			[[nodiscard]] visual_tree parse(std::string& parsed_algorithm_id)
 			{
 				skip_whitespace();
-				if (consume_prefix("b_plus_tree[") ||
-					consume_prefix("b\\_plus\\_tree["))
+				if (consume_prefix("bst{"))
 				{
-					tree_index = 5;
-					result.b_plus = true;
-					parse_fanout();
-					expect_character('{');
-					result.root = parse_b_plus_node(0);
-					expect_character('}');
-				}
-				else if (consume_prefix("bst{"))
-				{
-					tree_index = 0;
-					result.root = parse_binary_node(0);
-					expect_character('}');
-				}
-				else if (consume_prefix("avl{"))
-				{
-					tree_index = 1;
-					has_metadata = true;
-					result.root = parse_binary_node(0);
-					expect_character('}');
-				}
-				else if (consume_prefix("rb_tree{") ||
-					consume_prefix("rb\\_tree{"))
-				{
-					tree_index = 2;
-					has_metadata = true;
-					result.root = parse_binary_node(0);
-					expect_character('}');
-				}
-				else if (consume_prefix("splay{"))
-				{
-					tree_index = 3;
-					result.root = parse_binary_node(0);
-					expect_character('}');
-				}
-				else if (consume_prefix("treap{"))
-				{
-					tree_index = 4;
-					has_metadata = true;
+					algorithm_id = tree_practicum::mods::ids::bst;
 					result.root = parse_binary_node(0);
 					expect_character('}');
 				}
@@ -8021,11 +8225,7 @@ namespace tree_practicum
 				}
 
 				infer_key_types();
-				if (result.b_plus && result.root != no_visual_node)
-				{
-					link_b_plus_leaves();
-				}
-				parsed_tree_index = tree_index;
+				parsed_algorithm_id = std::move(algorithm_id);
 				return std::move(result);
 			}
 
@@ -8251,135 +8451,6 @@ namespace tree_practicum
 				}
 				stored.leaf =
 					left == no_visual_node && right == no_visual_node;
-				stored.red = tree_index == 2 && detail == "0";
-				return index;
-			}
-
-			void parse_fanout()
-			{
-				if (!consume_prefix("fanout="))
-				{
-					fail("в заголовке B+ дерева отсутствует fanout");
-				}
-				const std::size_t start = position;
-				while (position < source.size() &&
-					source[position] >= '0' &&
-					source[position] <= '9')
-				{
-					++position;
-				}
-				if (start == position)
-				{
-					fail("некорректное значение fanout");
-				}
-				const auto conversion = std::from_chars(
-					source.data() + start,
-					source.data() + position,
-					result.fanout);
-				if (conversion.ec != std::errc{} ||
-					result.fanout < 3 ||
-					result.fanout > 1'024)
-				{
-					fail("fanout должен быть от 3 до 1024");
-				}
-				expect_character(']');
-			}
-
-			[[nodiscard]] std::string read_b_plus_key()
-			{
-				if (position < source.size() && source[position] == '"')
-				{
-					return read_quoted_string();
-				}
-
-				const std::size_t start = position;
-				while (position < source.size() &&
-					source[position] != ',' &&
-					source[position] != '}')
-				{
-					++position;
-				}
-				return std::string(source.substr(start, position - start));
-			}
-
-			[[nodiscard]] std::size_t parse_b_plus_node(std::size_t depth)
-			{
-				skip_whitespace();
-				if (consume_character('#'))
-				{
-					return no_visual_node;
-				}
-				if (depth >= maximum_depth)
-				{
-					fail("превышена максимальная глубина B+ дерева");
-				}
-				if (position >= source.size() ||
-					(source[position] != 'I' && source[position] != 'L'))
-				{
-					fail("ожидался узел I или L в B+ дереве");
-				}
-				const bool leaf = source[position++] == 'L';
-				expect_character('{');
-
-				std::vector<visual_key> keys;
-				skip_whitespace();
-				if (!consume_character('}'))
-				{
-					while (true)
-					{
-						skip_whitespace();
-						const bool quoted =
-							position < source.size() && source[position] == '"';
-						keys.push_back({
-							visual_key::value_type{
-								std::in_place_type<std::string>,
-								read_b_plus_key() },
-							{},
-							!quoted
-						});
-						skip_whitespace();
-						if (consume_character('}'))
-						{
-							break;
-						}
-						expect_character(',');
-					}
-				}
-
-				visual_node node;
-				node.keys = std::move(keys);
-				node.leaf = leaf;
-				const std::size_t index = append_node(std::move(node));
-				if (leaf)
-				{
-					return index;
-				}
-
-				expect_character('[');
-				std::vector<std::size_t> children;
-				skip_whitespace();
-				if (!consume_character(']'))
-				{
-					while (true)
-					{
-						children.push_back(parse_b_plus_node(depth + 1));
-						skip_whitespace();
-						if (consume_character(']'))
-						{
-							break;
-						}
-						expect_character(',');
-					}
-				}
-				if (children.size() != result.nodes[index].keys.size() + 1)
-				{
-					fail("число потомков B+ узла должно быть на один больше числа ключей");
-				}
-				if (children.size() > result.fanout)
-				{
-					fail("число потомков B+ узла превышает fanout");
-				}
-				result.nodes[index].children = std::move(children);
 				return index;
 			}
 
@@ -8514,43 +8585,13 @@ namespace tree_practicum
 				}
 			}
 
-			void link_b_plus_leaves()
-			{
-				std::vector<std::size_t> pending{ result.root };
-				std::vector<std::size_t> leaves;
-				while (!pending.empty())
-				{
-					const std::size_t index = pending.back();
-					pending.pop_back();
-					if (index == no_visual_node)
-					{
-						continue;
-					}
-					const auto& node = result.nodes[index];
-					if (node.leaf)
-					{
-						leaves.push_back(index);
-						continue;
-					}
-					for (auto child = node.children.rbegin();
-						child != node.children.rend();
-						++child)
-					{
-						pending.push_back(*child);
-					}
-				}
-				for (std::size_t i = 0; i + 1 < leaves.size(); ++i)
-				{
-					result.nodes[leaves[i]].next_leaf = leaves[i + 1];
-				}
-			}
 		};
 
 		[[nodiscard]] static visual_tree parse_tree_serialization(
 			std::string_view serialization,
-			std::size_t& tree_index)
+			std::string& algorithm_id)
 		{
-			return tree_serialization_parser{ serialization }.parse(tree_index);
+			return tree_serialization_parser{ serialization }.parse(algorithm_id);
 		}
 
 		[[nodiscard]] static bool is_integer_literal(
@@ -9042,560 +9083,6 @@ namespace tree_practicum
 			}
 		}
 
-		[[nodiscard]] static std::size_t avl_height(
-			const visual_tree& tree,
-			std::size_t node_index)
-		{
-			if (node_index == no_visual_node)
-			{
-				return 0;
-			}
-			if (node_index >= tree.nodes.size() ||
-				tree.nodes[node_index].keys.size() != 1)
-			{
-				throw std::invalid_argument(
-					"Узел AVL содержит неверный индекс или число ключей.");
-			}
-
-			const auto& detail = tree.nodes[node_index].keys.front().detail;
-			std::size_t height = 0;
-			const auto conversion = std::from_chars(
-				detail.data(),
-				detail.data() + detail.size(),
-				height);
-			if (detail.empty() ||
-				conversion.ec != std::errc{} ||
-				conversion.ptr != detail.data() + detail.size() ||
-				height == 0)
-			{
-				throw std::invalid_argument(
-					"Высота узла AVL должна быть положительным целым числом.");
-			}
-			return height;
-		}
-
-		static void validate_avl_structure(const visual_tree& tree)
-		{
-			if (tree.b_plus)
-			{
-				throw std::invalid_argument(
-					"Невозможно проверить AVL как B+ дерево.");
-			}
-			if (tree.nodes.empty())
-			{
-				if (tree.root != no_visual_node)
-				{
-					throw std::invalid_argument(
-						"Пустое AVL содержит неверный индекс корня.");
-				}
-				return;
-			}
-			if (tree.root >= tree.nodes.size())
-			{
-				throw std::invalid_argument(
-					"Корень AVL ссылается на отсутствующий узел.");
-			}
-
-			struct validation_frame
-			{
-				std::size_t node_index;
-				bool expanded;
-			};
-
-			std::vector<validation_frame> pending{ { tree.root, false } };
-			std::vector<unsigned char> state(tree.nodes.size(), 0);
-			std::vector<std::size_t> heights(tree.nodes.size(), 0);
-			std::size_t visited_count = 0;
-			while (!pending.empty())
-			{
-				const auto frame = pending.back();
-				pending.pop_back();
-				if (frame.node_index >= tree.nodes.size())
-				{
-					throw std::invalid_argument(
-						"AVL содержит ссылку на отсутствующий узел.");
-				}
-
-				const auto& node = tree.nodes[frame.node_index];
-				if (!frame.expanded)
-				{
-					if (state[frame.node_index] != 0)
-					{
-						throw std::invalid_argument(
-							"AVL содержит цикл или повторную ссылку на узел.");
-					}
-					if (node.keys.size() != 1)
-					{
-						throw std::invalid_argument(
-							"Узел AVL должен содержать ровно один ключ.");
-					}
-					state[frame.node_index] = 1;
-					++visited_count;
-					pending.push_back({ frame.node_index, true });
-					if (node.binary_children[1] != no_visual_node)
-					{
-						pending.push_back({
-							node.binary_children[1],
-							false
-						});
-					}
-					if (node.binary_children[0] != no_visual_node)
-					{
-						pending.push_back({
-							node.binary_children[0],
-							false
-						});
-					}
-					continue;
-				}
-
-				if (state[frame.node_index] != 1)
-				{
-					throw std::invalid_argument(
-						"AVL содержит некорректную структуру узлов.");
-				}
-				const auto left = node.binary_children[0];
-				const auto right = node.binary_children[1];
-				const std::size_t left_height = left == no_visual_node
-					? 0
-					: heights[left];
-				const std::size_t right_height = right == no_visual_node
-					? 0
-					: heights[right];
-				const std::size_t expected_height =
-					std::max(left_height, right_height) + 1;
-				const std::size_t stored_height =
-					avl_height(tree, frame.node_index);
-				if (stored_height != expected_height)
-				{
-					throw std::invalid_argument(
-						"Сохранённая высота узла AVL не соответствует структуре.");
-				}
-				const std::size_t height_difference =
-					left_height > right_height
-					? left_height - right_height
-					: right_height - left_height;
-				if (height_difference > 1)
-				{
-					throw std::invalid_argument(
-						"AVL нарушает условие балансировки.");
-				}
-
-				heights[frame.node_index] = expected_height;
-				state[frame.node_index] = 2;
-			}
-
-			if (visited_count != tree.nodes.size())
-			{
-				throw std::invalid_argument(
-					"AVL содержит узлы, не достижимые из корня.");
-			}
-		}
-
-		[[nodiscard]] static bool red_black_node_is_red(
-			const visual_tree& tree,
-			std::size_t node_index)
-		{
-			if (node_index == no_visual_node)
-			{
-				return false;
-			}
-			if (node_index >= tree.nodes.size() ||
-				tree.nodes[node_index].keys.size() != 1)
-			{
-				throw std::invalid_argument(
-					"Узел красно-чёрного дерева содержит неверный индекс или число ключей.");
-			}
-
-			const auto& detail = tree.nodes[node_index].keys.front().detail;
-			if (detail == "0")
-			{
-				return true;
-			}
-			if (detail == "1")
-			{
-				return false;
-			}
-			throw std::invalid_argument(
-				"Цвет узла красно-чёрного дерева должен быть 0 (красный) или 1 (чёрный).");
-		}
-
-		static void set_red_black_node_color(
-			visual_tree& tree,
-			std::size_t node_index,
-			bool red)
-		{
-			if (node_index >= tree.nodes.size() ||
-				tree.nodes[node_index].keys.size() != 1)
-			{
-				throw std::invalid_argument(
-					"Невозможно изменить цвет некорректного узла красно-чёрного дерева.");
-			}
-			auto& node = tree.nodes[node_index];
-			node.keys.front().detail = red ? "0" : "1";
-			node.red = red;
-		}
-
-		static void validate_red_black_structure(const visual_tree& tree)
-		{
-			if (tree.b_plus)
-			{
-				throw std::invalid_argument(
-					"Невозможно проверить красно-чёрное дерево как B+ дерево.");
-			}
-			if (tree.nodes.empty())
-			{
-				if (tree.root != no_visual_node)
-				{
-					throw std::invalid_argument(
-						"Пустое красно-чёрное дерево содержит неверный индекс корня.");
-				}
-				return;
-			}
-			if (tree.root >= tree.nodes.size())
-			{
-				throw std::invalid_argument(
-					"Корень красно-чёрного дерева ссылается на отсутствующий узел.");
-			}
-			if (red_black_node_is_red(tree, tree.root))
-			{
-				throw std::invalid_argument(
-					"Корень красно-чёрного дерева должен быть чёрным.");
-			}
-
-			struct validation_frame
-			{
-				std::size_t node_index;
-				std::size_t black_count;
-				std::size_t depth;
-				bool parent_red;
-			};
-
-			std::vector<validation_frame> pending{ {
-				tree.root,
-				0,
-				0,
-				false
-			} };
-			std::vector<unsigned char> visited(tree.nodes.size(), 0);
-			visited[tree.root] = 1;
-			std::optional<std::size_t> expected_black_height;
-			std::size_t visited_count = 0;
-			while (!pending.empty())
-			{
-				const auto frame = pending.back();
-				pending.pop_back();
-				if (frame.node_index >= tree.nodes.size() ||
-					frame.depth >= tree_serialization_parser::maximum_depth)
-				{
-					throw std::invalid_argument(
-						"Красно-чёрное дерево содержит неверную ссылку или превышает допустимую глубину.");
-				}
-
-				const auto& node = tree.nodes[frame.node_index];
-				if (node.keys.size() != 1)
-				{
-					throw std::invalid_argument(
-						"Узел красно-чёрного дерева должен содержать ровно один ключ.");
-				}
-				const bool red =
-					red_black_node_is_red(tree, frame.node_index);
-				if (frame.parent_red && red)
-				{
-					throw std::invalid_argument(
-						"Красный узел красно-чёрного дерева не может иметь красного родителя.");
-				}
-				++visited_count;
-				const std::size_t black_count =
-					frame.black_count + (red ? 0 : 1);
-				for (std::size_t side = 0; side < 2; ++side)
-				{
-					const auto child = node.binary_children[side];
-					if (child == no_visual_node)
-					{
-						if (expected_black_height.has_value() &&
-							expected_black_height.value() != black_count)
-						{
-							throw std::invalid_argument(
-								"Пути от корня красно-чёрного дерева имеют разную чёрную высоту.");
-						}
-						expected_black_height = black_count;
-						continue;
-					}
-					if (child >= tree.nodes.size() || visited[child] != 0)
-					{
-						throw std::invalid_argument(
-							"Красно-чёрное дерево содержит цикл или повторную ссылку на узел.");
-					}
-					visited[child] = 1;
-					pending.push_back({
-						child,
-						black_count,
-						frame.depth + 1,
-						red
-					});
-				}
-			}
-
-			if (visited_count != tree.nodes.size())
-			{
-				throw std::invalid_argument(
-					"Красно-чёрное дерево содержит узлы, не достижимые из корня.");
-			}
-		}
-
-		[[nodiscard]] static std::uint64_t treap_priority(
-			const visual_tree& tree,
-			std::size_t node_index)
-		{
-			if (node_index >= tree.nodes.size() ||
-				tree.nodes[node_index].keys.size() != 1)
-			{
-				throw std::invalid_argument(
-					"Узел Treap содержит неверный индекс или число ключей.");
-			}
-
-			const auto& detail = tree.nodes[node_index].keys.front().detail;
-			std::uint64_t priority = 0;
-			const auto conversion = std::from_chars(
-				detail.data(),
-				detail.data() + detail.size(),
-				priority);
-			if (detail.empty() ||
-				conversion.ec != std::errc{} ||
-				conversion.ptr != detail.data() + detail.size())
-			{
-				throw std::invalid_argument(
-					"Приоритет узла Treap должен быть числом uint64_t.");
-			}
-			return priority;
-		}
-
-		static void validate_treap_structure(const visual_tree& tree)
-		{
-			if (tree.b_plus)
-			{
-				throw std::invalid_argument(
-					"Невозможно проверить Treap как B+ дерево.");
-			}
-			for (std::size_t i = 0; i < tree.nodes.size(); ++i)
-			{
-				const auto parent_priority = treap_priority(tree, i);
-				for (const auto child : tree.nodes[i].binary_children)
-				{
-					if (child != no_visual_node &&
-						parent_priority > treap_priority(tree, child))
-					{
-						throw std::invalid_argument(
-							"Treap нарушает min-heap порядок приоритетов.");
-					}
-				}
-			}
-		}
-
-		static void validate_b_plus_tree_structure(
-			const visual_tree& tree,
-			search_tree_key_kind kind)
-		{
-			if (!tree.b_plus || tree.fanout < 3 || tree.fanout > 1'024)
-			{
-				throw std::invalid_argument(
-					"B+ дерево должно иметь fanout от 3 до 1024.");
-			}
-			if (tree.nodes.empty())
-			{
-				if (tree.root != no_visual_node)
-				{
-					throw std::invalid_argument(
-						"Пустое B+ дерево содержит неверный индекс корня.");
-				}
-				return;
-			}
-			if (tree.root >= tree.nodes.size())
-			{
-				throw std::invalid_argument(
-					"Корень B+ дерева ссылается на отсутствующий узел.");
-			}
-
-			struct key_reference
-			{
-				std::size_t node_index;
-				std::size_t key_index;
-			};
-			struct subtree_summary
-			{
-				key_reference minimum{};
-				key_reference maximum{};
-				std::size_t leaf_depth = 0;
-			};
-			struct validation_frame
-			{
-				std::size_t node_index;
-				std::size_t depth;
-				bool is_root;
-				bool expanded;
-			};
-
-			const auto key_value = [&](key_reference reference)
-				-> const visual_key::value_type&
-			{
-				return tree.nodes[reference.node_index]
-					.keys[reference.key_index].value;
-			};
-
-			std::vector<unsigned char> state(tree.nodes.size(), 0);
-			std::vector<subtree_summary> summaries(tree.nodes.size());
-			std::vector<validation_frame> pending{
-				{ tree.root, 0, true, false }
-			};
-			std::size_t visited_count = 0;
-			while (!pending.empty())
-			{
-				const auto frame = pending.back();
-				pending.pop_back();
-				if (frame.node_index >= tree.nodes.size() ||
-					frame.depth >= tree_serialization_parser::maximum_depth)
-				{
-					throw std::invalid_argument(
-						"B+ дерево содержит неверную ссылку или превышает допустимую глубину.");
-				}
-
-				const auto& node = tree.nodes[frame.node_index];
-				if (!frame.expanded)
-				{
-					if (state[frame.node_index] != 0)
-					{
-						throw std::invalid_argument(
-							"B+ дерево содержит цикл или повторную ссылку на узел.");
-					}
-					state[frame.node_index] = 1;
-					++visited_count;
-
-					if (node.leaf)
-					{
-						const std::size_t minimum_keys = frame.is_root
-							? 1
-							: tree.fanout / 2;
-						if (!node.children.empty() ||
-							node.keys.size() < minimum_keys ||
-							node.keys.size() >= tree.fanout)
-						{
-							throw std::invalid_argument(
-								"B+ лист нарушает ограничение количества ключей.");
-						}
-						for (std::size_t i = 1; i < node.keys.size(); ++i)
-						{
-							if (compare_search_tree_keys(
-								node.keys[i - 1].value,
-								node.keys[i].value,
-								kind) >= 0)
-							{
-								throw std::invalid_argument(
-									"Ключи B+ листа должны идти строго по возрастанию.");
-							}
-						}
-						summaries[frame.node_index] = {
-							{ frame.node_index, 0 },
-							{ frame.node_index, node.keys.size() - 1 },
-							frame.depth
-						};
-						state[frame.node_index] = 2;
-						continue;
-					}
-
-					const std::size_t child_count = node.children.size();
-					const std::size_t minimum_children = frame.is_root
-						? 2
-						: tree.fanout / 2 + tree.fanout % 2;
-					if (child_count != node.keys.size() + 1 ||
-						child_count < minimum_children ||
-						child_count > tree.fanout)
-					{
-						throw std::invalid_argument(
-							"B+ внутренний узел нарушает ограничение числа потомков.");
-					}
-					for (std::size_t i = 1; i < node.keys.size(); ++i)
-					{
-						if (compare_search_tree_keys(
-							node.keys[i - 1].value,
-							node.keys[i].value,
-							kind) >= 0)
-						{
-							throw std::invalid_argument(
-								"Ключи-разделители B+ должны идти строго по возрастанию.");
-						}
-					}
-
-					pending.push_back({
-						frame.node_index,
-						frame.depth,
-						frame.is_root,
-						true
-					});
-					for (auto child = node.children.rbegin();
-						child != node.children.rend();
-						++child)
-					{
-						if (*child == no_visual_node)
-						{
-							throw std::invalid_argument(
-								"B+ внутренний узел не может иметь пустого потомка.");
-						}
-						pending.push_back({
-							*child,
-							frame.depth + 1,
-							false,
-							false
-						});
-					}
-					continue;
-				}
-
-				const auto& children = node.children;
-				const auto& first_summary = summaries[children.front()];
-				const auto& last_summary = summaries[children.back()];
-				for (std::size_t i = 0; i < children.size(); ++i)
-				{
-					const auto& child_summary = summaries[children[i]];
-					if (child_summary.leaf_depth != first_summary.leaf_depth)
-					{
-						throw std::invalid_argument(
-							"Все листья B+ дерева должны иметь одинаковую глубину.");
-					}
-					if (i == 0)
-					{
-						continue;
-					}
-
-					const auto& separator = node.keys[i - 1].value;
-					if (compare_search_tree_keys(
-						key_value(child_summary.minimum),
-						separator,
-						kind) != 0 ||
-						compare_search_tree_keys(
-							key_value(summaries[children[i - 1]].maximum),
-							separator,
-							kind) >= 0)
-					{
-						throw std::invalid_argument(
-							"Разделитель B+ должен совпадать с минимумом правого поддерева и быть больше левого.");
-					}
-				}
-				summaries[frame.node_index] = {
-					first_summary.minimum,
-					last_summary.maximum,
-					first_summary.leaf_depth
-				};
-				state[frame.node_index] = 2;
-			}
-
-			if (visited_count != tree.nodes.size())
-			{
-				throw std::invalid_argument(
-					"B+ дерево содержит узлы, недостижимые из корня.");
-			}
-		}
-
 		static void synchronize_binary_children(visual_node& node)
 		{
 			node.children.clear();
@@ -9673,580 +9160,11 @@ namespace tree_practicum
 			return parents;
 		}
 
-		static void update_avl_node_height(
-			visual_tree& tree,
-			std::size_t node_index)
-		{
-			const auto left = tree.nodes[node_index].binary_children[0];
-			const auto right = tree.nodes[node_index].binary_children[1];
-			const std::size_t height =
-				std::max(avl_height(tree, left), avl_height(tree, right)) + 1;
-			tree.nodes[node_index].keys.front().detail =
-				std::to_string(height);
-		}
-
-		[[nodiscard]] static std::ptrdiff_t avl_balance_factor(
-			const visual_tree& tree,
-			std::size_t node_index)
-		{
-			const auto left = tree.nodes[node_index].binary_children[0];
-			const auto right = tree.nodes[node_index].binary_children[1];
-			const std::size_t left_height = avl_height(tree, left);
-			const std::size_t right_height = avl_height(tree, right);
-			return left_height >= right_height
-				? static_cast<std::ptrdiff_t>(left_height - right_height)
-				: -static_cast<std::ptrdiff_t>(right_height - left_height);
-		}
-
-		[[nodiscard]] static std::size_t rotate_avl_left(
-			visual_tree& tree,
-			std::size_t root)
-		{
-			const auto pivot = tree.nodes[root].binary_children[1];
-			if (pivot == no_visual_node)
-			{
-				throw std::logic_error("Левый поворот AVL не имеет правого узла.");
-			}
-			const auto pivot_left = tree.nodes[pivot].binary_children[0];
-			set_binary_child(tree, root, 1, pivot_left);
-			set_binary_child(tree, pivot, 0, root);
-			update_avl_node_height(tree, root);
-			update_avl_node_height(tree, pivot);
-			return pivot;
-		}
-
-		[[nodiscard]] static std::size_t rotate_avl_right(
-			visual_tree& tree,
-			std::size_t root)
-		{
-			const auto pivot = tree.nodes[root].binary_children[0];
-			if (pivot == no_visual_node)
-			{
-				throw std::logic_error("Правый поворот AVL не имеет левого узла.");
-			}
-			const auto pivot_right = tree.nodes[pivot].binary_children[1];
-			set_binary_child(tree, root, 0, pivot_right);
-			set_binary_child(tree, pivot, 1, root);
-			update_avl_node_height(tree, root);
-			update_avl_node_height(tree, pivot);
-			return pivot;
-		}
-
-		[[nodiscard]] static std::size_t rebalance_avl_subtree(
-			visual_tree& tree,
-			std::size_t root)
-		{
-			update_avl_node_height(tree, root);
-			const auto balance = avl_balance_factor(tree, root);
-			if (balance > 1)
-			{
-				const auto left = tree.nodes[root].binary_children[0];
-				if (avl_balance_factor(tree, left) < 0)
-				{
-					set_binary_child(
-						tree,
-						root,
-						0,
-						rotate_avl_left(tree, left));
-					update_avl_node_height(tree, root);
-				}
-				return rotate_avl_right(tree, root);
-			}
-			if (balance < -1)
-			{
-				const auto right = tree.nodes[root].binary_children[1];
-				if (avl_balance_factor(tree, right) > 0)
-				{
-					set_binary_child(
-						tree,
-						root,
-						1,
-						rotate_avl_right(tree, right));
-					update_avl_node_height(tree, root);
-				}
-				return rotate_avl_left(tree, root);
-			}
-			return root;
-		}
-
-		struct avl_insert_result
-		{
-			std::size_t root;
-			bool inserted;
-		};
-
-		[[nodiscard]] static avl_insert_result insert_avl_subtree(
-			visual_tree& tree,
-			std::size_t node_index,
-			visual_key& key,
-			search_tree_key_kind kind,
-			std::size_t depth)
-		{
-			if (depth >= tree_serialization_parser::maximum_depth)
-			{
-				throw std::length_error(
-					"Вставка превысила максимальную глубину AVL.");
-			}
-			if (node_index == no_visual_node)
-			{
-				if (tree.nodes.size() >=
-					tree_serialization_parser::maximum_node_count)
-				{
-					throw std::length_error(
-						"Достигнут лимит в 1 000 000 узлов.");
-				}
-				key.detail = "1";
-				visual_node inserted_node;
-				inserted_node.keys.push_back(std::move(key));
-				inserted_node.leaf = true;
-				const std::size_t inserted_index = tree.nodes.size();
-				tree.nodes.push_back(std::move(inserted_node));
-				return { inserted_index, true };
-			}
-			if (node_index >= tree.nodes.size())
-			{
-				throw std::invalid_argument(
-					"Узел AVL ссылается на отсутствующего потомка.");
-			}
-
-			std::size_t side = 0;
-			std::size_t child = no_visual_node;
-			{
-				const auto& node = tree.nodes[node_index];
-				if (node.keys.size() != 1)
-				{
-					throw std::invalid_argument(
-						"Узел AVL должен содержать ровно один ключ.");
-				}
-				const int comparison = compare_search_tree_keys(
-					key.value,
-					node.keys.front().value,
-					kind);
-				if (comparison == 0)
-				{
-					return { node_index, false };
-				}
-
-				side = comparison < 0 ? 0 : 1;
-				child = node.binary_children[side];
-			}
-
-			const auto child_result = insert_avl_subtree(
-				tree,
-				child,
-				key,
-				kind,
-				depth + 1);
-			if (!child_result.inserted)
-			{
-				return { node_index, false };
-			}
-
-			set_binary_child(
-				tree,
-				node_index,
-				side,
-				child_result.root);
-			return {
-				rebalance_avl_subtree(tree, node_index),
-				true
-			};
-		}
-
-		[[nodiscard]] static bool insert_avl_key(
-			visual_tree& tree,
-			visual_key key,
-			search_tree_key_kind kind)
-		{
-			if (tree.b_plus)
-			{
-				throw std::invalid_argument(
-					"AVL insertion received a B+ tree.");
-			}
-			if (tree.nodes.empty() && tree.root != no_visual_node)
-			{
-				throw std::invalid_argument(
-					"Пустое AVL содержит неверный индекс корня.");
-			}
-			if (!tree.nodes.empty() && tree.root >= tree.nodes.size())
-			{
-				throw std::invalid_argument(
-					"Корень AVL ссылается на отсутствующий узел.");
-			}
-
-			const auto result = insert_avl_subtree(
-				tree,
-				tree.root,
-				key,
-				kind,
-				0);
-			if (result.inserted)
-			{
-				tree.root = result.root;
-			}
-			return result.inserted;
-		}
-
-		[[nodiscard]] static std::size_t rotate_red_black_left(
-			visual_tree& tree,
-			std::vector<std::size_t>& parents,
-			std::size_t root)
-		{
-			const auto pivot = tree.nodes[root].binary_children[1];
-			if (pivot == no_visual_node)
-			{
-				throw std::logic_error(
-					"Левый поворот красно-чёрного дерева не имеет правого узла.");
-			}
-
-			const auto old_parent = parents[root];
-			std::size_t parent_side = 2;
-			if (old_parent == no_visual_node)
-			{
-				if (tree.root != root)
-				{
-					throw std::logic_error(
-						"Корень поворота красно-чёрного дерева потерял родителя.");
-				}
-			}
-			else if (tree.nodes[old_parent].binary_children[0] == root)
-			{
-				parent_side = 0;
-			}
-			else if (tree.nodes[old_parent].binary_children[1] == root)
-			{
-				parent_side = 1;
-			}
-			else
-			{
-				throw std::logic_error(
-					"Родитель узла поворота красно-чёрного дерева не ссылается на него.");
-			}
-
-			const auto pivot_left = tree.nodes[pivot].binary_children[0];
-			set_binary_child(tree, root, 1, pivot_left);
-			if (pivot_left != no_visual_node)
-			{
-				parents[pivot_left] = root;
-			}
-			set_binary_child(tree, pivot, 0, root);
-			parents[root] = pivot;
-			if (old_parent == no_visual_node)
-			{
-				tree.root = pivot;
-			}
-			else
-			{
-				set_binary_child(tree, old_parent, parent_side, pivot);
-			}
-			parents[pivot] = old_parent;
-			return pivot;
-		}
-
-		[[nodiscard]] static std::size_t rotate_red_black_right(
-			visual_tree& tree,
-			std::vector<std::size_t>& parents,
-			std::size_t root)
-		{
-			const auto pivot = tree.nodes[root].binary_children[0];
-			if (pivot == no_visual_node)
-			{
-				throw std::logic_error(
-					"Правый поворот красно-чёрного дерева не имеет левого узла.");
-			}
-
-			const auto old_parent = parents[root];
-			std::size_t parent_side = 2;
-			if (old_parent == no_visual_node)
-			{
-				if (tree.root != root)
-				{
-					throw std::logic_error(
-						"Корень поворота красно-чёрного дерева потерял родителя.");
-				}
-			}
-			else if (tree.nodes[old_parent].binary_children[0] == root)
-			{
-				parent_side = 0;
-			}
-			else if (tree.nodes[old_parent].binary_children[1] == root)
-			{
-				parent_side = 1;
-			}
-			else
-			{
-				throw std::logic_error(
-					"Родитель узла поворота красно-чёрного дерева не ссылается на него.");
-			}
-
-			const auto pivot_right = tree.nodes[pivot].binary_children[1];
-			set_binary_child(tree, root, 0, pivot_right);
-			if (pivot_right != no_visual_node)
-			{
-				parents[pivot_right] = root;
-			}
-			set_binary_child(tree, pivot, 1, root);
-			parents[root] = pivot;
-			if (old_parent == no_visual_node)
-			{
-				tree.root = pivot;
-			}
-			else
-			{
-				set_binary_child(tree, old_parent, parent_side, pivot);
-			}
-			parents[pivot] = old_parent;
-			return pivot;
-		}
-
-		static void fix_red_black_tree_after_insert(
-			visual_tree& tree,
-			std::vector<std::size_t>& parents,
-			std::size_t node_index)
-		{
-			while (node_index != tree.root)
-			{
-				const auto parent = parents[node_index];
-				if (parent == no_visual_node ||
-					!red_black_node_is_red(tree, parent))
-				{
-					break;
-				}
-
-				const auto grandparent = parents[parent];
-				if (grandparent == no_visual_node)
-				{
-					throw std::logic_error(
-						"Красный родитель красно-чёрного дерева не имеет деда.");
-				}
-				const auto grandparent_left =
-					tree.nodes[grandparent].binary_children[0];
-				if (grandparent_left == parent)
-				{
-					const auto uncle =
-						tree.nodes[grandparent].binary_children[1];
-					if (red_black_node_is_red(tree, uncle))
-					{
-						set_red_black_node_color(tree, parent, false);
-						set_red_black_node_color(tree, uncle, false);
-						set_red_black_node_color(tree, grandparent, true);
-						node_index = grandparent;
-						continue;
-					}
-
-					if (tree.nodes[parent].binary_children[1] == node_index)
-					{
-						node_index = parent;
-						(void)rotate_red_black_left(
-							tree,
-							parents,
-							node_index);
-					}
-					const auto adjusted_parent = parents[node_index];
-					if (adjusted_parent == no_visual_node)
-					{
-						throw std::logic_error(
-							"Не удалось найти родителя при балансировке красно-чёрного дерева.");
-					}
-					const auto adjusted_grandparent =
-						parents[adjusted_parent];
-					if (adjusted_grandparent == no_visual_node)
-					{
-						throw std::logic_error(
-							"Не удалось найти деда при балансировке красно-чёрного дерева.");
-					}
-					set_red_black_node_color(
-						tree,
-						adjusted_parent,
-						false);
-					set_red_black_node_color(
-						tree,
-						adjusted_grandparent,
-						true);
-					(void)rotate_red_black_right(
-						tree,
-						parents,
-						adjusted_grandparent);
-				}
-				else if (tree.nodes[grandparent].binary_children[1] == parent)
-				{
-					const auto uncle =
-						tree.nodes[grandparent].binary_children[0];
-					if (red_black_node_is_red(tree, uncle))
-					{
-						set_red_black_node_color(tree, parent, false);
-						set_red_black_node_color(tree, uncle, false);
-						set_red_black_node_color(tree, grandparent, true);
-						node_index = grandparent;
-						continue;
-					}
-
-					if (tree.nodes[parent].binary_children[0] == node_index)
-					{
-						node_index = parent;
-						(void)rotate_red_black_right(
-							tree,
-							parents,
-							node_index);
-					}
-					const auto adjusted_parent = parents[node_index];
-					if (adjusted_parent == no_visual_node)
-					{
-						throw std::logic_error(
-							"Не удалось найти родителя при балансировке красно-чёрного дерева.");
-					}
-					const auto adjusted_grandparent =
-						parents[adjusted_parent];
-					if (adjusted_grandparent == no_visual_node)
-					{
-						throw std::logic_error(
-							"Не удалось найти деда при балансировке красно-чёрного дерева.");
-					}
-					set_red_black_node_color(
-						tree,
-						adjusted_parent,
-						false);
-					set_red_black_node_color(
-						tree,
-						adjusted_grandparent,
-						true);
-					(void)rotate_red_black_left(
-						tree,
-						parents,
-						adjusted_grandparent);
-				}
-				else
-				{
-					throw std::logic_error(
-						"Красный родитель не является потомком своего деда.");
-				}
-			}
-			set_red_black_node_color(tree, tree.root, false);
-		}
-
-		[[nodiscard]] static bool insert_red_black_key(
-			visual_tree& tree,
-			visual_key key,
-			search_tree_key_kind kind)
-		{
-			if (tree.b_plus)
-			{
-				throw std::invalid_argument(
-					"Red-black insertion received a B+ tree.");
-			}
-			if (tree.nodes.empty())
-			{
-				if (tree.root != no_visual_node)
-				{
-					throw std::invalid_argument(
-						"Пустое красно-чёрное дерево содержит неверный индекс корня.");
-				}
-				key.detail = "1";
-				visual_node root;
-				root.keys.push_back(std::move(key));
-				root.leaf = true;
-				root.red = false;
-				tree.nodes.push_back(std::move(root));
-				tree.root = 0;
-				return true;
-			}
-			if (tree.root >= tree.nodes.size())
-			{
-				throw std::invalid_argument(
-					"Корень красно-чёрного дерева ссылается на отсутствующий узел.");
-			}
-
-			auto parents = build_binary_parent_index(tree);
-			std::size_t current = tree.root;
-			std::size_t depth = 0;
-			std::size_t parent = no_visual_node;
-			std::size_t side = 0;
-			while (true)
-			{
-				if (current >= tree.nodes.size())
-				{
-					throw std::invalid_argument(
-						"Красно-чёрное дерево ссылается на отсутствующий потомок.");
-				}
-				const auto& node = tree.nodes[current];
-				if (node.keys.size() != 1)
-				{
-					throw std::invalid_argument(
-						"Узел красно-чёрного дерева должен содержать ровно один ключ.");
-				}
-				const int comparison = compare_search_tree_keys(
-					key.value,
-					node.keys.front().value,
-					kind);
-				if (comparison == 0)
-				{
-					return false;
-				}
-
-				side = comparison < 0 ? 0 : 1;
-				const auto child = node.binary_children[side];
-				if (child == no_visual_node)
-				{
-					if (depth + 1 >=
-						tree_serialization_parser::maximum_depth)
-					{
-						throw std::length_error(
-							"Вставка превысила максимальную глубину красно-чёрного дерева.");
-					}
-					if (tree.nodes.size() >=
-						tree_serialization_parser::maximum_node_count)
-					{
-						throw std::length_error(
-							"Достигнут лимит в 1 000 000 узлов.");
-					}
-					parent = current;
-					break;
-				}
-				current = child;
-				++depth;
-			}
-
-			const std::size_t inserted_index = tree.nodes.size();
-			key.detail = "0";
-			visual_node inserted_node;
-			inserted_node.keys.push_back(std::move(key));
-			inserted_node.leaf = true;
-			inserted_node.red = true;
-			tree.nodes.push_back(std::move(inserted_node));
-			parents.push_back(parent);
-			set_binary_child(tree, parent, side, inserted_index);
-			fix_red_black_tree_after_insert(
-				tree,
-				parents,
-				inserted_index);
-			return true;
-		}
-
-		static void record_splay_animation_event(
-			std::vector<tree_visual_event>& events,
-			bool& capture_available,
-			tree_visual_event step)
-		{
-			if (!capture_available)
-			{
-				return;
-			}
-			if (events.size() >= maximum_tree_animation_steps)
-			{
-				events.clear();
-				capture_available = false;
-				return;
-			}
-			events.push_back(std::move(step));
-		}
-
 		static void rotate_splay_node_up(
 			visual_tree& tree,
 			std::size_t parent,
 			std::size_t child,
-			std::size_t grandparent,
-			std::vector<tree_visual_event>* events = nullptr,
-			bool* capture_available = nullptr)
+			std::size_t grandparent)
 		{
 			std::size_t parent_side = 2;
 			if (tree.nodes[parent].binary_children[0] == child)
@@ -10309,264 +9227,6 @@ namespace tree_practicum
 					grandparent,
 					grandparent_side,
 					child);
-			}
-			if (events && capture_available && *capture_available)
-			{
-				record_splay_animation_event(
-					*events,
-					*capture_available,
-					tree_visual_event{
-						tree_visual_event::kind::rotate_node_up,
-						child,
-						parent,
-						grandparent
-					});
-			}
-		}
-
-		static void splay_node_to_root(
-			visual_tree& tree,
-			std::vector<std::size_t>& ancestors,
-			std::size_t node_index,
-			std::vector<tree_visual_event>* events = nullptr,
-			bool* capture_available = nullptr)
-		{
-			while (!ancestors.empty())
-			{
-				const auto parent = ancestors.back();
-				ancestors.pop_back();
-				if (ancestors.empty())
-				{
-					rotate_splay_node_up(
-						tree,
-						parent,
-						node_index,
-						no_visual_node,
-						events,
-						capture_available);
-					break;
-				}
-
-				const auto grandparent = ancestors.back();
-				ancestors.pop_back();
-				const auto great_grandparent = ancestors.empty()
-					? no_visual_node
-					: ancestors.back();
-
-				std::size_t parent_side = 2;
-				if (tree.nodes[grandparent].binary_children[0] == parent)
-				{
-					parent_side = 0;
-				}
-				else if (tree.nodes[grandparent].binary_children[1] == parent)
-				{
-					parent_side = 1;
-				}
-				else
-				{
-					throw std::logic_error(
-						"Splay-путь потерял связь между родителем и дедом.");
-				}
-
-				std::size_t node_side = 2;
-				if (tree.nodes[parent].binary_children[0] == node_index)
-				{
-					node_side = 0;
-				}
-				else if (tree.nodes[parent].binary_children[1] == node_index)
-				{
-					node_side = 1;
-				}
-				else
-				{
-					throw std::logic_error(
-						"Splay-путь потерял связь между узлом и родителем.");
-				}
-
-				if (parent_side == node_side)
-				{
-					rotate_splay_node_up(
-						tree,
-						grandparent,
-						parent,
-						great_grandparent,
-						events,
-						capture_available);
-					rotate_splay_node_up(
-						tree,
-						parent,
-						node_index,
-						great_grandparent,
-						events,
-						capture_available);
-				}
-				else
-				{
-					rotate_splay_node_up(
-						tree,
-						parent,
-						node_index,
-						grandparent,
-						events,
-						capture_available);
-					rotate_splay_node_up(
-						tree,
-						grandparent,
-						node_index,
-						great_grandparent,
-						events,
-						capture_available);
-				}
-			}
-
-			if (tree.root != node_index)
-			{
-				throw std::logic_error(
-					"Splay-операция не подняла целевой узел в корень.");
-			}
-		}
-
-		[[nodiscard]] static tree_operation_result insert_splay_key(
-			visual_tree& tree,
-			visual_key key,
-			search_tree_key_kind kind,
-			bool collect_animation_events)
-		{
-			tree_operation_result result;
-			bool capture_available = collect_animation_events;
-			if (tree.b_plus)
-			{
-				throw std::invalid_argument(
-					"Splay insertion received a B+ tree.");
-			}
-			if (tree.nodes.empty())
-			{
-				if (tree.root != no_visual_node)
-				{
-					throw std::invalid_argument(
-						"Пустое Splay-дерево содержит неверный индекс корня.");
-				}
-				visual_node root;
-				root.keys.push_back(std::move(key));
-				root.leaf = true;
-				tree.nodes.push_back(std::move(root));
-				tree.root = 0;
-				result.inserted = true;
-				result.changed = true;
-				if (collect_animation_events)
-				{
-					record_splay_animation_event(
-						result.events,
-						capture_available,
-						tree_visual_event{
-							tree_visual_event::kind::insert_node,
-							0,
-							no_visual_node,
-							no_visual_node,
-							0,
-							tree.nodes.front()
-						});
-				}
-				result.animation_events_complete = capture_available;
-				return result;
-			}
-			if (tree.root >= tree.nodes.size())
-			{
-				throw std::invalid_argument(
-					"Корень Splay-дерева ссылается на отсутствующий узел.");
-			}
-
-			std::vector<std::size_t> ancestors;
-			std::size_t current = tree.root;
-			std::size_t depth = 0;
-			while (true)
-			{
-				if (current >= tree.nodes.size())
-				{
-					throw std::invalid_argument(
-						"Splay-дерево ссылается на отсутствующего потомка.");
-				}
-				const auto& node = tree.nodes[current];
-				if (node.keys.size() != 1)
-				{
-					throw std::invalid_argument(
-						"Узел Splay-дерева должен содержать ровно один ключ.");
-				}
-				const int comparison = compare_search_tree_keys(
-					key.value,
-					node.keys.front().value,
-					kind);
-				if (comparison == 0)
-				{
-					const bool changed = current != tree.root;
-					splay_node_to_root(
-						tree,
-						ancestors,
-						current,
-						collect_animation_events
-							? &result.events
-							: nullptr,
-						&capture_available);
-					result.inserted = false;
-					result.changed = changed;
-					result.animation_events_complete = capture_available;
-					return result;
-				}
-
-				const std::size_t side = comparison < 0 ? 0 : 1;
-				const auto child = node.binary_children[side];
-				if (child == no_visual_node)
-				{
-					if (depth + 1 >=
-						tree_serialization_parser::maximum_depth)
-					{
-						throw std::length_error(
-							"Вставка превысила максимальную глубину Splay-дерева.");
-					}
-					if (tree.nodes.size() >=
-						tree_serialization_parser::maximum_node_count)
-					{
-						throw std::length_error(
-							"Достигнут лимит в 1 000 000 узлов.");
-					}
-
-					const auto inserted_index = tree.nodes.size();
-					visual_node inserted_node;
-					inserted_node.keys.push_back(std::move(key));
-					inserted_node.leaf = true;
-					tree.nodes.push_back(std::move(inserted_node));
-					set_binary_child(tree, current, side, inserted_index);
-					if (collect_animation_events)
-					{
-						record_splay_animation_event(
-							result.events,
-							capture_available,
-							tree_visual_event{
-								tree_visual_event::kind::insert_node,
-								inserted_index,
-								current,
-								no_visual_node,
-								side,
-								tree.nodes[inserted_index]
-							});
-					}
-					ancestors.push_back(current);
-					splay_node_to_root(
-						tree,
-						ancestors,
-						inserted_index,
-						collect_animation_events
-							? &result.events
-							: nullptr,
-						&capture_available);
-					result.inserted = true;
-					result.changed = true;
-					result.animation_events_complete = capture_available;
-					return result;
-				}
-				ancestors.push_back(current);
-				current = child;
-				++depth;
 			}
 		}
 
@@ -10723,9 +9383,7 @@ namespace tree_practicum
 
 		enum class search_tree_serialization_metadata
 		{
-			none,
-			avl_height,
-			red_black_color
+			none
 		};
 
 		static void append_serialized_search_tree_subtree(
@@ -10757,16 +9415,6 @@ namespace tree_practicum
 			append_serialized_bst_key(output, node.keys.front().value);
 			if (metadata != search_tree_serialization_metadata::none)
 			{
-				if (metadata ==
-					search_tree_serialization_metadata::avl_height)
-				{
-					(void)avl_height(tree, node_index);
-				}
-				else if (metadata ==
-					search_tree_serialization_metadata::red_black_color)
-				{
-					(void)red_black_node_is_red(tree, node_index);
-				}
 				output.push_back('|');
 				output += node.keys.front().detail;
 			}
@@ -10806,178 +9454,79 @@ namespace tree_practicum
 			return serialization;
 		}
 
-		[[nodiscard]] static std::string serialize_avl_tree(
-			const visual_tree& tree)
+		static const std::array<demo_tree_entry, 1>& demo_trees()
 		{
-			if (tree.b_plus)
+			static const std::array<demo_tree_entry, 1> trees = []
 			{
-				throw std::invalid_argument(
-					"Невозможно сериализовать B+ дерево как AVL.");
-			}
-			std::string serialization = "avl{";
-			append_serialized_search_tree_subtree(
-				tree,
-				tree.root,
-				0,
-				serialization,
-				search_tree_serialization_metadata::avl_height);
-			serialization.push_back('}');
-			return serialization;
-		}
-
-		[[nodiscard]] static std::string serialize_red_black_tree(
-			const visual_tree& tree)
-		{
-			if (tree.b_plus)
-			{
-				throw std::invalid_argument(
-					"Невозможно сериализовать B+ дерево как красно-чёрное.");
-			}
-			std::string serialization = "rb_tree{";
-			append_serialized_search_tree_subtree(
-				tree,
-				tree.root,
-				0,
-				serialization,
-				search_tree_serialization_metadata::red_black_color);
-			serialization.push_back('}');
-			return serialization;
-		}
-
-		[[nodiscard]] static std::string serialize_splay_tree(
-			const visual_tree& tree)
-		{
-			if (tree.b_plus)
-			{
-				throw std::invalid_argument(
-					"Невозможно сериализовать B+ дерево как Splay.");
-			}
-			std::string serialization = "splay{";
-			append_serialized_search_tree_subtree(
-				tree,
-				tree.root,
-				0,
-				serialization,
-				search_tree_serialization_metadata::none);
-			serialization.push_back('}');
-			return serialization;
-		}
-
-		static const std::array<visual_tree, 6>& demo_trees()
-		{
-			static const std::array<visual_tree, 6> trees = []
-			{
-				std::array<visual_tree, 6> result{};
+				std::array<demo_tree_entry, 1> result{{
+					{ tree_practicum::mods::ids::bst, {} }
+				}};
 				constexpr std::array<std::int64_t, 7> integer_values{
 					42, 18, 73, 9, 27, 58, 91
-				};
-				constexpr std::array<double, 7> floating_values{
-					42.125, 18.75, 73.5, 9.25, 27.625, 58.875, 91.0
-				};
-				constexpr std::array<std::string_view, 7> text_values{
-					"root", "alpha", "omega", "a-very-long-key-name",
-					"beta", "middle", "zeta"
-				};
-				constexpr std::array<std::string_view, 7> big_integer_values{
-					"42000000000000000000",
-					"18000000000000000000",
-					"73000000000000000000",
-					"9000000000000000000",
-					"27000000000000000000",
-					"58000000000000000000",
-					"91000000000000000000"
-				};
-				constexpr std::array<std::string_view, 7> priorities{
-					"p=90", "p=70", "p=80", "p=40", "p=50", "p=60", "p=30"
 				};
 				constexpr std::array<std::array<int, 2>, 7> binary_children{ {
 					{ 1, 2 }, { 3, 4 }, { 5, 6 }, { -1, -1 },
 					{ -1, -1 }, { -1, -1 }, { -1, -1 }
 				} };
 
-				for (std::size_t tree_index = 0; tree_index < 5; ++tree_index)
+				auto& tree = result.front().value;
+				for (std::size_t i = 0; i < integer_values.size(); ++i)
 				{
-					auto& tree = result[tree_index];
-					for (std::size_t i = 0; i < integer_values.size(); ++i)
+					visual_node node;
+					node.keys.push_back(
+						make_integer_key(integer_values[i]));
+					for (std::size_t side = 0; side < 2; ++side)
 					{
-						visual_node node;
-						switch (tree_index)
+						const int child = binary_children[i][side];
+						if (child >= 0)
 						{
-						case 1:
-							node.keys.push_back(
-								make_double_key(floating_values[i]));
-							break;
-						case 3:
-							node.keys.push_back(
-								make_text_key(text_values[i]));
-							break;
-						case 4:
-							node.keys.push_back(
-								make_big_integer_key(
-									big_integer_values[i],
-									priorities[i]));
-							break;
-						default:
-							node.keys.push_back(
-								make_integer_key(integer_values[i]));
-							break;
+							node.binary_children[side] =
+								static_cast<std::size_t>(child);
+							node.children.push_back(
+								static_cast<std::size_t>(child));
 						}
-						for (std::size_t side = 0; side < 2; ++side)
-						{
-							const int child = binary_children[i][side];
-							if (child >= 0)
-							{
-								node.binary_children[side] =
-									static_cast<std::size_t>(child);
-								node.children.push_back(
-									static_cast<std::size_t>(child));
-							}
-						}
-						node.leaf = node.children.empty();
-						node.red = tree_index == 2 && (i == 1 || i == 2);
-						tree.nodes.push_back(std::move(node));
 					}
+					node.leaf = node.children.empty();
+					tree.nodes.push_back(std::move(node));
 				}
-
-				auto& b_plus = result[5];
-				b_plus.b_plus = true;
-				visual_node root;
-				root.keys = {
-					make_big_integer_key("20000000000000000000"),
-					make_big_integer_key("40000000000000000000")
-				};
-				root.children = { 1, 2, 3 };
-				b_plus.nodes.push_back(std::move(root));
-
-				visual_node first_leaf;
-				first_leaf.keys = {
-					make_big_integer_key("5000000000000000000"),
-					make_big_integer_key("10000000000000000000")
-				};
-				first_leaf.leaf = true;
-				first_leaf.next_leaf = 2;
-				b_plus.nodes.push_back(std::move(first_leaf));
-
-				visual_node second_leaf;
-				second_leaf.keys = {
-					make_big_integer_key("20000000000000000000"),
-					make_big_integer_key("30000000000000000000")
-				};
-				second_leaf.leaf = true;
-				second_leaf.next_leaf = 3;
-				b_plus.nodes.push_back(std::move(second_leaf));
-
-				visual_node third_leaf;
-				third_leaf.keys = {
-					make_big_integer_key("40000000000000000000"),
-					make_big_integer_key("50000000000000000000"),
-					make_big_integer_key("60000000000000000000")
-				};
-				third_leaf.leaf = true;
-				b_plus.nodes.push_back(std::move(third_leaf));
 				return result;
 			}();
 			return trees;
+		}
+
+		[[nodiscard]] const visual_tree& demo_tree_for(
+			tree_practicum::mods::tree_id algorithm_id)
+		{
+			const auto& trees = demo_trees();
+			const auto found = std::find_if(
+				trees.begin(),
+				trees.end(),
+				[algorithm_id](const auto& entry)
+				{
+					return entry.algorithm_id == algorithm_id;
+				});
+			if (algorithm_id == tree_practicum::mods::ids::bst &&
+				found != trees.end() && tree_algorithm_for(algorithm_id))
+			{
+				return found->value;
+			}
+
+			const auto* algorithm = tree_algorithm_for(algorithm_id);
+			const auto* type = available_tree_type_for(algorithm_id);
+			if (algorithm && type)
+			{
+				auto [empty, inserted] = m_empty_demo_trees.try_emplace(
+					std::string(algorithm_id));
+				if (inserted)
+				{
+					empty->second = algorithm->create_empty(
+						default_tree_key_kind(type->algorithm));
+				}
+				return empty->second;
+			}
+
+			static const visual_tree empty_tree{};
+			return empty_tree;
 		}
 
 		[[nodiscard]] static std::size_t count_visual_keys(
@@ -11174,6 +9723,9 @@ namespace tree_practicum
 
 		void invalidate_tree_preview_cache() noexcept
 		{
+			m_hovered_tree_node.reset();
+			m_hovered_tree_node_algorithm_id.clear();
+			m_invariant_report_cached = false;
 			if (m_tree_preview_revision ==
 				std::numeric_limits<std::uint64_t>::max())
 			{
@@ -11405,7 +9957,7 @@ namespace tree_practicum
 		[[nodiscard]] std::shared_ptr<const tree_preview_geometry>
 			get_tree_preview_geometry(
 				const visual_tree& tree,
-				std::size_t tree_index,
+				tree_practicum::mods::tree_id algorithm_id,
 				bool current_tree_loaded,
 				bool showing_animation,
 				std::size_t cache_index)
@@ -11418,8 +9970,7 @@ namespace tree_practicum
 			if (cache.geometry &&
 				cache.geometry->revision ==
 					m_tree_preview_revision &&
-				cache.geometry->tree_index ==
-					static_cast<int>(tree_index) &&
+				cache.geometry->algorithm_id == algorithm_id &&
 				cache.geometry->current_tree_loaded ==
 					current_tree_loaded &&
 				cache.geometry->showing_animation ==
@@ -11435,7 +9986,7 @@ namespace tree_practicum
 				tree.nodes.size() < maximum_animated_tree_nodes
 				? tree_animation_tree_signature(tree)
 				: 0;
-			geometry->tree_index = static_cast<int>(tree_index);
+			geometry->algorithm_id = algorithm_id;
 			geometry->current_tree_loaded = current_tree_loaded;
 			geometry->showing_animation = showing_animation;
 			geometry->animation_step = animation_step;
@@ -11456,7 +10007,7 @@ namespace tree_practicum
 					target.annotation = source.leaf ? "leaf" : "index";
 					target.children = source.children;
 				}
-				else if (tree_index == 2)
+				else if (algorithm_id == tree_practicum::mods::ids::red_black)
 				{
 					target.style = source.red
 						? mngl::two_d::tree_node_style::red
@@ -11503,17 +10054,19 @@ namespace tree_practicum
 					target.keys.push_back(
 						format_visual_value(key.value, inner_width));
 					if (key.detail.empty() ||
-						(tree_index == 2 && !tree.b_plus))
+						(algorithm_id == tree_practicum::mods::ids::red_black &&
+							!tree.b_plus))
 					{
 						continue;
 					}
 
 					std::string metadata = key.detail;
-					if (tree_index == 1 && !metadata.starts_with("h="))
+					if (algorithm_id == tree_practicum::mods::ids::avl &&
+						!metadata.starts_with("h="))
 					{
 						metadata.insert(0, "h=");
 					}
-					else if (tree_index == 4 &&
+					else if (algorithm_id == tree_practicum::mods::ids::treap &&
 						!metadata.starts_with("p="))
 					{
 						metadata.insert(0, "p=");
@@ -11547,9 +10100,10 @@ namespace tree_practicum
 			};
 			options.edge_color = rgb(114.0f, 128.0f, 148.0f);
 			options.node_border = rgb(111.0f, 174.0f, 215.0f);
-			options.node_fill = tree_index == 3
+			options.node_fill = algorithm_id ==
+				tree_practicum::mods::ids::splay
 				? rgb(53.0f, 49.0f, 94.0f)
-				: tree_index == 4
+				: algorithm_id == tree_practicum::mods::ids::treap
 					? rgb(62.0f, 48.0f, 87.0f)
 					: rgb(35.0f, 57.0f, 77.0f);
 			options.red_node_fill = rgb(147.0f, 47.0f, 57.0f);
@@ -11736,7 +10290,7 @@ namespace tree_practicum
 		}
 
 		void draw_tree_preview(
-			std::size_t tree_index,
+			tree_practicum::mods::tree_id algorithm_id,
 			tree_canvas_view_state* canvas_state = nullptr,
 			const visual_tree* tree_override = nullptr,
 			std::string_view archive_path = {},
@@ -11751,9 +10305,9 @@ namespace tree_practicum
 			auto& canvas_texture = canvas_state
 				? canvas_state->texture
 				: m_tree_canvas_texture;
-			auto& canvas_tree_index = canvas_state
-				? canvas_state->tree_index
-				: m_tree_canvas_tree_index;
+		auto& canvas_algorithm_id = canvas_state
+				? canvas_state->algorithm_id
+			: m_tree_canvas_tree_id;
 			auto& canvas_zoom = canvas_state
 				? canvas_state->zoom
 				: m_tree_canvas_zoom;
@@ -11794,29 +10348,28 @@ namespace tree_practicum
 			const bool current_tree_loaded = tree_override
 				? true
 				: m_loaded_visual_tree.has_value() &&
-					m_loaded_tree_index == static_cast<int>(tree_index);
+					m_loaded_tree_id == algorithm_id;
 			const bool preview_tree_is_active =
 				!tree_override ||
 				archive_path == m_current_archive_member_path;
 			if (preview_tree_is_active)
 			{
 				advance_tree_animation(
-					static_cast<int>(tree_index),
+					algorithm_id,
 					ImGui::GetIO().DeltaTime);
 			}
 			const bool showing_animation =
 				preview_tree_is_active &&
 				current_tree_loaded &&
 				m_tree_animation.has_value() &&
-				m_tree_animation->tree_index ==
-					static_cast<int>(tree_index);
+				m_tree_animation->algorithm_id == algorithm_id;
 			const auto& tree = showing_animation
 				? m_tree_animation->tree
 				: tree_override
 					? *tree_override
 				: current_tree_loaded
 					? *m_loaded_visual_tree
-					: demo_trees()[tree_index];
+					: demo_tree_for(algorithm_id);
 			if (tree.nodes.empty())
 			{
 				ImGui::TextDisabled(
@@ -11863,8 +10416,12 @@ namespace tree_practicum
 				}
 				else
 				{
+					const auto animation_name = tree_name_for(
+						m_tree_animation->algorithm_id);
 					ImGui::TextDisabled(
-						"Вставка Splay: шаг %zu из %zu.",
+						"Анимация %.*s: шаг %zu из %zu.",
+						static_cast<int>(animation_name.size()),
+						animation_name.data(),
 						m_tree_animation->next_event,
 						m_tree_animation->events.size());
 				}
@@ -11872,7 +10429,7 @@ namespace tree_practicum
 
 			const auto geometry = get_tree_preview_geometry(
 				tree,
-				tree_index,
+				algorithm_id,
 				current_tree_loaded,
 				showing_animation,
 				cache_index);
@@ -12014,10 +10571,9 @@ namespace tree_practicum
 					}
 					return zoom;
 				};
-				const int current_tree_index = static_cast<int>(tree_index);
-				if (canvas_tree_index != current_tree_index)
+				if (canvas_algorithm_id != algorithm_id)
 				{
-					canvas_tree_index = current_tree_index;
+					canvas_algorithm_id = algorithm_id;
 					canvas_view_initialized = false;
 				}
 
@@ -12250,8 +10806,7 @@ namespace tree_practicum
 					hovered_key &&
 					current_tree_loaded &&
 					!showing_animation &&
-					search_tree_algorithm_for(
-						static_cast<int>(tree_index)) != nullptr &&
+					tree_algorithm_for(algorithm_id) != nullptr &&
 					(std::holds_alternative<double>(hovered_key->value) ||
 						std::holds_alternative<std::int64_t>(
 							hovered_key->value));
@@ -12262,6 +10817,14 @@ namespace tree_practicum
 					{
 						m_hovered_tree_comparison_pane = cache_index;
 					}
+				}
+				if (hovered_node >= 0 && current_tree_loaded &&
+					algorithm_id == m_active_tree_id && !showing_animation)
+				{
+					m_hovered_tree_node =
+						static_cast<std::size_t>(hovered_node);
+					m_hovered_tree_node_algorithm_id =
+						std::string(algorithm_id);
 				}
 				if (hovered_node >= 0 &&
 					ImGui::IsMouseClicked(ImGuiMouseButton_Right))
@@ -12277,8 +10840,7 @@ namespace tree_practicum
 				if (current_tree_loaded &&
 					preview_tree_is_active &&
 					m_tree_find_result_valid &&
-					m_tree_find_tree_index ==
-						static_cast<int>(tree_index))
+					m_tree_find_tree_id == algorithm_id)
 				{
 					for (const std::size_t node_index : m_tree_find_path)
 					{
@@ -12521,23 +11083,30 @@ namespace tree_practicum
 						if (context_menu_key)
 						{
 							ImGui::Separator();
-							if (ImGui::MenuItem("Найти ключ"))
+							if (supports_tool_operation(
+								tree_tool_operation::find) &&
+								ImGui::MenuItem("Найти ключ"))
 							{
 								context_menu_action =
 									tree_tool_operation::find;
 							}
-							if (ImGui::MenuItem("Удалить ключ [D / Del]"))
+							if (supports_tool_operation(
+								tree_tool_operation::erase) &&
+								ImGui::MenuItem("Удалить ключ [D / Del]"))
 							{
 								context_menu_action =
 									tree_tool_operation::erase;
 							}
-							if (ImGui::MenuItem("Split по ключу [C]"))
+							if (supports_tool_operation(
+								tree_tool_operation::split) &&
+								ImGui::MenuItem("Split по ключу [C]"))
 							{
 								context_menu_action =
 									tree_tool_operation::split;
 							}
 						}
-						if (can_insert_into_selected_search_tree() &&
+						if (supports_tool_operation(
+							tree_tool_operation::insert) &&
 							ImGui::MenuItem("Вставить ключ..."))
 						{
 							context_menu_action =
@@ -12661,20 +11230,40 @@ namespace tree_practicum
 				"find, insert, mass insert, random test...",
 				m_function_filter.data(),
 				m_function_filter.size());
+			auto function_entries = available_functions();
+			if (m_tree_filter >= static_cast<int>(m_available_tree_types.size()))
+			{
+				m_tree_filter = -1;
+			}
+			if (m_selected_function < 0 ||
+				m_selected_function >= static_cast<int>(function_entries.size()))
+			{
+				m_selected_function = 0;
+			}
 
-			const char* tree_filter_name = m_tree_filter < 0
-				? "Все деревья"
-				: tree_names[static_cast<std::size_t>(m_tree_filter)].data();
+			std::string tree_filter_name_storage = "Все деревья";
+			if (m_tree_filter >= 0)
+			{
+				tree_filter_name_storage = std::string(
+					m_available_tree_types[
+						static_cast<std::size_t>(m_tree_filter)]
+						.algorithm.display_name);
+			}
+			const char* tree_filter_name = tree_filter_name_storage.c_str();
 			if (ImGui::BeginCombo("Дерево##FunctionFilter", tree_filter_name))
 			{
 				if (ImGui::Selectable("Все деревья", m_tree_filter < 0))
 				{
 					m_tree_filter = -1;
 				}
-				for (std::size_t i = 0; i < tree_names.size(); ++i)
+				for (std::size_t i = 0;
+					i < m_available_tree_types.size();
+					++i)
 				{
+					const std::string display_name(
+						m_available_tree_types[i].algorithm.display_name);
 					if (ImGui::Selectable(
-						tree_names[i].data(),
+						display_name.c_str(),
 						m_tree_filter == static_cast<int>(i)))
 					{
 						m_tree_filter = static_cast<int>(i);
@@ -12692,11 +11281,12 @@ namespace tree_practicum
 				{ 0.0f, list_height },
 				ImGuiChildFlags_Borders))
 			{
-				for (std::size_t i = 0; i < functions.size(); ++i)
+				for (std::size_t i = 0; i < function_entries.size(); ++i)
 				{
-					const auto& function = functions[i];
+					const auto& function = function_entries[i];
 					if (m_tree_filter >= 0 &&
-						function.tree_index != static_cast<std::size_t>(m_tree_filter))
+						function.algorithm_id != m_available_tree_types[
+							static_cast<std::size_t>(m_tree_filter)].algorithm.id)
 					{
 						continue;
 					}
@@ -12721,8 +11311,9 @@ namespace tree_practicum
 					ImGui::SameLine();
 					ImGui::TextDisabled(
 						"%.*s",
-						static_cast<int>(tree_names[function.tree_index].size()),
-						tree_names[function.tree_index].data());
+						static_cast<int>(tree_name_for(
+							function.algorithm_id).size()),
+						tree_name_for(function.algorithm_id).data());
 					ImGui::TextDisabled(
 						"%.*s",
 						static_cast<int>(function.signature.size()),
@@ -12736,11 +11327,12 @@ namespace tree_practicum
 			}
 			ImGui::EndChild();
 
-			const auto& selected = functions[
+			const auto& selected = function_entries[
 				static_cast<std::size_t>(m_selected_function)];
 			const bool selected_matches =
 				(m_tree_filter < 0 ||
-					selected.tree_index == static_cast<std::size_t>(m_tree_filter)) &&
+					selected.algorithm_id == m_available_tree_types[
+						static_cast<std::size_t>(m_tree_filter)].algorithm.id) &&
 				function_matches_query(selected, query);
 			ImGui::Separator();
 			if (!selected_matches)
@@ -12758,6 +11350,75 @@ namespace tree_practicum
 				static_cast<int>(selected.description.size()),
 				selected.description.data());
 
+			if (selected.definition && selected.definition->custom)
+			{
+				const bool selected_tree_is_open =
+					selected.algorithm_id == m_active_tree_id &&
+					m_loaded_visual_tree.has_value() &&
+					m_loaded_tree_id == m_active_tree_id;
+				if (!selected_tree_is_open)
+				{
+					if (ImGui::Button("Перейти к выбранному типу дерева"))
+					{
+						select_tree(selected.algorithm_id);
+						m_last_action =
+							"Выберите сериализацию дерева этого типа в проводнике.";
+					}
+					ImGui::SameLine();
+					ImGui::TextDisabled(
+						"Сначала откройте дерево типа %.*s.",
+						static_cast<int>(tree_name_for(
+							selected.algorithm_id).size()),
+						tree_name_for(selected.algorithm_id).data());
+					return;
+				}
+
+				const auto& command = *selected.definition;
+				auto& inputs = m_custom_command_inputs[
+					command_identity(command.algorithm_id, command.name)];
+				inputs.resize(command.parameters.size());
+				for (std::size_t i = 0; i < command.parameters.size(); ++i)
+				{
+					const auto& parameter = command.parameters[i];
+					ImGui::PushID(static_cast<int>(i));
+					(void)ImGui::InputTextWithHint(
+						parameter.label.c_str(),
+						parameter.hint.empty()
+							? parameter.type.c_str()
+							: parameter.hint.c_str(),
+						inputs[i].data(),
+						inputs[i].size());
+					ImGui::PopID();
+				}
+
+				const auto* handler = tree_command_handler_for(
+					command.algorithm_id);
+				const bool can_execute = handler &&
+					handler->supports_command(command.name) &&
+					m_loaded_search_tree_valid &&
+					m_loaded_search_tree_key_kind.has_value();
+				ImGui::BeginDisabled(!can_execute);
+				const bool execute_clicked = ImGui::Button("Выполнить команду");
+				ImGui::EndDisabled();
+				if (execute_clicked)
+				{
+					execute_custom_command(command, inputs);
+				}
+				if (!m_custom_command_error.empty())
+				{
+					ImGui::TextColored(
+						{ 1.0f, 0.42f, 0.38f, 1.0f },
+						"%s",
+						m_custom_command_error.c_str());
+				}
+				if (!handler)
+				{
+					ImGui::TextDisabled(
+						"Обработчик команды мода не зарегистрирован.");
+				}
+				return;
+			}
+
 			const bool implemented_tree_operation =
 				selected.name == "find" ||
 				selected.name == "insert" ||
@@ -12768,28 +11429,30 @@ namespace tree_practicum
 			if (implemented_tree_operation)
 			{
 				const bool selected_tree_is_open =
-					selected.tree_index == static_cast<std::size_t>(m_active_tree) &&
+					selected.algorithm_id == m_active_tree_id &&
 					m_loaded_visual_tree.has_value() &&
-					m_loaded_tree_index == m_active_tree;
+					m_loaded_tree_id == m_active_tree_id;
 				if (!selected_tree_is_open)
 				{
 					if (ImGui::Button("Перейти к выбранному типу дерева"))
 					{
-						select_tree(static_cast<int>(selected.tree_index));
+						select_tree(selected.algorithm_id);
 						m_last_action =
 							"Выберите сериализацию дерева этого типа в проводнике.";
 					}
 					ImGui::SameLine();
 					ImGui::TextDisabled(
 						"Сначала откройте дерево типа %.*s.",
-						static_cast<int>(tree_names[
-							selected.tree_index].size()),
-						tree_names[selected.tree_index].data());
+						static_cast<int>(tree_name_for(
+							selected.algorithm_id).size()),
+						tree_name_for(selected.algorithm_id).data());
 					return;
 				}
 
-				const bool can_operate =
-					can_insert_into_selected_search_tree();
+				const auto selected_operation =
+					tree_tool_for_function(selected.name);
+				const bool can_operate = selected_operation &&
+					supports_tool_operation(*selected_operation);
 				ImGui::BeginDisabled(
 					!can_operate);
 				const char* action_label =
@@ -12806,7 +11469,7 @@ namespace tree_practicum
 					: "Разделить [C]";
 				const bool action_clicked = ImGui::Button(action_label);
 				ImGui::EndDisabled();
-				if (action_clicked)
+				if (action_clicked && selected_operation)
 				{
 					if (selected.name == "find")
 					{
@@ -12852,11 +11515,153 @@ namespace tree_practicum
 
 			if (ImGui::Button("Выбрать тип нового дерева"))
 			{
-				select_tree(static_cast<int>(selected.tree_index));
+				select_tree(selected.algorithm_id);
 				m_last_action = "Выбран тип для следующего нового файла.";
 				ImGui::SameLine();
 				ImGui::TextDisabled(
 					"операция пока не подключена");
+			}
+		}
+
+		[[nodiscard]] static std::string command_identity(
+			std::string_view algorithm_id,
+			std::string_view command_id)
+		{
+			std::string result(algorithm_id);
+			result.push_back('\n');
+			result.append(command_id);
+			return result;
+		}
+
+		void execute_custom_command(
+			const owned_function_entry& command,
+			const std::vector<std::array<char, 256>>& inputs)
+		{
+			clear_tree_find_result();
+			m_custom_command_error.clear();
+			try
+			{
+				const auto* handler = tree_command_handler_for(
+					command.algorithm_id);
+				const auto* algorithm = tree_algorithm_for(command.algorithm_id);
+				if (!handler || !handler->supports_command(command.name) ||
+					!algorithm || !m_loaded_visual_tree ||
+					!m_loaded_search_tree_key_kind)
+				{
+					throw std::logic_error(
+						"Команда или открытое дерево больше недоступны.");
+				}
+				if (inputs.size() != command.parameters.size())
+				{
+					throw std::logic_error(
+						"Число полей команды не совпадает с её описанием.");
+				}
+
+				std::vector<mngl::mods::tree::command_argument> arguments;
+				arguments.reserve(command.parameters.size());
+				for (std::size_t i = 0; i < command.parameters.size(); ++i)
+				{
+					const auto& parameter = command.parameters[i];
+					const std::string_view input(inputs[i].data());
+					if (parameter.type == "text" ||
+						parameter.type == "bit_string")
+					{
+						arguments.emplace_back(std::string(input));
+					}
+					else if (parameter.type == "int64")
+					{
+						std::int64_t value = 0;
+						const auto parsed = std::from_chars(
+							input.data(), input.data() + input.size(), value);
+						if (input.empty() || parsed.ec != std::errc{} ||
+							parsed.ptr != input.data() + input.size())
+						{
+							throw std::invalid_argument(
+								"Параметр «" + parameter.label +
+								"» должен быть целым int64_t.");
+						}
+						arguments.emplace_back(value);
+					}
+					else if (parameter.type == "double")
+					{
+						double value = 0.0;
+						const auto parsed = std::from_chars(
+							input.data(), input.data() + input.size(), value,
+							std::chars_format::general);
+						if (input.empty() || parsed.ec != std::errc{} ||
+							parsed.ptr != input.data() + input.size() ||
+							!std::isfinite(value))
+						{
+							throw std::invalid_argument(
+								"Параметр «" + parameter.label +
+								"» должен быть конечным числом.");
+						}
+						arguments.emplace_back(value);
+					}
+					else if (parameter.type == "boolean")
+					{
+						if (input == "true" || input == "1")
+							arguments.emplace_back(true);
+						else if (input == "false" || input == "0")
+							arguments.emplace_back(false);
+						else
+							throw std::invalid_argument(
+								"Параметр «" + parameter.label +
+								"» должен быть true/false или 1/0.");
+					}
+					else
+					{
+						throw std::logic_error(
+							"Описание команды содержит неизвестный тип параметра.");
+					}
+				}
+
+				cancel_tree_animation();
+				m_tree_operation_error.clear();
+				auto updated_tree = *m_loaded_visual_tree;
+				const auto key_kind = *m_loaded_search_tree_key_kind;
+				auto result = handler->execute(
+					command.name,
+					updated_tree,
+					key_kind,
+					std::span<const mngl::mods::tree::command_argument>(
+						arguments));
+				if (std::any_of(
+					result.highlighted_nodes.begin(),
+					result.highlighted_nodes.end(),
+					[&](std::size_t index)
+					{
+						return index >= updated_tree.nodes.size();
+					}))
+				{
+					throw std::invalid_argument(
+						"Обработчик вернул индекс узла вне дерева.");
+				}
+				if (result.changed)
+				{
+					algorithm->validate(updated_tree, key_kind);
+					auto serialization = algorithm->serialize(updated_tree);
+					store_search_tree_update(
+						std::move(updated_tree),
+						std::move(serialization),
+						key_kind);
+				}
+				m_tree_find_path = std::move(result.highlighted_nodes);
+				m_tree_find_tree_id = m_active_tree_id;
+				m_tree_find_result_valid = true;
+				m_tree_find_found = true;
+				m_tree_find_status = result.message.empty()
+					? "Команда мода выполнена."
+					: std::move(result.message);
+				m_last_action = m_tree_find_status;
+			}
+			catch (const std::exception& error)
+			{
+				m_custom_command_error = error.what();
+				m_tree_find_tree_id = m_active_tree_id;
+				m_tree_find_result_valid = true;
+				m_tree_find_status = "Ошибка команды: " + m_custom_command_error;
+				m_last_action = m_tree_find_status;
 			}
 		}
 
@@ -12880,14 +11685,17 @@ namespace tree_practicum
 						"Рабочая область: %s",
 						m_session_name.c_str());
 					ImGui::SameLine();
-					ImGui::Text("Дерево: %s", tree_names[
-						static_cast<std::size_t>(m_active_tree)].data());
+					ImGui::Text(
+						"Дерево: %.*s",
+						static_cast<int>(tree_name_for(
+							m_active_tree_id).size()),
+						tree_name_for(m_active_tree_id).data());
 					const bool empty_workspace =
 						m_current_tree_name.empty() &&
 						!m_show_demo_trees;
 					const bool current_tree_loaded =
 						m_loaded_visual_tree.has_value() &&
-						m_loaded_tree_index == m_active_tree;
+						m_loaded_tree_id == m_active_tree_id;
 					if (empty_workspace)
 					{
 						ImGui::TextDisabled(
@@ -12897,8 +11705,7 @@ namespace tree_practicum
 					{
 						const auto& displayed_tree = current_tree_loaded
 							? *m_loaded_visual_tree
-							: demo_trees()[
-								static_cast<std::size_t>(m_active_tree)];
+							: demo_tree_for(m_active_tree_id);
 						ImGui::Text(
 							"%s: %zu узлов · ключей: %zu",
 							current_tree_loaded ? "Загружено" : "Демо",
@@ -13018,6 +11825,11 @@ namespace tree_practicum
 						m_last_action.data());
 					ImGui::EndTabItem();
 				}
+				if (ImGui::BeginTabItem("Инварианты и ход"))
+				{
+					draw_invariants_and_operation();
+					ImGui::EndTabItem();
+				}
 				if (ImGui::BeginTabItem("Журнал"))
 				{
 					if (ImGui::SmallButton("Очистить"))
@@ -13056,6 +11868,242 @@ namespace tree_practicum
 					ImGui::EndTabItem();
 				}
 				ImGui::EndTabBar();
+			}
+		}
+
+		void draw_invariants_and_operation()
+		{
+			const bool tree_is_open = m_loaded_visual_tree.has_value() &&
+				m_loaded_tree_id == m_active_tree_id &&
+				m_loaded_search_tree_valid;
+			if (!tree_is_open)
+			{
+				ImGui::TextDisabled(
+					"Откройте корректный файл дерева, чтобы проверить его инварианты.");
+				return;
+			}
+
+			const auto* type = available_tree_type_for(m_active_tree_id);
+			const auto* inspector = tree_invariant_inspector_for(m_active_tree_id);
+			if (!type || !inspector)
+			{
+				ImGui::TextDisabled(
+					"Для этого типа дерева мод не предоставил инспектор инвариантов.");
+				return;
+			}
+			const auto key_kind = m_loaded_search_tree_key_kind.value_or(
+				default_tree_key_kind(type->algorithm));
+			if (!m_invariant_report_cached ||
+				m_invariant_report_tree_id != m_active_tree_id ||
+				m_invariant_report_revision != m_tree_preview_revision ||
+				m_invariant_report_key_kind != key_kind)
+			{
+				m_invariant_report = {};
+				m_invariant_report_error.clear();
+				try
+				{
+					m_invariant_report = inspector->inspect(
+						*m_loaded_visual_tree,
+						key_kind);
+				}
+				catch (const std::exception& error)
+				{
+					m_invariant_report_error = error.what();
+				}
+				m_invariant_report_tree_id = m_active_tree_id;
+				m_invariant_report_revision = m_tree_preview_revision;
+				m_invariant_report_key_kind = key_kind;
+				m_invariant_report_cached = true;
+			}
+
+			ImGui::TextDisabled("ПРОВЕРКА СТРУКТУРЫ");
+			if (!m_invariant_report_error.empty())
+			{
+				ImGui::TextColored(
+					{ 1.0f, 0.42f, 0.38f, 1.0f },
+					"Проверка завершилась ошибкой: %s",
+					m_invariant_report_error.c_str());
+			}
+			else if (m_invariant_report.checks.empty())
+			{
+				ImGui::TextDisabled("Инспектор не вернул проверок.");
+			}
+			else
+			{
+				for (std::size_t i = 0;
+					i < m_invariant_report.checks.size();
+					++i)
+				{
+					const auto& check = m_invariant_report.checks[i];
+					ImGui::PushID(static_cast<int>(i));
+					ImGui::TextColored(
+						check.passed
+							? ImVec4{ 0.43f, 0.86f, 0.58f, 1.0f }
+							: ImVec4{ 1.0f, 0.42f, 0.38f, 1.0f },
+						"%s %s",
+						check.passed ? "✓" : "✗",
+						check.name.c_str());
+					ImGui::TextWrapped("%s", check.detail.c_str());
+					ImGui::PopID();
+				}
+			}
+
+			ImGui::Separator();
+			ImGui::TextDisabled("МЕТРИКИ УЗЛА");
+			const bool hovered_node_available =
+				m_hovered_tree_node.has_value() &&
+				m_hovered_tree_node_algorithm_id == m_active_tree_id &&
+				*m_hovered_tree_node < m_loaded_visual_tree->nodes.size();
+			if (hovered_node_available)
+			{
+				ImGui::TextDisabled(
+					"Последний узел под курсором: %zu",
+					*m_hovered_tree_node);
+				ImGui::SameLine();
+				if (ImGui::SmallButton("Показать##HoveredInvariantNode"))
+				{
+					m_invariant_selected_node = static_cast<int>(
+						std::min<std::size_t>(
+							*m_hovered_tree_node,
+							static_cast<std::size_t>(
+								std::numeric_limits<int>::max())));
+				}
+			}
+			if (m_invariant_selected_node < 0 &&
+				!m_loaded_visual_tree->nodes.empty())
+			{
+				m_invariant_selected_node = 0;
+			}
+			if (!m_loaded_visual_tree->nodes.empty())
+			{
+				ImGui::SetNextItemWidth(110.0f);
+				(void)ImGui::InputInt(
+					"Индекс узла",
+					&m_invariant_selected_node);
+				m_invariant_selected_node = std::clamp(
+					m_invariant_selected_node,
+					0,
+					static_cast<int>(std::min<std::size_t>(
+						m_loaded_visual_tree->nodes.size() - 1,
+						static_cast<std::size_t>(
+							std::numeric_limits<int>::max()))));
+				try
+				{
+					const auto details = inspector->describe_node(
+						*m_loaded_visual_tree,
+						key_kind,
+						static_cast<std::size_t>(m_invariant_selected_node));
+					ImGui::TextWrapped("%s", details.c_str());
+				}
+				catch (const std::exception& error)
+				{
+					ImGui::TextColored(
+						{ 1.0f, 0.42f, 0.38f, 1.0f },
+						"Не удалось прочитать узел: %s",
+						error.what());
+				}
+			}
+			else
+			{
+				ImGui::TextDisabled("Дерево пустое.");
+			}
+
+			ImGui::Separator();
+			ImGui::TextDisabled("ХОД ОПЕРАЦИИ");
+			ImGui::TextWrapped("%s", m_last_action.c_str());
+			if (m_tree_animation &&
+				m_tree_animation->algorithm_id == m_active_tree_id)
+			{
+				if (m_tree_animation->mode == tree_animation_mode::step_events)
+				{
+					ImGui::Text(
+						"Шаг анимации: %zu / %zu",
+						m_tree_animation->next_event,
+						m_tree_animation->events.size());
+					if (m_tree_animation->active_event)
+					{
+						const auto& event =
+							*m_tree_animation->active_event;
+						const char* action =
+							event.action == tree_visual_event::kind::insert_node
+							? "Создание узла"
+							: "Поворот узла вверх";
+						const auto parent_label =
+							event.parent_index == no_visual_node
+							? std::string("∅")
+							: std::to_string(event.parent_index);
+						ImGui::Text(
+							"%s · узел %zu · родитель %s",
+							action,
+							event.node_index,
+							parent_label.c_str());
+					}
+				}
+				else
+				{
+					const float progress = std::clamp(
+						m_tree_animation->elapsed_seconds /
+							tree_layout_animation_seconds,
+						0.0f,
+						1.0f);
+					ImGui::ProgressBar(progress, { -1.0f, 0.0f }, "Переход раскладки");
+				}
+			}
+			else if (m_tree_find_result_valid &&
+				m_tree_find_tree_id == m_active_tree_id)
+			{
+				ImGui::Text(
+					"Узлы результата: %zu",
+					m_tree_find_path.size());
+				if (ImGui::BeginChild(
+					"InvariantOperationTrace",
+					{ 0.0f, 110.0f },
+					ImGuiChildFlags_Borders))
+				{
+					const auto visible_count = std::min<std::size_t>(
+						m_tree_find_path.size(),
+						static_cast<std::size_t>(
+							std::numeric_limits<int>::max()));
+					ImGuiListClipper clipper;
+					clipper.Begin(static_cast<int>(visible_count));
+					while (clipper.Step())
+					{
+						for (int i = clipper.DisplayStart;
+							i < clipper.DisplayEnd;
+							++i)
+						{
+							const auto node_index = m_tree_find_path[
+								static_cast<std::size_t>(i)];
+							if (node_index >= m_loaded_visual_tree->nodes.size())
+							{
+								ImGui::Text("%d. узел %zu (вне дерева)", i + 1, node_index);
+								continue;
+							}
+							const auto& node =
+								m_loaded_visual_tree->nodes[node_index];
+							std::string labels;
+							for (std::size_t key_index = 0;
+								key_index < node.keys.size();
+								++key_index)
+							{
+								if (key_index != 0) labels += ", ";
+								labels += full_visual_value(
+									node.keys[key_index].value);
+							}
+							ImGui::Text(
+								"%d. узел %zu · %s",
+								i + 1,
+								node_index,
+								labels.c_str());
+						}
+					}
+				}
+				ImGui::EndChild();
+			}
+			else
+			{
+				ImGui::TextDisabled(
+					"Детальный путь доступен для поиска; текущая операция сообщает только итог.");
 			}
 		}
 
@@ -13228,32 +12276,63 @@ namespace tree_practicum
 				"Случайная вставка поддерживает только int64_t и конечный double.");
 		}
 
-		class tree_operation_algorithm
+		class tree_operation_algorithm : public tree_practicum::mods::algorithm
 		{
 		public:
-			virtual ~tree_operation_algorithm() = default;
-			[[nodiscard]] virtual std::size_t tree_index() const noexcept = 0;
-			[[nodiscard]] virtual std::string_view name() const noexcept = 0;
-			virtual void validate(
+			[[nodiscard]] virtual std::string_view name() const noexcept
+			{
+				return info().display_name;
+			}
+
+			[[nodiscard]] visual_tree create_empty(
+				tree_practicum::mods::key_kind) const override
+			{
+				visual_tree result;
+				result.root = no_visual_node;
+				return result;
+			}
+
+			[[nodiscard]] tree_practicum::mods::document deserialize(
+				std::string_view source) const override
+			{
+				std::string parsed_id;
+				auto result = parse_tree_serialization(source, parsed_id);
+				if (parsed_id != id())
+				{
+					throw tree_serialization_error(
+						"Tree serialization belongs to a different algorithm");
+				}
+				const auto keys = infer_search_tree_key_kind(result);
+				return {
+					std::string(id()),
+					std::move(result),
+					keys
+				};
+			}
+
+			void validate(
 				const visual_tree& tree,
-				search_tree_key_kind kind) const = 0;
-			[[nodiscard]] virtual tree_find_result find(
+				search_tree_key_kind kind) const override = 0;
+
+			[[nodiscard]] tree_find_result find(
 				visual_tree& tree,
 				const visual_key& key,
-				search_tree_key_kind kind) const
+				search_tree_key_kind kind) const override
 			{
 				return find_visual_search_tree(tree, key, kind);
 			}
-			[[nodiscard]] virtual tree_operation_result insert(
+
+			[[nodiscard]] tree_operation_result insert(
 				visual_tree& tree,
 				visual_key key,
 				search_tree_key_kind kind,
-				bool collect_animation_events) const = 0;
-			[[nodiscard]] virtual tree_bulk_insert_result insert_many(
+				bool collect_animation_events) const override = 0;
+
+			[[nodiscard]] tree_bulk_insert_result insert_many(
 				visual_tree& tree,
 				std::uint64_t requested_count,
 				search_tree_key_kind kind,
-				std::mt19937_64& random_engine) const
+				std::mt19937_64& random_engine) const override
 			{
 				tree_bulk_insert_result result;
 				while (result.inserted_count < requested_count)
@@ -13272,15 +12351,13 @@ namespace tree_practicum
 				}
 				return result;
 			}
-			[[nodiscard]] virtual std::string serialize(
-				const visual_tree& tree) const = 0;
-			[[nodiscard]] virtual tree_erase_result erase(
+			[[nodiscard]] tree_erase_result erase(
 				visual_tree& tree,
 				const visual_key& key,
-				search_tree_key_kind kind) const
+				search_tree_key_kind kind) const override
 			{
 				const auto result = erase_native_search_tree(
-					tree_index(),
+					id(),
 					tree,
 					key,
 					kind);
@@ -13288,7 +12365,7 @@ namespace tree_practicum
 				{
 					tree = parse_native_operation_tree(
 						result.serialization,
-						tree_index(),
+						id(),
 						kind);
 				}
 				return {
@@ -13296,13 +12373,14 @@ namespace tree_practicum
 					result.changed
 				};
 			}
-			[[nodiscard]] virtual bool merge(
+
+			[[nodiscard]] bool merge(
 				visual_tree& left,
 				const visual_tree& right,
-				search_tree_key_kind kind) const
+				search_tree_key_kind kind) const override
 			{
 				const auto result = merge_native_search_trees(
-					tree_index(),
+					id(),
 					left,
 					right,
 					kind);
@@ -13310,44 +12388,41 @@ namespace tree_practicum
 				{
 					left = parse_native_operation_tree(
 						result.serialization,
-						tree_index(),
+						id(),
 						kind);
 				}
 				return result.changed;
 			}
-			[[nodiscard]] virtual std::pair<visual_tree, visual_tree> split(
+
+			[[nodiscard]] std::pair<visual_tree, visual_tree> split(
 				const visual_tree& tree,
 				const visual_key& pivot,
-				search_tree_key_kind kind) const
+				search_tree_key_kind kind) const override
 			{
 				auto serializations = split_native_search_tree(
-					tree_index(),
+					id(),
 					tree,
 					pivot,
 					kind);
 				return {
 					parse_native_operation_tree(
 						serializations.first,
-						tree_index(),
+						id(),
 						kind),
 					parse_native_operation_tree(
 						serializations.second,
-						tree_index(),
+						id(),
 						kind)
 				};
-			}
-			[[nodiscard]] virtual bool supports_animation() const noexcept
-			{
-				return false;
 			}
 		};
 
 		class bst_tree_algorithm final : public tree_operation_algorithm
 		{
 		public:
-			[[nodiscard]] std::size_t tree_index() const noexcept override
+			[[nodiscard]] const tree_practicum::mods::algorithm_info& info() const noexcept override
 			{
-				return 0;
+				return tree_type_for(tree_practicum::mods::ids::bst)->algorithm;
 			}
 
 			[[nodiscard]] std::string_view name() const noexcept override
@@ -13382,279 +12457,77 @@ namespace tree_practicum
 			}
 		};
 
-		class avl_tree_algorithm final : public tree_operation_algorithm
+		class bst_tree_invariant_inspector final :
+			public mngl::mods::tree::invariant_inspector
 		{
 		public:
-			[[nodiscard]] std::size_t tree_index() const noexcept override
+			[[nodiscard]] std::string_view algorithm_id() const noexcept override
 			{
-				return 1;
+				return tree_practicum::mods::ids::bst;
 			}
 
-			[[nodiscard]] std::string_view name() const noexcept override
-			{
-				return "AVL";
-			}
-
-			void validate(
+			[[nodiscard]] mngl::mods::tree::invariant_report inspect(
 				const visual_tree& tree,
-				search_tree_key_kind kind) const override
+				search_tree_key_kind keys) const override
 			{
-				validate_search_tree_structure(tree, kind);
-				validate_avl_structure(tree);
-			}
-
-			[[nodiscard]] tree_operation_result insert(
-				visual_tree& tree,
-				visual_key key,
-				search_tree_key_kind kind,
-				bool) const override
-			{
-				const bool inserted = insert_avl_key(
-					tree,
-					std::move(key),
-					kind);
-				return { inserted, inserted, true, {} };
-			}
-
-			[[nodiscard]] std::string serialize(
-				const visual_tree& tree) const override
-			{
-				return serialize_avl_tree(tree);
-			}
-		};
-
-		class red_black_tree_algorithm final
-			: public tree_operation_algorithm
-		{
-		public:
-			[[nodiscard]] std::size_t tree_index() const noexcept override
-			{
-				return 2;
-			}
-
-			[[nodiscard]] std::string_view name() const noexcept override
-			{
-				return "красно-чёрное дерево";
-			}
-
-			void validate(
-				const visual_tree& tree,
-				search_tree_key_kind kind) const override
-			{
-				validate_search_tree_structure(tree, kind);
-				validate_red_black_structure(tree);
-			}
-
-			[[nodiscard]] tree_operation_result insert(
-				visual_tree& tree,
-				visual_key key,
-				search_tree_key_kind kind,
-				bool) const override
-			{
-				const bool inserted = insert_red_black_key(
-					tree,
-					std::move(key),
-					kind);
-				return { inserted, inserted, true, {} };
-			}
-
-			[[nodiscard]] tree_bulk_insert_result insert_many(
-				visual_tree& tree,
-				std::uint64_t requested_count,
-				search_tree_key_kind kind,
-				std::mt19937_64& random_engine) const override
-			{
-				return insert_native_search_tree_many(
-					tree,
-					requested_count,
-					kind,
-					tree_index(),
-					random_engine);
-			}
-
-			[[nodiscard]] std::string serialize(
-				const visual_tree& tree) const override
-			{
-				return serialize_red_black_tree(tree);
-			}
-		};
-
-		class splay_tree_algorithm final : public tree_operation_algorithm
-		{
-		public:
-			[[nodiscard]] std::size_t tree_index() const noexcept override
-			{
-				return 3;
-			}
-
-			[[nodiscard]] std::string_view name() const noexcept override
-			{
-				return "Splay";
-			}
-
-			void validate(
-				const visual_tree& tree,
-				search_tree_key_kind kind) const override
-			{
-				validate_search_tree_structure(tree, kind);
-			}
-
-			[[nodiscard]] tree_find_result find(
-				visual_tree& tree,
-				const visual_key& key,
-				search_tree_key_kind kind) const override
-			{
-				if (kind == search_tree_key_kind::signed_integer)
+				mngl::mods::tree::invariant_report report;
+				try
 				{
-					return find_splay_search_tree_typed<std::int64_t>(
-						tree,
-						key);
+					validate_search_tree_structure(tree, keys);
+					report.checks.push_back({
+						"Порядок BST",
+						true,
+						"Для каждого узла ключи слева меньше, а ключи справа больше.",
+					});
+					report.checks.push_back({
+						"Связность структуры",
+						true,
+						"Нет циклов и недостижимых узлов; каждый узел содержит один ключ.",
+					});
 				}
-				if (kind == search_tree_key_kind::floating_point)
+				catch (const std::exception& error)
 				{
-					return find_splay_search_tree_typed<double>(
-						tree,
-						key);
+					report.checks.push_back({
+						"Структура BST",
+						false,
+						std::format("Нарушение: {}", error.what()),
+					});
 				}
-				throw std::invalid_argument(
-					"Поиск поддерживает только int64_t и конечный double.");
+				return report;
 			}
 
-			[[nodiscard]] tree_operation_result insert(
-				visual_tree& tree,
-				visual_key key,
-				search_tree_key_kind kind,
-				bool collect_animation_events) const override
-			{
-				return insert_splay_key(
-					tree,
-					std::move(key),
-					kind,
-					collect_animation_events);
-			}
-
-			[[nodiscard]] std::string serialize(
-				const visual_tree& tree) const override
-			{
-				return serialize_splay_tree(tree);
-			}
-
-			[[nodiscard]] bool supports_animation() const noexcept override
-			{
-				return true;
-			}
-		};
-
-		class treap_tree_algorithm final : public tree_operation_algorithm
-		{
-		public:
-			[[nodiscard]] std::size_t tree_index() const noexcept override
-			{
-				return 4;
-			}
-
-			[[nodiscard]] std::string_view name() const noexcept override
-			{
-				return "Treap";
-			}
-
-			void validate(
+			[[nodiscard]] std::string describe_node(
 				const visual_tree& tree,
-				search_tree_key_kind kind) const override
+				search_tree_key_kind,
+				std::size_t node_index) const override
 			{
-				validate_search_tree_structure(tree, kind);
-				validate_treap_structure(tree);
-			}
-
-			[[nodiscard]] tree_operation_result insert(
-				visual_tree& tree,
-				visual_key key,
-				search_tree_key_kind kind,
-				bool) const override
-			{
-				return insert_native_search_tree(
-					tree,
-					std::move(key),
-					kind,
-					tree_index());
-			}
-
-			[[nodiscard]] tree_bulk_insert_result insert_many(
-				visual_tree& tree,
-				std::uint64_t requested_count,
-				search_tree_key_kind kind,
-				std::mt19937_64& random_engine) const override
-			{
-				return insert_native_search_tree_many(
-					tree,
-					requested_count,
-					kind,
-					tree_index(),
-					random_engine);
-			}
-
-			[[nodiscard]] std::string serialize(
-				const visual_tree& tree) const override
-			{
-				return serialize_native_search_tree(
-					tree,
-					tree_index());
-			}
-		};
-
-		class b_plus_tree_algorithm final : public tree_operation_algorithm
-		{
-		public:
-			[[nodiscard]] std::size_t tree_index() const noexcept override
-			{
-				return 5;
-			}
-
-			[[nodiscard]] std::string_view name() const noexcept override
-			{
-				return "B+";
-			}
-
-			void validate(
-				const visual_tree& tree,
-				search_tree_key_kind kind) const override
-			{
-				validate_b_plus_tree_structure(tree, kind);
-			}
-
-			[[nodiscard]] tree_operation_result insert(
-				visual_tree& tree,
-				visual_key key,
-				search_tree_key_kind kind,
-				bool) const override
-			{
-				return insert_native_search_tree(
-					tree,
-					std::move(key),
-					kind,
-					tree_index());
-			}
-
-			[[nodiscard]] tree_bulk_insert_result insert_many(
-				visual_tree& tree,
-				std::uint64_t requested_count,
-				search_tree_key_kind kind,
-				std::mt19937_64& random_engine) const override
-			{
-				return insert_native_search_tree_many(
-					tree,
-					requested_count,
-					kind,
-					tree_index(),
-					random_engine);
-			}
-
-			[[nodiscard]] std::string serialize(
-				const visual_tree& tree) const override
-			{
-				return serialize_native_search_tree(
-					tree,
-					tree_index());
+				if (node_index >= tree.nodes.size())
+				{
+					throw std::out_of_range("Индекс узла BST вне дерева.");
+				}
+				const auto& current = tree.nodes[node_index];
+				if (current.keys.size() != 1)
+				{
+					throw std::invalid_argument(
+						"Узел BST должен содержать ровно один ключ.");
+				}
+				const auto child_label = [&](std::size_t child)
+				{
+					if (child == no_visual_node) return std::string("∅");
+					if (child >= tree.nodes.size() ||
+						tree.nodes[child].keys.size() != 1)
+					{
+						throw std::invalid_argument(
+							"Дочерний узел BST содержит неверную ссылку.");
+					}
+					return full_visual_value(
+						tree.nodes[child].keys.front().value);
+				};
+				return std::format(
+					"Ключ: {} · левый потомок: {} · правый потомок: {}",
+					full_visual_value(current.keys.front().value),
+					child_label(current.binary_children[0]),
+					child_label(current.binary_children[1]));
 			}
 		};
 
@@ -13696,30 +12569,7 @@ namespace tree_practicum
 				}
 				const Value value = native_key_value<Value>(
 					source.keys.front());
-				if constexpr (std::is_same_v<NativeTree, avl<Value>>)
-				{
-					nodes[i] = std::make_unique<node_type>(
-						value,
-						avl_height(tree, i));
-				}
-				else if constexpr (std::is_same_v<NativeTree, rb_tree<Value>>)
-				{
-					nodes[i] = std::make_unique<node_type>(
-						value,
-						red_black_node_is_red(tree, i)
-							? rb_color::red
-							: rb_color::black);
-				}
-				else if constexpr (std::is_same_v<NativeTree, treap<Value>>)
-				{
-					nodes[i] = std::make_unique<node_type>(
-						value,
-						treap_priority(tree, i));
-				}
-				else
-				{
-					nodes[i] = std::make_unique<node_type>(value);
-				}
+				nodes[i] = std::make_unique<node_type>(value);
 				raw_nodes[i] = nodes[i].get();
 			}
 
@@ -13767,86 +12617,16 @@ namespace tree_practicum
 			return NativeTree::from_validated_root(std::move(root));
 		}
 
-		template<class Value, class Visitor>
-		static void for_each_b_plus_value(
-			const visual_tree& tree,
-			Visitor&& visitor)
-		{
-			if (!tree.b_plus)
-			{
-				throw std::invalid_argument(
-					"Ожидалось B+ дерево.");
-			}
-			if (tree.nodes.empty())
-			{
-				return;
-			}
-
-			std::size_t leaf_index = tree.root;
-			while (leaf_index < tree.nodes.size() &&
-				!tree.nodes[leaf_index].leaf)
-			{
-				const auto& children = tree.nodes[leaf_index].children;
-				if (children.empty())
-				{
-					throw std::invalid_argument(
-						"B+ внутренний узел не содержит потомков.");
-				}
-				leaf_index = children.front();
-			}
-
-			std::size_t visited_leaves = 0;
-			while (leaf_index != no_visual_node)
-			{
-				if (leaf_index >= tree.nodes.size() ||
-					!tree.nodes[leaf_index].leaf ||
-					++visited_leaves > tree.nodes.size())
-				{
-					throw std::invalid_argument(
-						"B+ дерево содержит неверную связь между листьями.");
-				}
-				const auto& leaf = tree.nodes[leaf_index];
-				for (const auto& key : leaf.keys)
-				{
-					visitor(native_key_value<Value>(key));
-				}
-				leaf_index = leaf.next_leaf;
-			}
-		}
-
-		template<class Value>
-		[[nodiscard]] static b_plus_tree<Value> make_native_b_plus_tree(
-			const visual_tree& tree)
-		{
-			if (!tree.b_plus || tree.fanout < 3 || tree.fanout > 1'024)
-			{
-				throw std::invalid_argument(
-					"B+ дерево должно иметь fanout от 3 до 1024.");
-			}
-			b_plus_tree<Value> result(tree.fanout);
-			for_each_b_plus_value<Value>(
-				tree,
-				[&](const Value& value)
-				{
-					if (!result.insert(value))
-					{
-						throw std::invalid_argument(
-							"B+ дерево содержит повторный ключ.");
-					}
-				});
-			return result;
-		}
-
 		[[nodiscard]] static visual_tree parse_native_operation_tree(
 			std::string_view serialization,
-			std::size_t expected_tree_index,
+			tree_practicum::mods::tree_id expected_algorithm_id,
 			search_tree_key_kind expected_key_kind)
 		{
-			std::size_t parsed_tree_index = 0;
+			std::string parsed_algorithm_id;
 			auto tree = parse_tree_serialization(
 				serialization,
-				parsed_tree_index);
-			if (parsed_tree_index != expected_tree_index)
+				parsed_algorithm_id);
+			if (parsed_algorithm_id != expected_algorithm_id)
 			{
 				throw std::logic_error(
 					"Нативная операция изменила тип дерева.");
@@ -13858,7 +12638,7 @@ namespace tree_practicum
 					"Нативная операция изменила тип ключей.");
 			}
 			const auto* algorithm = search_tree_algorithm_for(
-				static_cast<int>(expected_tree_index));
+				expected_algorithm_id);
 			if (!algorithm)
 			{
 				throw std::logic_error(
@@ -13871,294 +12651,17 @@ namespace tree_practicum
 		}
 
 		template<class Value>
-		[[nodiscard]] static tree_find_result
-			find_splay_search_tree_typed(
-				visual_tree& tree,
-				const visual_key& key)
-		{
-			auto result = find_visual_search_tree_typed<Value>(tree, key);
-			if (result.path.empty())
-			{
-				return result;
-			}
-			const std::size_t visited_nodes = result.visited_nodes;
-			const bool found = result.found;
-			const auto target = result.path.back();
-			if (target == tree.root)
-			{
-				return result;
-			}
-			auto ancestors = std::move(result.path);
-			ancestors.pop_back();
-
-			splay_node_to_root(tree, ancestors, target);
-			result = find_visual_search_tree_typed<Value>(tree, key);
-			if (result.found != found)
-			{
-				throw std::logic_error(
-					"Результат поиска изменился после перестройки Splay.");
-			}
-			result.visited_nodes = visited_nodes;
-			result.changed = true;
-			return result;
-		}
-
-		template<class Value>
-		[[nodiscard]] static std::string serialize_native_search_tree_typed(
-			const visual_tree& tree,
-			std::size_t tree_index)
-		{
-			switch (tree_index)
-			{
-			case 0:
-				return make_native_binary_tree<bst<Value>, Value>(tree)
-					.to_string();
-			case 1:
-				return make_native_binary_tree<avl<Value>, Value>(tree)
-					.to_string();
-			case 2:
-				return make_native_binary_tree<rb_tree<Value>, Value>(tree)
-					.to_string();
-			case 3:
-				return make_native_binary_tree<splay_tree<Value>, Value>(tree)
-					.to_string();
-			case 4:
-				return make_native_binary_tree<treap<Value>, Value>(tree)
-					.to_string();
-			case 5:
-				return make_native_b_plus_tree<Value>(tree).to_string();
-			default:
-				throw std::invalid_argument(
-					"Неизвестный тип дерева поиска.");
-			}
-		}
-
-		[[nodiscard]] static std::string serialize_native_search_tree(
-			const visual_tree& tree,
-			std::size_t tree_index)
-		{
-			const auto key_kind = infer_search_tree_key_kind(tree);
-			if (!key_kind ||
-				*key_kind == search_tree_key_kind::signed_integer)
-			{
-				return serialize_native_search_tree_typed<std::int64_t>(
-					tree,
-					tree_index);
-			}
-			if (*key_kind == search_tree_key_kind::floating_point)
-			{
-				return serialize_native_search_tree_typed<double>(
-					tree,
-					tree_index);
-			}
-			throw std::invalid_argument(
-				"Операции поддерживают только int64_t и конечный double.");
-		}
-
-		template<class Value, class NativeTree>
-		[[nodiscard]] static std::uint64_t insert_random_native_values(
-			NativeTree& native_tree,
-			std::uint64_t requested_count,
-			search_tree_key_kind kind,
-			std::mt19937_64& random_engine)
-		{
-			std::uint64_t inserted_count = 0;
-			while (inserted_count < requested_count)
-			{
-				const auto key = make_random_search_tree_key(
-					kind,
-					random_engine);
-				if (native_tree.insert(native_key_value<Value>(key)))
-				{
-					++inserted_count;
-				}
-			}
-			return inserted_count;
-		}
-
-		template<class Value>
-		[[nodiscard]] static tree_bulk_insert_result
-			insert_native_search_tree_many_typed(
-				visual_tree& tree,
-				std::uint64_t requested_count,
-				search_tree_key_kind kind,
-				std::size_t tree_index,
-				std::mt19937_64& random_engine)
-		{
-			if (requested_count == 0)
-			{
-				return {};
-			}
-
-			std::uint64_t inserted_count = 0;
-			std::string serialization;
-			if (tree_index == 2)
-			{
-				auto native =
-					make_native_binary_tree<rb_tree<Value>, Value>(tree);
-				inserted_count = insert_random_native_values<Value>(
-					native,
-					requested_count,
-					kind,
-					random_engine);
-				serialization = native.to_string();
-			}
-			else if (tree_index == 4)
-			{
-				auto native =
-					make_native_binary_tree<treap<Value>, Value>(tree);
-				inserted_count = insert_random_native_values<Value>(
-					native,
-					requested_count,
-					kind,
-					random_engine);
-				serialization = native.to_string();
-			}
-			else if (tree_index == 5)
-			{
-				auto native = make_native_b_plus_tree<Value>(tree);
-				inserted_count = insert_random_native_values<Value>(
-					native,
-					requested_count,
-					kind,
-					random_engine);
-				serialization = native.to_string();
-			}
-			else
-			{
-				throw std::invalid_argument(
-					"Нативная массовая вставка не поддерживается для этого алгоритма.");
-			}
-
-			tree = parse_native_operation_tree(
-				serialization,
-				tree_index,
-				kind);
-			return {
-				inserted_count,
-				std::optional<std::string>{
-					std::move(serialization)
-				}
-			};
-		}
-
-		[[nodiscard]] static tree_bulk_insert_result
-			insert_native_search_tree_many(
-				visual_tree& tree,
-				std::uint64_t requested_count,
-				search_tree_key_kind kind,
-				std::size_t tree_index,
-				std::mt19937_64& random_engine)
-		{
-			if (kind == search_tree_key_kind::signed_integer)
-			{
-				return insert_native_search_tree_many_typed<std::int64_t>(
-					tree,
-					requested_count,
-					kind,
-					tree_index,
-					random_engine);
-			}
-			if (kind == search_tree_key_kind::floating_point)
-			{
-				return insert_native_search_tree_many_typed<double>(
-					tree,
-					requested_count,
-					kind,
-					tree_index,
-					random_engine);
-			}
-			throw std::invalid_argument(
-				"Операции поддерживают только int64_t и конечный double.");
-		}
-
-		template<class Value>
-		[[nodiscard]] static tree_operation_result insert_native_search_tree_typed(
-			visual_tree& tree,
-			const visual_key& key,
-			search_tree_key_kind kind,
-			std::size_t tree_index)
-		{
-			const Value value = native_key_value<Value>(key);
-			bool inserted = false;
-			std::string serialization;
-			if (tree_index == 4)
-			{
-				auto native = make_native_binary_tree<treap<Value>, Value>(tree);
-				inserted = native.insert(value);
-				if (inserted)
-				{
-					serialization = native.to_string();
-				}
-			}
-			else if (tree_index == 5)
-			{
-				auto native = make_native_b_plus_tree<Value>(tree);
-				inserted = native.insert(value);
-				if (inserted)
-				{
-					serialization = native.to_string();
-				}
-			}
-			else
-			{
-				throw std::invalid_argument(
-					"Нативная вставка не поддерживается для этого алгоритма.");
-			}
-
-			if (inserted)
-			{
-				tree = parse_native_operation_tree(
-					serialization,
-					tree_index,
-					kind);
-			}
-			tree_operation_result result;
-			result.inserted = inserted;
-			result.changed = inserted;
-			return result;
-		}
-
-		[[nodiscard]] static tree_operation_result insert_native_search_tree(
-			visual_tree& tree,
-			visual_key key,
-			search_tree_key_kind kind,
-			std::size_t tree_index)
-		{
-			if (kind == search_tree_key_kind::signed_integer)
-			{
-				return insert_native_search_tree_typed<std::int64_t>(
-					tree,
-					key,
-					kind,
-					tree_index);
-			}
-			if (kind == search_tree_key_kind::floating_point)
-			{
-				return insert_native_search_tree_typed<double>(
-					tree,
-					key,
-					kind,
-					tree_index);
-			}
-			throw std::invalid_argument(
-				"Операции поддерживают только int64_t и конечный double.");
-		}
-
-		template<class Value>
 		[[nodiscard]] static tree_native_change_result erase_native_search_tree_typed(
 			const visual_tree& tree,
 			const visual_key& key,
 			search_tree_key_kind kind,
-			std::size_t tree_index)
+			tree_practicum::mods::tree_id algorithm_id)
 		{
 			const Value value = native_key_value<Value>(key);
 			bool erased = false;
 			bool changed = false;
 			std::string serialization;
-			switch (tree_index)
-			{
-			case 0:
+			if (algorithm_id == tree_practicum::mods::ids::bst)
 			{
 				auto native = make_native_binary_tree<bst<Value>, Value>(tree);
 				erased = native.erase(value);
@@ -14167,70 +12670,17 @@ namespace tree_practicum
 				{
 					serialization = native.to_string();
 				}
-				break;
 			}
-			case 1:
+			else
 			{
-				auto native = make_native_binary_tree<avl<Value>, Value>(tree);
-				erased = native.erase(value);
-				changed = erased;
-				if (changed)
-				{
-					serialization = native.to_string();
-				}
-				break;
-			}
-			case 2:
-			{
-				auto native = make_native_binary_tree<rb_tree<Value>, Value>(tree);
-				erased = native.erase(value);
-				changed = erased;
-				if (changed)
-				{
-					serialization = native.to_string();
-				}
-				break;
-			}
-			case 3:
-			{
-				auto native = make_native_binary_tree<splay_tree<Value>, Value>(tree);
-				const auto before = native.to_string();
-				erased = native.erase(value);
-				serialization = native.to_string();
-				changed = erased || serialization != before;
-				break;
-			}
-			case 4:
-			{
-				auto native = make_native_binary_tree<treap<Value>, Value>(tree);
-				erased = native.erase(value);
-				changed = erased;
-				if (changed)
-				{
-					serialization = native.to_string();
-				}
-				break;
-			}
-			case 5:
-			{
-				auto native = make_native_b_plus_tree<Value>(tree);
-				erased = native.erase(value);
-				changed = erased;
-				if (changed)
-				{
-					serialization = native.to_string();
-				}
-				break;
-			}
-			default:
 				throw std::invalid_argument(
-					"Неизвестный тип дерева поиска.");
+					"Неизвестный ID алгоритма дерева.");
 			}
 			return { erased, changed, std::move(serialization) };
 		}
 
 		[[nodiscard]] static tree_native_change_result erase_native_search_tree(
-			std::size_t tree_index,
+			tree_practicum::mods::tree_id algorithm_id,
 			const visual_tree& tree,
 			const visual_key& key,
 			search_tree_key_kind kind)
@@ -14241,7 +12691,7 @@ namespace tree_practicum
 					tree,
 					key,
 					kind,
-					tree_index);
+					algorithm_id);
 			}
 			if (kind == search_tree_key_kind::floating_point)
 			{
@@ -14249,7 +12699,7 @@ namespace tree_practicum
 					tree,
 					key,
 					kind,
-					tree_index);
+					algorithm_id);
 			}
 			throw std::invalid_argument(
 				"Операции поддерживают только int64_t и конечный double.");
@@ -14257,7 +12707,7 @@ namespace tree_practicum
 
 		template<class Value>
 		[[nodiscard]] static tree_native_change_result merge_native_search_trees_typed(
-			std::size_t tree_index,
+			tree_practicum::mods::tree_id algorithm_id,
 			const visual_tree& left,
 			const visual_tree& right,
 			search_tree_key_kind kind)
@@ -14266,9 +12716,7 @@ namespace tree_practicum
 			{
 				return {};
 			}
-			switch (tree_index)
-			{
-			case 0:
+			if (algorithm_id == tree_practicum::mods::ids::bst)
 			{
 				auto native_left =
 					make_native_binary_tree<bst<Value>, Value>(left);
@@ -14277,88 +12725,15 @@ namespace tree_practicum
 				native_left.merge(std::move(native_right));
 				return { true, true, native_left.to_string() };
 			}
-			case 1:
+			else
 			{
-				auto native_left =
-					make_native_binary_tree<avl<Value>, Value>(left);
-				auto native_right =
-					make_native_binary_tree<avl<Value>, Value>(right);
-				native_left.merge(std::move(native_right));
-				return { true, true, native_left.to_string() };
-			}
-			case 2:
-			{
-				auto native_left =
-					make_native_binary_tree<rb_tree<Value>, Value>(left);
-				auto native_right =
-					make_native_binary_tree<rb_tree<Value>, Value>(right);
-				native_left.merge(std::move(native_right));
-				return { true, true, native_left.to_string() };
-			}
-			case 3:
-			{
-				auto native_left =
-					make_native_binary_tree<splay_tree<Value>, Value>(left);
-				auto native_right =
-					make_native_binary_tree<splay_tree<Value>, Value>(right);
-				native_left.merge(std::move(native_right));
-				return { true, true, native_left.to_string() };
-			}
-			case 4:
-			{
-				auto native_left =
-					make_native_binary_tree<treap<Value>, Value>(left);
-				auto native_right =
-					make_native_binary_tree<treap<Value>, Value>(right);
-				native_left.merge(std::move(native_right));
-				return { true, true, native_left.to_string() };
-			}
-			case 5:
-			{
-				std::optional<Value> maximum_left;
-				std::optional<Value> minimum_right;
-				for_each_b_plus_value<Value>(
-					left,
-					[&](const Value& value)
-					{
-						maximum_left = value;
-					});
-				for_each_b_plus_value<Value>(
-					right,
-					[&](const Value& value)
-					{
-						if (!minimum_right)
-						{
-							minimum_right = value;
-						}
-					});
-				if (maximum_left && minimum_right &&
-					!(*maximum_left < *minimum_right))
-				{
-					throw std::invalid_argument(
-						"B+ merge requires every left key to precede every right key");
-				}
-				auto native_left = make_native_b_plus_tree<Value>(left);
-				for_each_b_plus_value<Value>(
-					right,
-					[&](const Value& value)
-					{
-						if (!native_left.insert(value))
-						{
-							throw std::invalid_argument(
-								"B+ merge encountered a duplicate key.");
-						}
-					});
-				return { true, true, native_left.to_string() };
-			}
-			default:
 				throw std::invalid_argument(
-					"Неизвестный тип дерева поиска.");
+					"Неизвестный ID алгоритма дерева.");
 			}
 		}
 
 		[[nodiscard]] static tree_native_change_result merge_native_search_trees(
-			std::size_t tree_index,
+			tree_practicum::mods::tree_id algorithm_id,
 			const visual_tree& left,
 			const visual_tree& right,
 			search_tree_key_kind kind)
@@ -14366,7 +12741,7 @@ namespace tree_practicum
 			if (kind == search_tree_key_kind::signed_integer)
 			{
 				return merge_native_search_trees_typed<std::int64_t>(
-					tree_index,
+					algorithm_id,
 					left,
 					right,
 					kind);
@@ -14374,7 +12749,7 @@ namespace tree_practicum
 			if (kind == search_tree_key_kind::floating_point)
 			{
 				return merge_native_search_trees_typed<double>(
-					tree_index,
+					algorithm_id,
 					left,
 					right,
 					kind);
@@ -14386,71 +12761,28 @@ namespace tree_practicum
 		template<class Value>
 		[[nodiscard]] static std::pair<std::string, std::string>
 			split_native_search_tree_typed(
-				std::size_t tree_index,
+				tree_practicum::mods::tree_id algorithm_id,
 				const visual_tree& tree,
 				const visual_key& pivot,
 				search_tree_key_kind)
 		{
 			const Value value = native_key_value<Value>(pivot);
-			switch (tree_index)
-			{
-			case 0:
+			if (algorithm_id == tree_practicum::mods::ids::bst)
 			{
 				auto native = make_native_binary_tree<bst<Value>, Value>(tree);
 				auto [left, right] = native.split(value);
 				return { left.to_string(), right.to_string() };
 			}
-			case 1:
+			else
 			{
-				auto native = make_native_binary_tree<avl<Value>, Value>(tree);
-				auto [left, right] = native.split(value);
-				return { left.to_string(), right.to_string() };
-			}
-			case 2:
-			{
-				auto native = make_native_binary_tree<rb_tree<Value>, Value>(tree);
-				auto [left, right] = native.split(value);
-				return { left.to_string(), right.to_string() };
-			}
-			case 3:
-			{
-				auto native =
-					make_native_binary_tree<splay_tree<Value>, Value>(tree);
-				auto [left, right] = native.split(value);
-				return { left.to_string(), right.to_string() };
-			}
-			case 4:
-			{
-				auto native = make_native_binary_tree<treap<Value>, Value>(tree);
-				auto [left, right] = native.split(value);
-				return { left.to_string(), right.to_string() };
-			}
-			case 5:
-			{
-				b_plus_tree<Value> left(tree.fanout);
-				b_plus_tree<Value> right(tree.fanout);
-				for_each_b_plus_value<Value>(
-					tree,
-					[&](const Value& key)
-					{
-						auto& output = key < value ? left : right;
-						if (!output.insert(key))
-						{
-							throw std::invalid_argument(
-								"B+ split encountered a duplicate key.");
-						}
-					});
-				return { left.to_string(), right.to_string() };
-			}
-			default:
 				throw std::invalid_argument(
-					"Неизвестный тип дерева поиска.");
+					"Неизвестный ID алгоритма дерева.");
 			}
 		}
 
 		[[nodiscard]] static std::pair<std::string, std::string>
 			split_native_search_tree(
-				std::size_t tree_index,
+				tree_practicum::mods::tree_id algorithm_id,
 				const visual_tree& tree,
 				const visual_key& pivot,
 				search_tree_key_kind kind)
@@ -14458,7 +12790,7 @@ namespace tree_practicum
 			if (kind == search_tree_key_kind::signed_integer)
 			{
 				return split_native_search_tree_typed<std::int64_t>(
-					tree_index,
+					algorithm_id,
 					tree,
 					pivot,
 					kind);
@@ -14466,7 +12798,7 @@ namespace tree_practicum
 			if (kind == search_tree_key_kind::floating_point)
 			{
 				return split_native_search_tree_typed<double>(
-					tree_index,
+					algorithm_id,
 					tree,
 					pivot,
 					kind);
@@ -14475,35 +12807,508 @@ namespace tree_practicum
 				"Операции поддерживают только int64_t и конечный double.");
 		}
 
-		[[nodiscard]] static const tree_operation_algorithm*
-			search_tree_algorithm_for(int tree_index) noexcept
+		[[nodiscard]] const tree_practicum::mods::algorithm*
+			tree_algorithm_for(
+				tree_practicum::mods::tree_id algorithm_id) const
 		{
-			static const bst_tree_algorithm bst;
-			static const avl_tree_algorithm avl;
-			static const red_black_tree_algorithm red_black;
-			static const splay_tree_algorithm splay;
-			static const treap_tree_algorithm treap;
-			static const b_plus_tree_algorithm b_plus;
+			const auto found = m_tree_algorithms.find(std::string(algorithm_id));
+			return found == m_tree_algorithms.end()
+				? nullptr
+				: found->second.get();
+		}
 
-			switch (tree_index)
+		[[nodiscard]] const mngl::mods::tree::custom_command_handler*
+			tree_command_handler_for(std::string_view algorithm_id) const
+		{
+			const auto found = m_tree_command_handlers.find(
+				std::string(algorithm_id));
+			return found == m_tree_command_handlers.end()
+				? nullptr
+				: found->second.get();
+		}
+
+		[[nodiscard]] const mngl::mods::tree::invariant_inspector*
+			tree_invariant_inspector_for(std::string_view algorithm_id) const
+		{
+			const auto found = m_tree_invariant_inspectors.find(
+				std::string(algorithm_id));
+			return found == m_tree_invariant_inspectors.end()
+				? nullptr
+				: found->second.get();
+		}
+
+		void initialize_tree_mods()
+		{
+			m_mod_registry.apply_declarations();
+			auto& algorithms = m_mod_registry.define_class<
+				tree_practicum::mods::algorithm>(
+					std::string(tree_practicum::mods::algorithm_class_id));
+			(void)m_mod_registry.define_class<
+				mngl::mods::tree::custom_command_handler>(
+					std::string(
+						mngl::mods::tree::custom_command_class_id));
+			auto& invariant_inspectors = m_mod_registry.define_class<
+				mngl::mods::tree::invariant_inspector>(
+					std::string(
+						mngl::mods::tree::invariant_inspector_class_id));
+			algorithms.add_builtin(
+				std::string(tree_practicum::mods::ids::bst),
+				[] { return std::make_unique<bst_tree_algorithm>(); });
+			invariant_inspectors.add_builtin(
+				std::string(tree_practicum::mods::ids::bst),
+				[] { return std::make_unique<bst_tree_invariant_inspector>(); });
+
+			const char* executable_base = SDL_GetBasePath();
+			if (!executable_base)
 			{
-			case 0:
-				return &bst;
-			case 1:
-				return &avl;
-			case 2:
-				return &red_black;
-			case 3:
-				return &splay;
-			case 4:
-				return &treap;
-			case 5:
-				return &b_plus;
-			default:
-				return nullptr;
+				logger.warning(
+					"Could not locate the executable directory; tree mods were not loaded.");
+				refresh_tree_algorithm_catalog();
+				refresh_tree_command_catalog();
+				refresh_tree_invariant_catalog();
+				std::error_code current_path_error;
+				const auto current_directory =
+					std::filesystem::current_path(current_path_error);
+				if (!current_path_error)
+				{
+					load_command_catalogs(current_directory, {});
+				}
+				return;
+			}
+			const std::filesystem::path mods_directory =
+				std::filesystem::path(executable_base) / "mods";
+
+			std::error_code directory_error;
+			if (!std::filesystem::is_directory(mods_directory, directory_error))
+			{
+				logger.info(
+					"No mods directory found at '",
+					path_to_utf8(mods_directory),
+					"'; starting with built-in BST only.");
+				refresh_tree_algorithm_catalog();
+				refresh_tree_command_catalog();
+				refresh_tree_invariant_catalog();
+				load_command_catalogs(
+					std::filesystem::path(executable_base), mods_directory);
+				return;
+			}
+
+			try
+			{
+				for (const auto& result : m_mod_loader.load_all(mods_directory))
+				{
+					if (result)
+					{
+						logger.success(
+							"Loaded mod '", result.mod_id, "': ", result.message);
+					}
+					else
+					{
+						logger.error(
+							"Rejected mod '",
+							result.mod_id.empty() ? "<unknown>" : result.mod_id,
+							"': ",
+							result.message);
+					}
+				}
+			}
+			catch (const std::exception& error)
+			{
+				logger.error(
+					"Failed to scan mods directory '",
+					path_to_utf8(mods_directory),
+					"': ",
+					error.what());
+			}
+			refresh_tree_algorithm_catalog();
+			refresh_tree_command_catalog();
+			refresh_tree_invariant_catalog();
+			load_command_catalogs(
+				std::filesystem::path(executable_base), mods_directory);
+		}
+
+		[[nodiscard]] static std::optional<tree_practicum::mods::operation>
+			command_operation(std::string_view name) noexcept
+		{
+			using operation = tree_practicum::mods::operation;
+			if (name == "find") return operation::find;
+			if (name == "insert") return operation::insert;
+			if (name == "insert_random") return operation::random_insert;
+			if (name == "erase") return operation::erase;
+			if (name == "merge") return operation::merge;
+			if (name == "split") return operation::split;
+			return std::nullopt;
+		}
+
+		void load_command_catalog_file(
+			const std::filesystem::path& path,
+			bool from_shared_catalog)
+		{
+			std::error_code file_error;
+			const auto size = std::filesystem::file_size(path, file_error);
+			if (file_error)
+			{
+				throw std::runtime_error(
+					"cannot inspect catalog file: " + file_error.message());
+			}
+			if (size > 4 * 1024 * 1024)
+			{
+				throw std::length_error("command catalog file exceeds 4 MiB");
+			}
+			std::ifstream input(path, std::ios::binary);
+			if (!input)
+			{
+				throw std::runtime_error("cannot open command catalog file");
+			}
+			const std::string source{
+				std::istreambuf_iterator<char>(input),
+				std::istreambuf_iterator<char>() };
+			const auto catalog = mngl::mods::command_catalog::parse(source);
+			std::size_t added = 0;
+			for (const auto& command : catalog.commands)
+			{
+				if (!valid_tree_algorithm_id(command.algorithm_id))
+				{
+					logger.warning(
+						"Ignoring command with an invalid tree ID in '",
+						path_to_utf8(path), "'.");
+					continue;
+				}
+				const auto* type = available_tree_type_for(command.algorithm_id);
+				const auto operation = command_operation(command.name);
+				const auto* command_handler =
+					tree_command_handler_for(command.algorithm_id);
+				const bool is_custom_command = !operation && command_handler &&
+					command_handler->supports_command(command.name);
+				const bool supported_operation = type && operation &&
+					command.parameters.empty() &&
+					tree_practicum::mods::supports(
+						type->algorithm.supported_operations, *operation);
+				if (!type || (!supported_operation && !is_custom_command))
+				{
+					logger.warning(
+						"Ignoring unsupported command '", command.name,
+						"' for tree '", command.algorithm_id, "'.");
+					continue;
+				}
+				const auto identity = command.algorithm_id + "\n" + command.name;
+				const auto existing = m_command_function_indices.find(identity);
+				if (existing != m_command_function_indices.end())
+				{
+					auto& previous = m_command_functions[existing->second];
+					if (previous->from_shared_catalog && !from_shared_catalog)
+					{
+					auto replacement =
+						std::make_unique<owned_function_entry>();
+						replacement->algorithm_id = command.algorithm_id;
+						replacement->name = command.name;
+						replacement->signature = command.signature;
+						replacement->description = command.description;
+						replacement->parameters = command.parameters;
+						replacement->from_shared_catalog = false;
+						replacement->custom = is_custom_command;
+						previous = std::move(replacement);
+						++added;
+						continue;
+					}
+					logger.warning(
+						"Ignoring duplicate command description '",
+						command.name, "' for tree '", command.algorithm_id, "'.");
+					continue;
+				}
+				auto stored = std::make_unique<owned_function_entry>();
+				stored->algorithm_id = command.algorithm_id;
+				stored->name = command.name;
+				stored->signature = command.signature;
+				stored->description = command.description;
+				stored->parameters = command.parameters;
+				stored->from_shared_catalog = from_shared_catalog;
+				stored->custom = is_custom_command;
+				m_command_function_indices.emplace(
+					identity, m_command_functions.size());
+				m_command_functions.push_back(std::move(stored));
+				++added;
+			}
+			logger.info(
+				"Loaded ", added, " command descriptions from '",
+				path_to_utf8(path), "'.");
+		}
+
+		void load_command_catalogs(
+			const std::filesystem::path& executable_directory,
+			const std::filesystem::path& mods_directory)
+		{
+			m_command_functions.clear();
+			m_command_function_indices.clear();
+			const auto shared_catalog =
+				executable_directory / "data" / "tree_commands.json";
+			std::error_code error;
+			bool has_shared_catalog =
+				std::filesystem::is_regular_file(shared_catalog, error);
+			std::vector<std::filesystem::path> package_catalogs;
+			try
+			{
+				if (std::filesystem::is_directory(mods_directory, error))
+				{
+					for (const auto& package :
+						std::filesystem::directory_iterator(mods_directory))
+					{
+						if (!package.is_directory(error))
+						{
+							error.clear();
+							continue;
+						}
+						const auto path = package.path() / "commands.json";
+						if (std::filesystem::is_regular_file(path, error))
+						{
+							package_catalogs.push_back(path);
+						}
+						error.clear();
+					}
+				}
+			}
+			catch (const std::exception& scan_error)
+			{
+				logger.error(
+					"Failed to scan mod command catalogs in '",
+					path_to_utf8(mods_directory), "': ", scan_error.what());
+			}
+			std::sort(package_catalogs.begin(), package_catalogs.end());
+			if (has_shared_catalog)
+			{
+				try
+				{
+					load_command_catalog_file(shared_catalog, true);
+				}
+				catch (const std::exception& error)
+				{
+					logger.error(
+						"Failed to load command catalog '",
+						path_to_utf8(shared_catalog),
+						"': ", error.what());
+				}
+			}
+			for (const auto& path : package_catalogs)
+			{
+				try
+				{
+					load_command_catalog_file(path, false);
+				}
+				catch (const std::exception& error)
+				{
+					logger.error(
+						"Failed to load command catalog '", path_to_utf8(path),
+						"': ", error.what());
+				}
 			}
 		}
 
+		void refresh_tree_command_catalog()
+		{
+			m_tree_command_handlers.clear();
+			auto& registry = m_mod_registry.classes<
+				mngl::mods::tree::custom_command_handler>(
+					mngl::mods::tree::custom_command_class_id);
+			const auto implementations = registry.implementations();
+			m_tree_command_handlers.reserve(implementations.size());
+			for (const auto& implementation : implementations)
+			{
+				auto handler = registry.create(implementation.id);
+				if (!handler)
+				{
+					logger.error(
+						"Tree command handler factory returned no object for '",
+						implementation.id,
+						"'.");
+					continue;
+				}
+				m_tree_command_handlers.emplace(
+					implementation.id,
+					std::move(handler));
+			}
+		}
+
+		void refresh_tree_invariant_catalog()
+		{
+			m_tree_invariant_inspectors.clear();
+			auto& registry = m_mod_registry.classes<
+				mngl::mods::tree::invariant_inspector>(
+					mngl::mods::tree::invariant_inspector_class_id);
+			const auto implementations = registry.implementations();
+			m_tree_invariant_inspectors.reserve(implementations.size());
+			for (const auto& implementation : implementations)
+			{
+				auto inspector = registry.create(implementation.id);
+				if (!inspector)
+				{
+					logger.error(
+						"Tree invariant inspector factory returned no object for '",
+						implementation.id,
+						"'.");
+					continue;
+				}
+				if (inspector->algorithm_id() != implementation.id)
+				{
+					logger.error(
+						"Tree invariant inspector ID does not match its factory ID: '",
+						implementation.id,
+						"'.");
+					continue;
+				}
+				m_tree_invariant_inspectors.emplace(
+					implementation.id,
+					std::move(inspector));
+			}
+		}
+
+		void refresh_tree_algorithm_catalog()
+		{
+			m_available_tree_types.clear();
+			m_empty_demo_trees.clear();
+			m_tree_algorithms.clear();
+
+			auto& registry = m_mod_registry.classes<
+				tree_practicum::mods::algorithm>(
+					tree_practicum::mods::algorithm_class_id);
+			const auto implementations = registry.implementations();
+			m_tree_algorithms.reserve(implementations.size());
+			m_available_tree_types.reserve(implementations.size());
+			for (const auto& implementation : implementations)
+			{
+				auto algorithm = registry.create(implementation.id);
+				if (!algorithm)
+				{
+					logger.error(
+						"Tree algorithm factory returned no object for '",
+						implementation.id,
+						"'.");
+					continue;
+				}
+
+				const auto& info = algorithm->info();
+				if (info.id != implementation.id ||
+					info.display_name.empty() ||
+					info.serialization_prefix.empty() ||
+					info.supported_key_kinds == 0 ||
+					!safe_tree_file_stem(info.file_stem))
+				{
+					logger.error(
+						"Tree algorithm '",
+						implementation.id,
+						"' has invalid metadata or an ID that differs from its factory ID.");
+					continue;
+				}
+
+				const auto duplicate_prefix = std::find_if(
+					m_available_tree_types.begin(),
+					m_available_tree_types.end(),
+					[&](const auto& type)
+					{
+						return type.algorithm.serialization_prefix ==
+							info.serialization_prefix;
+					});
+				if (duplicate_prefix != m_available_tree_types.end())
+				{
+					logger.error(
+						"Tree algorithm '",
+						implementation.id,
+						"' uses a serialization prefix already owned by '",
+						duplicate_prefix->algorithm.id,
+						"'.");
+					continue;
+				}
+
+				m_available_tree_types.push_back({ info });
+				m_tree_algorithms.emplace(
+					implementation.id,
+					std::move(algorithm));
+			}
+
+			std::sort(
+				m_available_tree_types.begin(),
+				m_available_tree_types.end(),
+				[](const auto& left, const auto& right)
+				{
+					const bool left_is_bst = left.algorithm.id ==
+						tree_practicum::mods::ids::bst;
+					const bool right_is_bst = right.algorithm.id ==
+						tree_practicum::mods::ids::bst;
+					return left_is_bst != right_is_bst
+						? left_is_bst
+						: left.algorithm.id < right.algorithm.id;
+				});
+
+			if (!tree_algorithm_for(tree_practicum::mods::ids::bst))
+			{
+				throw std::logic_error(
+					"The built-in BST tree algorithm was not registered.");
+			}
+		}
+
+		[[nodiscard]] static const tree_operation_algorithm*
+			search_tree_algorithm_for(
+				tree_practicum::mods::tree_id algorithm_id) noexcept
+		{
+			static const bst_tree_algorithm bst;
+
+			if (algorithm_id == bst.id())
+				return &bst;
+			return nullptr;
+		}
+
+		[[nodiscard]] tree_practicum::mods::document
+			deserialize_tree_document(std::string_view source)
+		{
+			const auto* type = available_tree_type_for_serialization(source);
+			if (!type)
+			{
+				throw tree_serialization_error("неизвестный тип дерева");
+			}
+			const auto* algorithm = tree_algorithm_for(
+				type->algorithm.id);
+			if (!algorithm)
+			{
+				throw tree_serialization_error(
+					"для этого типа дерева не загружен алгоритм");
+			}
+			try
+			{
+				auto document = algorithm->deserialize(source);
+				if (document.algorithm_id != type->algorithm.id)
+				{
+					throw tree_serialization_error(
+						"алгоритм вернул документ с другим ID дерева");
+				}
+				return document;
+			}
+			catch (const tree_serialization_error&)
+			{
+				throw;
+			}
+			catch (const std::exception& error)
+			{
+				throw tree_serialization_error(error.what());
+			}
+		}
+
+		mngl::mods::registry m_mod_registry;
+		mngl::mods::mod_loader m_mod_loader;
+		std::unordered_map<std::string,
+			std::unique_ptr<tree_practicum::mods::algorithm>> m_tree_algorithms;
+		std::unordered_map<std::string,
+			std::unique_ptr<mngl::mods::tree::custom_command_handler>>
+			m_tree_command_handlers;
+		std::unordered_map<std::string,
+			std::unique_ptr<mngl::mods::tree::invariant_inspector>>
+			m_tree_invariant_inspectors;
+		std::vector<std::unique_ptr<owned_function_entry>>
+			m_command_functions;
+		std::unordered_map<std::string, std::size_t>
+			m_command_function_indices;
+		std::unordered_map<std::string,
+			std::vector<std::array<char, 256>>> m_custom_command_inputs;
+		std::unordered_map<std::string, visual_tree> m_empty_demo_trees;
+		std::vector<tree_type_descriptor> m_available_tree_types;
 		mngl::render_window& m_render_window;
 		mngl::two_d::font& m_tree_font;
 		std::optional<mngl::texture> m_tree_canvas_texture;
@@ -14556,6 +13361,9 @@ namespace tree_practicum
 		std::string m_tree_find_status;
 		std::string m_tree_parse_error;
 		std::string m_tree_operation_error;
+		std::string m_custom_command_error;
+		std::string m_invariant_report_error;
+		std::string m_invariant_report_tree_id;
 		std::string m_explorer_error;
 		std::string m_file_error;
 		std::string m_file_dialog_error;
@@ -14564,13 +13372,15 @@ namespace tree_practicum
 		int m_selected_workspace = 1;
 		int m_selected_function = 0;
 		int m_selected_archive_entry = -1;
-		int m_active_tree = 0;
-		int m_new_tree_type = 0;
-		int m_tree_find_tree_index = -1;
-		int m_loaded_tree_index = -1;
+		std::string m_active_tree_id =
+			std::string(tree_practicum::mods::ids::bst);
+		std::string m_new_tree_id =
+			std::string(tree_practicum::mods::ids::bst);
+		std::string m_tree_find_tree_id;
+		std::string m_loaded_tree_id;
 		int m_tree_filter = -1;
 		int m_active_comparison_pane = 0;
-		int m_tree_canvas_tree_index = -1;
+		std::string m_tree_canvas_tree_id;
 		double m_tree_canvas_zoom = 1.0;
 		glm::dvec2 m_tree_canvas_pan{};
 		file_dialog_mode m_file_dialog_mode = file_dialog_mode::open;
@@ -14610,5 +13420,14 @@ namespace tree_practicum
 		std::uint64_t m_saved_document_state_id = 0;
 		std::uint64_t m_next_document_state_id = 1;
 		std::uint64_t m_tree_preview_revision = 0;
+		std::uint64_t m_invariant_report_revision =
+			std::numeric_limits<std::uint64_t>::max();
+		std::optional<tree_practicum::mods::key_kind>
+			m_invariant_report_key_kind;
+		std::optional<std::size_t> m_hovered_tree_node;
+		std::string m_hovered_tree_node_algorithm_id;
+		int m_invariant_selected_node = -1;
+		mngl::mods::tree::invariant_report m_invariant_report;
+		bool m_invariant_report_cached = false;
 	};
 }

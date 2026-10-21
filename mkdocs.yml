@@ -37,6 +37,7 @@ nav:
       - Граф кадра: gpu/frame-graph.md
   - Моды:
       - Контракт: mods/api-contract.md
+      - API алгоритмов деревьев: mods/tree-algorithm-api.md
       - Создание и отладка: mods/creating-and-debugging.md
       - Среда и CI/CD: mods/automation.md
   - Справочник по модулям: reference/index.md
