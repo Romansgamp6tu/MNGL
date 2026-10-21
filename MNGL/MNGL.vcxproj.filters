@@ -80,6 +80,9 @@
     <ClInclude Include="logger.h">
       <Filter>Файлы заголовков\utility</Filter>
     </ClInclude>
+    <ClInclude Include="console.hpp">
+      <Filter>Файлы заголовков\utility</Filter>
+    </ClInclude>
     <ClInclude Include="mod_loader.hpp">
       <Filter>Файлы заголовков\utility</Filter>
     </ClInclude>

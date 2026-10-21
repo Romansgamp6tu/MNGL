@@ -27,6 +27,7 @@ nav:
       - Поверхности и цвета: core/media-and-colors.md
       - Геометрия: core/geometry.md
       - Runtime и утилиты: core/runtime-and-utilities.md
+      - Консольные команды: core/console.md
   - GPU:
       - Обзор: gpu/index.md
       - Устройство и команды: gpu/device-and-commands.md

@@ -13,6 +13,7 @@
 | `color.hpp` | Цвета, преобразования RGB/HSV/HSL | [Поверхности и цвета](../core/media-and-colors.md) |
 | `line.hpp`, `rectangle.hpp` | Геометрические примитивы и пересечения | [Геометрия](../core/geometry.md) |
 | `utilities.hpp`, `logger.h`, `iupdate.h`, `proxy.hpp` | Runtime, ошибки, logging, обновления и SDL interop | [Runtime и утилиты](../core/runtime-and-utilities.md) |
+| `console.hpp` | Реестр типизированных CLI-команд, режимы вывода и результатов обработчиков | [Консольные команды](../core/console.md) |
 | `device.hpp`, `command_buffer.hpp` | GPU device и command buffers | [Устройство и команды](../gpu/device-and-commands.md) |
 | `gpu_buffer.hpp`, `gpu_texture.hpp`, `sampler.hpp` | Низкоуровневые GPU-ресурсы | [GPU-ресурсы](../gpu/resources.md) |
 | `graphics_shader.hpp`, `shader_loader.hpp` | Загрузка/компиляция шейдеров, uniforms и bindings | [Шейдеры](../gpu/shaders.md) |
