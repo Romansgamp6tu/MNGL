@@ -72,8 +72,9 @@ cmake --build build --config Debug
 #### Development ZIP и ImGui DLL
 
 GitHub Actions собирает Windows x64 ZIP на GitHub-hosted `windows-latest` runner
-при push и для ручного запуска workflow. При push тега `vX.Y.Z` ZIP также
-прикладывается к GitHub Release. Для ручной сборки:
+и Linux x64 tar.gz на self-hosted runner при push и для ручного запуска workflow.
+При push тега `vX.Y.Z` оба пакета прикладываются к GitHub Release. Для ручной
+сборки Windows-пакета:
 
 ```powershell
 cmake -S . -B build-package -A x64 `
@@ -101,6 +102,23 @@ target_link_libraries(my_app PRIVATE MNGL::MNGL)
 заголовки используемых ImGui API и SDL3/SDL GPU backend; остальные внутренние
 заголовки ImGui не копируются. При ручной сборке feature-ветки укажите её через
 `-DMNGL_PACKAGE_BRANCH=<имя-ветки>` и убедитесь, что `origin/main` доступен.
+
+Linux x64 development-пакет собирается на self-hosted runner с теми же
+development-пакетами SDL3, SDL3_image и FreeType, что нужны runtime-сборке:
+
+```sh
+cmake -S . -B build-devel -GNinja -DCMAKE_BUILD_TYPE=Release \
+  -DMNGL_BUILD_LINUX_DEVEL_PACKAGE=ON \
+  -DMNGL_PACKAGE_VERSION=1.2.3
+cmake --build build-devel --target mngl_imgui --parallel 4
+cpack --config build-devel/CPackConfig.cmake -G TGZ
+```
+
+В `build-devel/packages/mngl-devel-linux-x64-1.2.3.tar.gz` находятся
+`libmngl_imgui.so`, заголовки и CMake targets `MNGL::MNGL` и `MNGL::ImGui`.
+При подключении `find_package(MNGL CONFIG REQUIRED)` на Linux автоматически
+ищутся системные CMake-пакеты SDL3, SDL3_image и FreeType; они должны быть
+установлены в окружении разработчика.
 
 Папку ZIP `bin/` нужно добавить в `PATH` или скопировать её DLL рядом с
 исполняемым файлом. Версии ImGui между DLL и приложением должны совпадать:
