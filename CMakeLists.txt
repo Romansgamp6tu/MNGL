@@ -2,8 +2,32 @@ cmake_minimum_required(VERSION 3.24)
 
 project(MNGL LANGUAGES CXX)
 
-add_executable(mngl_demo
-	MNGL/MNGL.cpp
+include(CTest)
+find_package(OpenMP QUIET COMPONENTS CXX)
+
+execute_process(
+	COMMAND git branch --show-current
+	WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+	OUTPUT_VARIABLE MNGL_CURRENT_GIT_BRANCH
+	OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(NOT MNGL_CURRENT_GIT_BRANCH)
+	set(MNGL_CURRENT_GIT_BRANCH "main")
+endif()
+set(MNGL_PACKAGE_BRANCH "${MNGL_CURRENT_GIT_BRANCH}" CACHE STRING
+	"Git branch name used to namespace branch-only headers")
+set(MNGL_PACKAGE_BASE_REF "origin/main" CACHE STRING "Git ref used to identify headers added outside main")
+if(MNGL_PACKAGE_BRANCH STREQUAL "main")
+	set(MNGL_PACKAGE_HEADER_NAMESPACE "MNGL")
+else()
+	set(MNGL_PACKAGE_HEADER_NAMESPACE "${MNGL_PACKAGE_BRANCH}")
+	if(MNGL_PACKAGE_HEADER_NAMESPACE MATCHES "(^|/)\\.\\.?(/|$)" OR
+		MNGL_PACKAGE_HEADER_NAMESPACE MATCHES "[<>:\"|?*;\\\\]")
+		message(FATAL_ERROR "MNGL_PACKAGE_BRANCH must be a safe Git branch name")
+	endif()
+endif()
+
+set(MNGL_IMGUI_SOURCES
 	MNGL/imgui/imgui.cpp
 	MNGL/imgui/imgui_draw.cpp
 	MNGL/imgui/imgui_tables.cpp
@@ -12,54 +36,100 @@ add_executable(mngl_demo
 	MNGL/imgui/backends/imgui_impl_sdlgpu3.cpp
 )
 
-target_compile_features(mngl_demo PRIVATE cxx_std_23)
-find_package(OpenMP QUIET COMPONENTS CXX)
-if(OpenMP_CXX_FOUND)
-	target_link_libraries(mngl_demo PRIVATE OpenMP::OpenMP_CXX)
-endif()
-
-target_include_directories(mngl_demo PRIVATE
-	"${CMAKE_CURRENT_SOURCE_DIR}/include"
-	"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
-	"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui"
-)
-
 if(MSVC)
-	# The practicum's template-heavy translation unit can exceed COFF's section limit.
-	target_compile_options(mngl_demo PRIVATE /bigobj)
 	# utilities.hpp uses MSVC linker pragmas for these bundled libraries.
 	if(CMAKE_SIZEOF_VOID_P EQUAL 8)
 		set(MNGL_LIBRARY_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/libs")
 	else()
 		set(MNGL_LIBRARY_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/libs/x86")
 	endif()
-	target_link_directories(mngl_demo PRIVATE "${MNGL_LIBRARY_DIRECTORY}")
+	add_library(mngl_imgui SHARED ${MNGL_IMGUI_SOURCES})
+	target_compile_definitions(mngl_imgui
+		PRIVATE "IMGUI_API=__declspec(dllexport)"
+		INTERFACE "IMGUI_API=__declspec(dllimport)"
+	)
+	target_compile_options(mngl_imgui PRIVATE /utf-8)
+	target_include_directories(mngl_imgui PUBLIC
+		$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+		$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/MNGL>
+		$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui>
+		$<INSTALL_INTERFACE:include>
+		$<INSTALL_INTERFACE:include/imgui>
+	)
+	target_link_directories(mngl_imgui PUBLIC
+		$<BUILD_INTERFACE:${MNGL_LIBRARY_DIRECTORY}>
+		$<INSTALL_INTERFACE:lib>
+	)
+	target_link_libraries(mngl_imgui PUBLIC SDL3.lib)
 
-	if(WIN32)
-		add_custom_command(TARGET mngl_demo POST_BUILD
-			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-				"${MNGL_LIBRARY_DIRECTORY}/SDL3.dll"
-				"$<TARGET_FILE_DIR:mngl_demo>"
-			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-				"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.dll"
-				"$<TARGET_FILE_DIR:mngl_demo>"
-			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-				"${MNGL_LIBRARY_DIRECTORY}/freetype.dll"
-				"$<TARGET_FILE_DIR:mngl_demo>"
-			VERBATIM
-		)
-	endif()
+	add_executable(mngl_demo MNGL/MNGL.cpp)
+	target_compile_features(mngl_demo PRIVATE cxx_std_23)
+	target_compile_options(mngl_demo PRIVATE /bigobj)
+	target_include_directories(mngl_demo PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}/include"
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui"
+	)
+	# utilities.hpp uses MSVC linker pragmas for these bundled libraries.
+	target_link_directories(mngl_demo PRIVATE "${MNGL_LIBRARY_DIRECTORY}")
 else()
 	find_package(SDL3 CONFIG REQUIRED)
 	find_package(SDL3_image CONFIG REQUIRED)
 	find_package(Freetype REQUIRED)
 
-	target_link_libraries(mngl_demo PRIVATE
-		SDL3::SDL3
-		SDL3_image::SDL3_image
-		Freetype::Freetype
+	add_library(mngl_imgui SHARED ${MNGL_IMGUI_SOURCES})
+	target_include_directories(mngl_imgui PUBLIC
+		$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+		$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/MNGL>
+		$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui>
+		$<INSTALL_INTERFACE:include>
+		$<INSTALL_INTERFACE:include/imgui>
+	)
+	target_link_libraries(mngl_imgui PUBLIC SDL3::SDL3)
+
+	add_executable(mngl_demo MNGL/MNGL.cpp)
+	target_compile_features(mngl_demo PRIVATE cxx_std_23)
+	target_include_directories(mngl_demo PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}/include"
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui"
 	)
 endif()
+
+add_library(MNGL::ImGui ALIAS mngl_imgui)
+set_target_properties(mngl_imgui PROPERTIES EXPORT_NAME ImGui)
+target_compile_features(mngl_imgui PUBLIC cxx_std_23)
+
+add_library(mngl INTERFACE)
+add_library(MNGL::MNGL ALIAS mngl)
+set_target_properties(mngl PROPERTIES EXPORT_NAME MNGL)
+target_compile_features(mngl INTERFACE cxx_std_23)
+target_include_directories(mngl INTERFACE
+	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/MNGL>
+	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+	$<INSTALL_INTERFACE:include>
+	$<INSTALL_INTERFACE:include/MNGL>
+	$<INSTALL_INTERFACE:include/${MNGL_PACKAGE_HEADER_NAMESPACE}>
+)
+if(MSVC)
+	target_link_directories(mngl INTERFACE
+		$<BUILD_INTERFACE:${MNGL_LIBRARY_DIRECTORY}>
+		$<INSTALL_INTERFACE:lib>
+	)
+	target_link_libraries(mngl INTERFACE mngl_imgui SDL3_image.lib freetype.lib)
+else()
+	target_link_libraries(mngl INTERFACE
+		mngl_imgui SDL3_image::SDL3_image Freetype::Freetype)
+endif()
+target_link_libraries(mngl_demo PRIVATE mngl)
+if(OpenMP_CXX_FOUND)
+	target_link_libraries(mngl_demo PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
+option(MNGL_BUILD_MOD_EXAMPLE "Build the native mod host and example module" ON)
+include(cmake/MNGLMods.cmake)
+mngl_add_mod_targets("${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
 
 add_custom_command(TARGET mngl_demo POST_BUILD
 	COMMAND "${CMAKE_COMMAND}" -E copy_directory
@@ -73,93 +143,124 @@ add_custom_command(TARGET mngl_demo POST_BUILD
 	VERBATIM
 )
 
+if(WIN32)
+	add_custom_command(TARGET mngl_demo POST_BUILD
+		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+			"$<TARGET_FILE:mngl_imgui>"
+			"$<TARGET_FILE_DIR:mngl_demo>"
+		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+			"${MNGL_LIBRARY_DIRECTORY}/SDL3.dll"
+			"$<TARGET_FILE_DIR:mngl_demo>"
+		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+			"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.dll"
+			"$<TARGET_FILE_DIR:mngl_demo>"
+		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+			"${MNGL_LIBRARY_DIRECTORY}/freetype.dll"
+			"$<TARGET_FILE_DIR:mngl_demo>"
+		VERBATIM
+	)
+endif()
+
 option(MNGL_BUILD_TESTS "Build tree coordinate regression checks" OFF)
 if(MNGL_BUILD_TESTS)
-	enable_testing()
 	add_executable(mngl_tree_precision tests/tree_precision.cpp)
 	target_compile_features(mngl_tree_precision PRIVATE cxx_std_23)
 	target_include_directories(mngl_tree_precision PRIVATE include MNGL)
 	target_compile_definitions(mngl_tree_precision PRIVATE
 		MNGL_TEST_FONT_FILE="${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui/misc/fonts/Roboto-Medium.ttf")
-	if(MSVC)
-		target_link_directories(mngl_tree_precision PRIVATE "${MNGL_LIBRARY_DIRECTORY}")
-		target_compile_options(mngl_tree_precision PRIVATE /utf-8)
-		foreach(dependency SDL3 SDL3_image freetype)
-			add_custom_command(TARGET mngl_tree_precision POST_BUILD
-				COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-					"${MNGL_LIBRARY_DIRECTORY}/${dependency}.dll"
-					"$<TARGET_FILE_DIR:mngl_tree_precision>" VERBATIM)
-		endforeach()
-	else()
-		target_link_libraries(mngl_tree_precision PRIVATE
-			SDL3::SDL3 SDL3_image::SDL3_image Freetype::Freetype)
-	endif()
+	target_link_libraries(mngl_tree_precision PRIVATE mngl)
 	if(OpenMP_CXX_FOUND)
 		target_link_libraries(mngl_tree_precision PRIVATE OpenMP::OpenMP_CXX)
+	endif()
+	if(MSVC)
+		target_compile_options(mngl_tree_precision PRIVATE /bigobj /utf-8)
+		add_custom_command(TARGET mngl_tree_precision POST_BUILD
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+				"$<TARGET_FILE:mngl_imgui>" "$<TARGET_FILE_DIR:mngl_tree_precision>"
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+				"${MNGL_LIBRARY_DIRECTORY}/SDL3.dll" "$<TARGET_FILE_DIR:mngl_tree_precision>"
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+				"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.dll" "$<TARGET_FILE_DIR:mngl_tree_precision>"
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+				"${MNGL_LIBRARY_DIRECTORY}/freetype.dll" "$<TARGET_FILE_DIR:mngl_tree_precision>"
+			VERBATIM)
 	endif()
 	add_custom_command(TARGET mngl_tree_precision POST_BUILD
 		COMMAND "${CMAKE_COMMAND}" -E copy_directory
 			"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/shaders"
-			"$<TARGET_FILE_DIR:mngl_tree_precision>/shaders" VERBATIM)
-	# The default check needs no GPU. Pass --render <directory> explicitly for readback comparisons.
+			"$<TARGET_FILE_DIR:mngl_tree_precision>/shaders"
+		VERBATIM)
 	add_test(NAME tree_precision COMMAND mngl_tree_precision)
 endif()
 
-option(MNGL_BUILD_DEVEL_PACKAGE "Define install rules and package targets for the MNGL development package" OFF)
-if(MNGL_BUILD_DEVEL_PACKAGE)
-	if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-		message(FATAL_ERROR "MNGL_BUILD_DEVEL_PACKAGE currently supports Linux only")
-	endif()
+option(MNGL_BUILD_WINDOWS_DEVEL_PACKAGE "Create a Windows x64 MNGL development ZIP" OFF)
+option(MNGL_BUILD_LINUX_DEVEL_PACKAGE "Create a Linux x64 MNGL development tarball" OFF)
+option(MNGL_BUILD_DEVEL_PACKAGE "Create a Linux x64 MNGL Debian development package" OFF)
+if((MNGL_BUILD_WINDOWS_DEVEL_PACKAGE AND MNGL_BUILD_LINUX_DEVEL_PACKAGE) OR
+	(MNGL_BUILD_WINDOWS_DEVEL_PACKAGE AND MNGL_BUILD_DEVEL_PACKAGE) OR
+	(MNGL_BUILD_LINUX_DEVEL_PACKAGE AND MNGL_BUILD_DEVEL_PACKAGE))
+	message(FATAL_ERROR "Build only one MNGL development package per CMake build directory")
+endif()
 
+if(MNGL_BUILD_WINDOWS_DEVEL_PACKAGE OR MNGL_BUILD_LINUX_DEVEL_PACKAGE OR MNGL_BUILD_DEVEL_PACKAGE)
 	include(GNUInstallDirs)
 	include(CMakePackageConfigHelpers)
-	# CPack invokes the preinstall target; do not make it compile the demo executable.
 	set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY TRUE)
+	set(MNGL_PACKAGE_VERSION "0.0.0" CACHE STRING "Version used for the MNGL development package")
+	string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" MNGL_CMAKE_CONFIG_VERSION "${MNGL_PACKAGE_VERSION}")
+	if(NOT MNGL_CMAKE_CONFIG_VERSION)
+		set(MNGL_CMAKE_CONFIG_VERSION "0.0.0")
+	endif()
 
-	find_package(SDL3 CONFIG REQUIRED)
-	find_package(SDL3_image CONFIG REQUIRED)
-	find_package(Freetype REQUIRED)
-	find_package(glm CONFIG REQUIRED)
-
-	add_library(mngl INTERFACE)
-	add_library(MNGL::MNGL ALIAS mngl)
-	set_target_properties(mngl PROPERTIES EXPORT_NAME MNGL)
-	target_compile_features(mngl INTERFACE cxx_std_23)
-	target_include_directories(mngl INTERFACE
-		$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/MNGL>
-		$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mngl>
-	)
-	target_link_libraries(mngl INTERFACE
-		SDL3::SDL3
-		SDL3_image::SDL3_image
-		Freetype::Freetype
-		glm::glm
-	)
-
-	add_library(mngl_imgui STATIC
-		MNGL/imgui/imgui.cpp
-		MNGL/imgui/imgui_draw.cpp
-		MNGL/imgui/imgui_tables.cpp
-		MNGL/imgui/imgui_widgets.cpp
-		MNGL/imgui/backends/imgui_impl_sdl3.cpp
-		MNGL/imgui/backends/imgui_impl_sdlgpu3.cpp
-	)
-	add_library(MNGL::ImGui ALIAS mngl_imgui)
-	set_target_properties(mngl_imgui PROPERTIES
-		EXPORT_NAME ImGui
-		POSITION_INDEPENDENT_CODE ON
-	)
-	target_compile_features(mngl_imgui PUBLIC cxx_std_23)
-	target_include_directories(mngl_imgui PUBLIC
-		$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/MNGL>
-		$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui>
-		$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mngl>
-		$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mngl/imgui>
-	)
-	target_link_libraries(mngl_imgui PUBLIC mngl)
+	set(MNGL_CONFIG_FIND_DEPENDENCIES "")
+	if(MNGL_BUILD_WINDOWS_DEVEL_PACKAGE)
+		if(NOT WIN32 OR NOT MSVC OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+			message(FATAL_ERROR "MNGL_BUILD_WINDOWS_DEVEL_PACKAGE requires 64-bit MSVC on Windows")
+		endif()
+		set(MNGL_DEVEL_PACKAGE_NAME "mngl-devel-windows-x64")
+		set(MNGL_DEVEL_PACKAGE_GENERATOR "ZIP")
+	elseif(MNGL_BUILD_LINUX_DEVEL_PACKAGE)
+		if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+			message(FATAL_ERROR "MNGL_BUILD_LINUX_DEVEL_PACKAGE requires 64-bit Linux")
+		endif()
+		set(MNGL_DEVEL_PACKAGE_NAME "mngl-devel-linux-x64")
+		set(MNGL_DEVEL_PACKAGE_GENERATOR "TGZ")
+		set(CPACK_PACKAGING_INSTALL_PREFIX "/")
+		set(MNGL_CONFIG_FIND_DEPENDENCIES [=[include(CMakeFindDependencyMacro)
+find_dependency(SDL3 CONFIG REQUIRED)
+find_dependency(SDL3_image CONFIG REQUIRED)
+find_dependency(Freetype REQUIRED)]=])
+	else()
+		if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+			message(FATAL_ERROR "MNGL_BUILD_DEVEL_PACKAGE requires 64-bit Linux")
+		endif()
+		find_package(glm CONFIG REQUIRED)
+		target_link_libraries(mngl INTERFACE glm::glm)
+		set(MNGL_DEVEL_PACKAGE_NAME "libmngl-dev")
+		set(MNGL_DEVEL_PACKAGE_GENERATOR "DEB")
+		set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+		set(MNGL_CONFIG_FIND_DEPENDENCIES [=[include(CMakeFindDependencyMacro)
+find_dependency(SDL3 CONFIG REQUIRED)
+find_dependency(SDL3_image CONFIG REQUIRED)
+find_dependency(Freetype REQUIRED)
+find_dependency(glm CONFIG REQUIRED)]=])
+	endif()
+	if(MNGL_BUILD_DEVEL_PACKAGE)
+		set(CPACK_PACKAGE_CONTACT "MNGL maintainers")
+		set(CPACK_PACKAGE_VENDOR "MNGL")
+		set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "C++23 MNGL development headers and CMake targets")
+		set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "C++23 MNGL development headers, CMake targets, and Dear ImGui integration")
+		set(CPACK_DEBIAN_PACKAGE_MAINTAINER "${CPACK_PACKAGE_CONTACT}")
+		set(CPACK_DEBIAN_PACKAGE_RELEASE "1")
+		set(CPACK_DEBIAN_PACKAGE_SECTION "libdevel")
+		set(CPACK_DEBIAN_PACKAGE_DEPENDS "libfreetype-dev, libglm-dev, libsdl3-dev, libsdl3-image-dev")
+		set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
+	endif()
 
 	install(TARGETS mngl EXPORT MNGLTargets)
 	install(TARGETS mngl_imgui EXPORT MNGLTargets
+		RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+		LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 		ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 	)
 	install(EXPORT MNGLTargets
@@ -167,21 +268,105 @@ if(MNGL_BUILD_DEVEL_PACKAGE)
 		NAMESPACE MNGL::
 		DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/MNGL"
 	)
-	install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/MNGL/"
-		DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/mngl"
-		FILES_MATCHING
-			PATTERN "*.h"
-			PATTERN "*.hpp"
-			PATTERN "examples" EXCLUDE
-			PATTERN ".github" EXCLUDE
+	set(MNGL_BRANCH_ONLY_HEADERS)
+	if(NOT MNGL_PACKAGE_BRANCH STREQUAL "main")
+		execute_process(
+			COMMAND git diff --name-only --diff-filter=A
+				"${MNGL_PACKAGE_BASE_REF}...HEAD" --
+			WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+			RESULT_VARIABLE MNGL_BRANCH_DIFF_RESULT
+			OUTPUT_VARIABLE MNGL_BRANCH_ADDED_PATHS
+			ERROR_VARIABLE MNGL_BRANCH_DIFF_ERROR
+			OUTPUT_STRIP_TRAILING_WHITESPACE
+		)
+		if(NOT MNGL_BRANCH_DIFF_RESULT EQUAL 0)
+			message(FATAL_ERROR
+				"Could not compare ${MNGL_PACKAGE_BRANCH} with ${MNGL_PACKAGE_BASE_REF} to place branch-only headers: ${MNGL_BRANCH_DIFF_ERROR}")
+		endif()
+		string(REPLACE "\r\n" "\n" MNGL_BRANCH_ADDED_PATHS "${MNGL_BRANCH_ADDED_PATHS}")
+		string(REPLACE "\n" ";" MNGL_BRANCH_ADDED_PATHS "${MNGL_BRANCH_ADDED_PATHS}")
+		foreach(MNGL_ADDED_PATH IN LISTS MNGL_BRANCH_ADDED_PATHS)
+			file(TO_CMAKE_PATH "${MNGL_ADDED_PATH}" MNGL_ADDED_PATH)
+			if(MNGL_ADDED_PATH MATCHES "\\.(h|hpp)$")
+				list(APPEND MNGL_BRANCH_ONLY_HEADERS "${MNGL_ADDED_PATH}")
+			endif()
+		endforeach()
+	endif()
+
+	function(mngl_install_header_tree source_directory)
+		if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${source_directory}")
+			return()
+		endif()
+		file(GLOB_RECURSE MNGL_HEADERS CONFIGURE_DEPENDS LIST_DIRECTORIES false
+			"${CMAKE_CURRENT_SOURCE_DIR}/${source_directory}/*.h"
+			"${CMAKE_CURRENT_SOURCE_DIR}/${source_directory}/*.hpp"
+		)
+		foreach(MNGL_HEADER IN LISTS MNGL_HEADERS)
+			file(RELATIVE_PATH MNGL_HEADER_RELATIVE_PATH
+				"${CMAKE_CURRENT_SOURCE_DIR}" "${MNGL_HEADER}")
+			file(TO_CMAKE_PATH "${MNGL_HEADER_RELATIVE_PATH}" MNGL_HEADER_RELATIVE_PATH)
+			if(MNGL_HEADER_RELATIVE_PATH MATCHES "^MNGL/imgui(/|$)")
+				continue()
+			endif()
+			get_filename_component(MNGL_HEADER_DIRECTORY "${MNGL_HEADER_RELATIVE_PATH}" DIRECTORY)
+			if(MNGL_HEADER_RELATIVE_PATH IN_LIST MNGL_BRANCH_ONLY_HEADERS)
+				set(MNGL_HEADER_INSTALL_DIRECTORY
+					"${CMAKE_INSTALL_INCLUDEDIR}/${MNGL_PACKAGE_HEADER_NAMESPACE}/${MNGL_HEADER_DIRECTORY}")
+			else()
+				set(MNGL_HEADER_INSTALL_DIRECTORY
+					"${CMAKE_INSTALL_INCLUDEDIR}/${MNGL_HEADER_DIRECTORY}")
+			endif()
+			install(FILES "${MNGL_HEADER}" DESTINATION "${MNGL_HEADER_INSTALL_DIRECTORY}")
+		endforeach()
+	endfunction()
+
+	mngl_install_header_tree("MNGL")
+	set(MNGL_BRANCH_HEADER_DIRECTORIES "tree" CACHE STRING
+		"Additional project header directories whose new headers are branch-namespaced")
+	foreach(MNGL_BRANCH_HEADER_DIRECTORY IN LISTS MNGL_BRANCH_HEADER_DIRECTORIES)
+		mngl_install_header_tree("${MNGL_BRANCH_HEADER_DIRECTORY}")
+	endforeach()
+
+	if(MNGL_BUILD_DEVEL_PACKAGE)
+		install(DIRECTORY
+			"${CMAKE_CURRENT_SOURCE_DIR}/include/SDL3"
+			"${CMAKE_CURRENT_SOURCE_DIR}/include/SDL3_image"
+			DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+		)
+	else()
+		install(DIRECTORY
+			"${CMAKE_CURRENT_SOURCE_DIR}/include/SDL3"
+			"${CMAKE_CURRENT_SOURCE_DIR}/include/SDL3_image"
+			"${CMAKE_CURRENT_SOURCE_DIR}/include/glm"
+			DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+		)
+	endif()
+	install(FILES
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui/imconfig.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui/imgui.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui/imstb_truetype.h"
+		DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/imgui"
 	)
-	# tree_practicum_ui.hpp includes these project headers by a relative path.
-	install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tree/"
-		DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tree"
-		FILES_MATCHING PATTERN "*.hpp"
+	install(FILES
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui/backends/imgui_impl_sdl3.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui/backends/imgui_impl_sdlgpu3.h"
+		DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/imgui/backends"
 	)
+	if(MNGL_BUILD_WINDOWS_DEVEL_PACKAGE)
+		install(FILES
+			"${MNGL_LIBRARY_DIRECTORY}/SDL3.lib"
+			"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.lib"
+			"${MNGL_LIBRARY_DIRECTORY}/SDL3_test.lib"
+			"${MNGL_LIBRARY_DIRECTORY}/freetype.lib"
+			DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+		)
+		install(DIRECTORY "${MNGL_LIBRARY_DIRECTORY}/"
+			DESTINATION "${CMAKE_INSTALL_BINDIR}"
+			FILES_MATCHING PATTERN "*.dll"
+		)
+	endif()
 	install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui/LICENSE.txt"
-		DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/libmngl-dev/licenses"
+		DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/MNGL"
 	)
 
 	configure_package_config_file(
@@ -189,11 +374,6 @@ if(MNGL_BUILD_DEVEL_PACKAGE)
 		"${CMAKE_CURRENT_BINARY_DIR}/MNGLConfig.cmake"
 		INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/MNGL"
 	)
-	set(MNGL_PACKAGE_VERSION "0.0.0" CACHE STRING "Version used for the MNGL development package")
-	string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" MNGL_CMAKE_CONFIG_VERSION "${MNGL_PACKAGE_VERSION}")
-	if(NOT MNGL_CMAKE_CONFIG_VERSION)
-		set(MNGL_CMAKE_CONFIG_VERSION "0.0.0")
-	endif()
 	write_basic_package_version_file(
 		"${CMAKE_CURRENT_BINARY_DIR}/MNGLConfigVersion.cmake"
 		VERSION "${MNGL_CMAKE_CONFIG_VERSION}"
@@ -205,18 +385,13 @@ if(MNGL_BUILD_DEVEL_PACKAGE)
 		DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/MNGL"
 	)
 
-	set(CPACK_GENERATOR "DEB")
-	set(CPACK_PACKAGE_NAME "libmngl-dev")
+	set(CPACK_GENERATOR "${MNGL_DEVEL_PACKAGE_GENERATOR}")
+	set(CPACK_PACKAGE_NAME "${MNGL_DEVEL_PACKAGE_NAME}")
 	set(CPACK_PACKAGE_VERSION "${MNGL_PACKAGE_VERSION}")
-	set(CPACK_PACKAGE_CONTACT "MNGL maintainers")
-	set(CPACK_PACKAGE_VENDOR "MNGL")
-	set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "C++23 MNGL development headers and CMake targets")
-	set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "C++23 MNGL development headers, CMake targets, and Dear ImGui integration")
-	set(CPACK_DEBIAN_PACKAGE_MAINTAINER "${CPACK_PACKAGE_CONTACT}")
-	set(CPACK_DEBIAN_PACKAGE_RELEASE "1")
-	set(CPACK_DEBIAN_PACKAGE_SECTION "libdevel")
-	set(CPACK_DEBIAN_PACKAGE_DEPENDS "libfreetype-dev, libglm-dev, libsdl3-dev, libsdl3-image-dev")
-	set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
+	if(NOT MNGL_BUILD_DEVEL_PACKAGE)
+		set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}")
+	endif()
 	set(CPACK_PACKAGE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/packages")
 	include(CPack)
 endif()
+

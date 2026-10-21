@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -203,7 +203,6 @@
     <ClInclude Include="text.hpp" />
     <ClInclude Include="tree_practicum_ui.hpp" />
     <ClInclude Include="tree_practicum_storage.hpp" />
-    <ClInclude Include="undo_redo_stack.hpp" />
     <ClInclude Include="render_window.hpp" />
     <ClInclude Include="color.hpp" />
     <ClInclude Include="command_buffer.hpp" />
@@ -217,6 +216,9 @@
     <ClInclude Include="iupdate.h" />
     <ClInclude Include="line.hpp" />
     <ClInclude Include="logger.h" />
+    <ClInclude Include="mod_loader.hpp" />
+    <ClInclude Include="mods.hpp" />
+    <ClInclude Include="undo_redo_stack.hpp" />
     <ClInclude Include="pixel_format.hpp" />
     <ClInclude Include="proxy.hpp" />
     <ClInclude Include="rectangle.hpp" />

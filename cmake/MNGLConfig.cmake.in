@@ -1,10 +1,7 @@
 @PACKAGE_INIT@
 
-include(CMakeFindDependencyMacro)
-find_dependency(SDL3 CONFIG REQUIRED)
-find_dependency(SDL3_image CONFIG REQUIRED)
-find_dependency(Freetype REQUIRED)
-find_dependency(glm CONFIG REQUIRED)
+@MNGL_CONFIG_FIND_DEPENDENCIES@
 
 include("${CMAKE_CURRENT_LIST_DIR}/MNGLTargets.cmake")
 check_required_components(MNGL)
+
