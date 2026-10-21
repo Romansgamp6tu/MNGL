@@ -128,6 +128,8 @@ namespace
         auto& trees = registry.classes<tree_base>(mngl_mod_demo::tree_class_id);
         std::cout << "\n[" << phase << "] Tree label: "
             << registry.property<std::string>(mngl_mod_demo::tree_label_property_id).get()
+            << ", node gap: "
+            << registry.property<float>(mngl_mod_demo::tree_node_gap_property_id).get()
             << '\n';
         auto tree = trees.create(mngl_mod_demo::bst_implementation_id);
         for (const key_type key : { -5, 5 })
@@ -139,6 +141,8 @@ namespace
     void print_usage(const char* executable)
     {
         std::cout << "Usage: " << executable << " [mods-directory]\n"
+            << "       " << executable << " --list-settings [mods-directory]\n"
+            << "       " << executable << " --set-setting <mod-id> <property-id> <value> [mods-directory]\n"
             << "       " << executable << " --print-abi\n";
     }
 }
@@ -149,6 +153,8 @@ REGISTER_MODDABLE_FUNCTION(mngl_mod_demo::tree_base, "demo.tree.insert",
 REGISTER_MODDABLE_VALUE_PROPERTY(mngl_mod_demo::tree_base, std::string,
     "demo.tree.label", mngl::mods::property_scope::global,
     std::string("Built-in BST"));
+REGISTER_MODDABLE_VALUE_PROPERTY(mngl_mod_demo::tree_base, float,
+    "demo.tree.node-gap", mngl::mods::property_scope::global, 24.0f);
 REGISTER_MODDABLE_FACTORY(mngl_mod_demo::tree_base, "demo.tree", "demo.tree.bst",
     make_bst_tree);
 
@@ -161,17 +167,40 @@ int main(int argc, char** argv)
             std::cout << mngl::mods::native_binary_abi_tag() << '\n';
             return 0;
         }
-        if (argc > 2)
+        bool list_settings = false;
+        bool set_setting_requested = false;
+        std::string setting_mod_id;
+        std::string setting_property_id;
+        std::string setting_value;
+        std::filesystem::path requested_mods_directory;
+        if (argc > 1 && std::string_view(argv[1]) == "--list-settings")
+        {
+            list_settings = true;
+            if (argc == 3) requested_mods_directory = argv[2];
+            else if (argc != 2) { print_usage(argv[0]); return 2; }
+        }
+        else if (argc > 1 && std::string_view(argv[1]) == "--set-setting")
+        {
+            if (argc != 5 && argc != 6) { print_usage(argv[0]); return 2; }
+            set_setting_requested = true;
+            setting_mod_id = argv[2];
+            setting_property_id = argv[3];
+            setting_value = argv[4];
+            if (argc == 6) requested_mods_directory = argv[5];
+        }
+        else if (argc == 2)
+            requested_mods_directory = argv[1];
+        else if (argc != 1)
         {
             print_usage(argv[0]);
             return 2;
         }
 
         const auto host_directory = executable_directory(argv[0]);
-        const bool use_built_in_example = argc == 1;
+        const bool use_built_in_example = requested_mods_directory.empty();
         const auto mods_directory = use_built_in_example
-            ? host_directory / "mods"
-            : std::filesystem::path(argv[1]);
+            ? host_directory / "mods" : requested_mods_directory;
+        const auto settings_path = host_directory / "mod-settings.ini";
         if (use_built_in_example)
         {
             std::filesystem::create_directories(mods_directory);
@@ -204,6 +233,29 @@ int main(int argc, char** argv)
                     << ": " << result.message << '\n';
             }
         }
+
+        for (const auto& issue : registry.load_settings(settings_path))
+            std::cerr << "Setting " << issue.mod_id << '/' << issue.extension_id
+                << ": " << issue.message << '\n';
+
+        if (set_setting_requested)
+        {
+            std::string error;
+            if (!registry.set_setting(setting_mod_id, setting_property_id,
+                    setting_value, &error))
+                throw std::runtime_error("cannot set " + setting_mod_id + '/' +
+                    setting_property_id + ": " + error);
+        }
+
+        if (list_settings)
+        {
+            for (const auto& setting : registry.settings())
+                std::cout << setting.mod_id << ' ' << setting.property_id << " ["
+                    << setting.type << "] = " << setting.value << '\n';
+        }
+
+        registry.save_settings(settings_path);
+        if (list_settings) return 0;
 
         if (example_loaded)
         {

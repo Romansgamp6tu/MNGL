@@ -116,6 +116,9 @@ namespace
         require(registry.property<std::string>(
             mngl_mod_demo::tree_label_property_id).get() == "Built-in BST",
             "host property did not return to its default value");
+        require(registry.property<float>(
+            mngl_mod_demo::tree_node_gap_property_id).get() == 24.0f,
+            "host numeric property did not return to its default value");
     }
 }
 
@@ -123,6 +126,8 @@ REGISTER_MODDABLE_CLASS(tree_base, "demo.tree");
 REGISTER_MODDABLE_FUNCTION(tree_base, "demo.tree.insert", &tree_base::insert_impl);
 REGISTER_MODDABLE_VALUE_PROPERTY(tree_base, std::string, "demo.tree.label",
     mngl::mods::property_scope::global, std::string("Built-in BST"));
+REGISTER_MODDABLE_VALUE_PROPERTY(tree_base, float, "demo.tree.node-gap",
+    mngl::mods::property_scope::global, 24.0f);
 REGISTER_MODDABLE_FACTORY(tree_base, "demo.tree", "demo.tree.bst", make_bst_tree);
 
 int main(int argc, char** argv)
@@ -255,20 +260,82 @@ int main(int argc, char** argv)
             write_package(dependency_root, "b-cycle", "test.cycle-b",
                 dependency_module, mngl::mods::native_binary_abi_tag(), "1.0.0",
                 R"({"test.cycle-a":"*"})");
+            write_package(dependency_root, "c-blocked", "test.cycle-dependent",
+                dependency_module, mngl::mods::native_binary_abi_tag(), "1.0.0",
+                R"({"test.cycle-a":"*"})");
 
             const auto cycle_results = dependency_loader.load_all(dependency_root);
-            require(cycle_results.size() == 2,
+            require(cycle_results.size() == 3,
                 "cycle detection did not return an error for each blocked package");
             for (const auto& result : cycle_results)
             {
                 require(!result, "a package in a dependency cycle was loaded");
-                require(result.message.find("dependency cycle detected") != std::string::npos,
-                    "dependency cycle error was not explicit");
                 require(result.message.find("test.cycle-a") != std::string::npos &&
                     result.message.find("test.cycle-b") != std::string::npos,
                     "dependency cycle error did not name the cycle members");
+                if (result.mod_id == "test.cycle-dependent")
+                    require(result.message.find("depends on the cycle") != std::string::npos,
+                        "mod blocked by a cycle was reported as a cycle member");
+                else
+                    require(result.message.find("dependency cycle detected") != std::string::npos,
+                        "dependency cycle error was not explicit");
             }
-            std::cout << "PASS: dependency cycle reported with participating mod IDs\n";
+            std::cout << "PASS: dependency cycle and blocked dependent reported clearly\n";
+        }
+
+        {
+            const auto settings_package = write_package(temp.path(), "settings-package",
+                "example.tree-tools", example_module, mngl::mods::native_binary_abi_tag());
+            const auto settings_path = temp.path() / "mod-settings.ini";
+            const std::string custom_label = "Configured\tTree\nTools";
+            {
+                mngl::mods::registry settings_registry;
+                settings_registry.apply_declarations();
+                mngl::mods::mod_loader settings_loader(settings_registry);
+                require(static_cast<bool>(settings_loader.load_package(settings_package)),
+                    "settings probe mod did not load");
+                require(settings_registry.settings().size() == 2,
+                    "host did not enumerate both string and numeric mod settings");
+                require(settings_registry.set_setting("example.tree-tools",
+                    mngl_mod_demo::tree_label_property_id, custom_label),
+                    "host could not change the string mod setting");
+                require(settings_registry.set_setting("example.tree-tools",
+                    mngl_mod_demo::tree_node_gap_property_id, "41.25"),
+                    "host could not change the floating-point mod setting");
+                std::string setting_error;
+                require(!settings_registry.set_setting("example.tree-tools",
+                    mngl_mod_demo::tree_node_gap_property_id, "not-a-number", &setting_error),
+                    "malformed numeric mod setting was accepted");
+                require(settings_registry.property<float>(
+                    mngl_mod_demo::tree_node_gap_property_id).get() == 41.25f,
+                    "rejected numeric setting changed the current value");
+                settings_registry.save_settings(settings_path);
+                require(settings_loader.unload("example.tree-tools").state ==
+                    mngl::mods::mod_unload_state::unloaded,
+                    "settings probe mod did not unload after saving");
+            }
+
+            {
+                mngl::mods::registry restored_registry;
+                restored_registry.apply_declarations();
+                mngl::mods::mod_loader restored_loader(restored_registry);
+                require(static_cast<bool>(restored_loader.load_package(settings_package)),
+                    "settings probe mod did not reload");
+                const auto load_issues = restored_registry.load_settings(settings_path);
+                require(load_issues.empty(), "valid saved settings produced diagnostics");
+                require(restored_registry.property<std::string>(
+                    mngl_mod_demo::tree_label_property_id).get() == custom_label,
+                    "string mod setting did not persist across reload");
+                require(restored_registry.property<float>(
+                    mngl_mod_demo::tree_node_gap_property_id).get() == 41.25f,
+                    "numeric mod setting did not persist across reload");
+                const auto restored_settings = restored_registry.settings();
+                require(restored_settings.size() == 2 &&
+                    restored_settings[0].mod_id == "example.tree-tools",
+                    "host settings interface did not expose restored values");
+                (void)restored_loader.unload_all();
+            }
+            std::cout << "PASS: string and numeric mod settings survive a save and reload\n";
         }
 
         const auto example_package = write_package(temp.path(), "working",

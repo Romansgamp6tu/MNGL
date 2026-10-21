@@ -956,12 +956,26 @@ namespace mngl::mods
                     for (const auto& [id, _] : graph_indices)
                         if (indegree[id] != 0) unresolved.insert(id);
                     const auto cycle = find_dependency_cycle(dependency_graph, unresolved);
-                    const auto detail = cycle.empty()
-                        ? std::string("dependency cycle detected among unresolved packages")
-                        : "dependency cycle detected: " + cycle;
+                    std::string cycle_text;
+                    std::set<std::string> cycle_members;
+                    for (std::size_t i = 0; i < cycle.size(); ++i)
+                    {
+                        if (!cycle_text.empty()) cycle_text += " -> ";
+                        cycle_text += cycle[i];
+                        if (i + 1 < cycle.size()) cycle_members.insert(cycle[i]);
+                    }
                     for (const auto& id : unresolved)
+                    {
+                        const auto message = cycle_text.empty()
+                            ? "dependency graph contains unresolved packages; this mod was not loaded"
+                            : (cycle_members.contains(id)
+                                ? "dependency cycle detected: " + cycle_text +
+                                    "; this mod is part of the cycle and was not loaded"
+                                : "cannot load this mod because its dependency graph contains a cycle: " +
+                                    cycle_text + "; this mod depends on the cycle and was not loaded");
                         results.push_back({ mod_load_state::rejected, id,
-                            detail + "; this mod was not loaded" });
+                            message });
+                    }
                 }
 
                 for (const auto& id : order)
@@ -1240,7 +1254,7 @@ namespace mngl::mods
             return {};
         }
 
-        [[nodiscard]] static std::string find_dependency_cycle(
+        [[nodiscard]] static std::vector<std::string> find_dependency_cycle(
             const std::map<std::string, std::vector<std::string>>& graph,
             const std::set<std::string>& unresolved)
         {
@@ -1281,14 +1295,8 @@ namespace mngl::mods
                     else if (state[dependency] == 1)
                     {
                         const auto first = std::find(path.begin(), path.end(), dependency);
-                        std::string cycle;
-                        for (auto current_id = first; current_id != path.end(); ++current_id)
-                        {
-                            if (!cycle.empty()) cycle += " -> ";
-                            cycle += *current_id;
-                        }
-                        if (!cycle.empty()) cycle += " -> ";
-                        cycle += dependency;
+                        std::vector<std::string> cycle(first, path.end());
+                        cycle.push_back(dependency);
                         return cycle;
                     }
                 }

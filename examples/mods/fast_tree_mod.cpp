@@ -55,6 +55,9 @@ mngl_mod_load_v1(mngl::mods::mod_context& context)
     if (!context.set_property<std::string>(
             mngl_mod_demo::tree_label_property_id, "Tree tools mod active"))
         return false;
+    if (!context.set_property<float>(
+            mngl_mod_demo::tree_node_gap_property_id, 32.0f))
+        return false;
 
     return context.add_implementation<mngl_mod_demo::tree_base>(
         mngl_mod_demo::tree_class_id,

@@ -2,11 +2,17 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
+#include <cmath>
 #include <concepts>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <exception>
 #include <functional>
+#include <iterator>
 #include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -44,6 +50,16 @@ namespace mngl::mods
         global,
         class_default,
         instance
+    };
+
+    struct mod_setting
+    {
+        std::string mod_id;
+        std::string property_id;
+        std::string type;
+        std::string value;
+        property_scope scope{ property_scope::global };
+        priority_t priority{};
     };
 
     struct diagnostic
@@ -394,6 +410,9 @@ namespace mngl::mods
             virtual ~property_slot_base() = default;
             virtual void remove_mod(std::string_view mod_id) = 0;
             virtual void remove_instance(instance_handle handle) = 0;
+            [[nodiscard]] virtual std::vector<mod_setting> get_mod_settings() const = 0;
+            virtual bool set_mod_setting(std::string_view mod_id,
+                std::string_view value, std::string& error) = 0;
         };
 
         struct class_registry_base
@@ -424,6 +443,119 @@ namespace mngl::mods
         struct next_result<R, true>
         {
             using type = bool;
+        };
+
+        template<class T, class = void>
+        struct setting_codec
+        {
+            static constexpr bool supported = false;
+        };
+
+        template<>
+        struct setting_codec<std::string>
+        {
+            static constexpr bool supported = true;
+            static constexpr std::string_view type_name = "string";
+            static std::string encode(const std::string& value) { return value; }
+            static std::string decode(std::string_view value) { return std::string(value); }
+        };
+
+        template<>
+        struct setting_codec<bool>
+        {
+            static constexpr bool supported = true;
+            static constexpr std::string_view type_name = "bool";
+            static std::string encode(bool value) { return value ? "true" : "false"; }
+            static bool decode(std::string_view value)
+            {
+                if (value == "true") return true;
+                if (value == "false") return false;
+                throw std::runtime_error("expected true or false");
+            }
+        };
+
+        template<std::integral T>
+            requires (!std::same_as<T, bool>)
+        struct setting_codec<T>
+        {
+            static constexpr bool supported = true;
+            static constexpr std::string_view type_name = [] {
+                if constexpr (std::is_signed_v<T>)
+                    return sizeof(T) == 1 ? std::string_view("int8") :
+                        sizeof(T) == 2 ? std::string_view("int16") :
+                        sizeof(T) == 4 ? std::string_view("int32") :
+                        std::string_view("int64");
+                else
+                    return sizeof(T) == 1 ? std::string_view("uint8") :
+                        sizeof(T) == 2 ? std::string_view("uint16") :
+                        sizeof(T) == 4 ? std::string_view("uint32") :
+                        std::string_view("uint64");
+            }();
+
+            static std::string encode(T value)
+            {
+                if constexpr (std::is_signed_v<T>)
+                    return std::to_string(static_cast<std::int64_t>(value));
+                else
+                    return std::to_string(static_cast<std::uint64_t>(value));
+            }
+
+            static T decode(std::string_view value)
+            {
+                if constexpr (std::is_signed_v<T>)
+                {
+                    std::int64_t parsed{};
+                    const auto result = std::from_chars(
+                        value.data(), value.data() + value.size(), parsed);
+                    if (result.ec != std::errc{} || result.ptr != value.data() + value.size() ||
+                        parsed < static_cast<std::int64_t>(std::numeric_limits<T>::min()) ||
+                        parsed > static_cast<std::int64_t>(std::numeric_limits<T>::max()))
+                        throw std::runtime_error("integer value is out of range or malformed");
+                    return static_cast<T>(parsed);
+                }
+                else
+                {
+                    std::uint64_t parsed{};
+                    const auto result = std::from_chars(
+                        value.data(), value.data() + value.size(), parsed);
+                    if (result.ec != std::errc{} || result.ptr != value.data() + value.size() ||
+                        parsed > static_cast<std::uint64_t>(std::numeric_limits<T>::max()))
+                        throw std::runtime_error("integer value is out of range or malformed");
+                    return static_cast<T>(parsed);
+                }
+            }
+        };
+
+        template<std::floating_point T>
+        struct setting_codec<T>
+        {
+            static constexpr bool supported = sizeof(T) == sizeof(float) ||
+                sizeof(T) == sizeof(double);
+            static constexpr std::string_view type_name = sizeof(T) == sizeof(float)
+                ? std::string_view("float32") : std::string_view("float64");
+
+            static std::string encode(T value)
+            {
+                if (!std::isfinite(value))
+                    throw std::runtime_error("non-finite settings values cannot be saved");
+                char buffer[128]{};
+                const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value,
+                    std::chars_format::general, std::numeric_limits<T>::max_digits10);
+                if (result.ec != std::errc{})
+                    throw std::runtime_error("could not encode floating-point setting");
+                return std::string(buffer, result.ptr);
+            }
+
+            static T decode(std::string_view value)
+            {
+                T parsed{};
+                const auto result = std::from_chars(value.data(),
+                    value.data() + value.size(), parsed, std::chars_format::general);
+                if (result.ec != std::errc{} || result.ptr != value.data() + value.size() ||
+                    !std::isfinite(parsed))
+                    throw std::runtime_error("floating-point value is malformed or non-finite");
+                return parsed;
+            }
         };
     }
 
@@ -790,6 +922,72 @@ namespace mngl::mods
         }
 
     private:
+        [[nodiscard]] std::vector<mod_setting> get_mod_settings() const
+        {
+            if constexpr (!detail::setting_codec<T>::supported)
+                return {};
+            else
+            {
+                if (m_scope == property_scope::instance) return {};
+                std::lock_guard lock(m_mutex);
+                std::vector<mod_setting> result;
+                for (const auto& item : m_overrides)
+                    if (!item.handle)
+                        result.push_back(mod_setting{ item.mod_id, m_id,
+                            std::string(detail::setting_codec<T>::type_name),
+                            detail::setting_codec<T>::encode(item.value), m_scope, item.priority });
+                return result;
+            }
+        }
+
+        bool set_mod_setting(std::string_view mod_id, std::string_view value,
+            std::string& error)
+        {
+            if (m_scope == property_scope::instance)
+            {
+                error = "instance-scoped properties cannot be saved as mod settings";
+                return false;
+            }
+            if constexpr (!detail::setting_codec<T>::supported)
+            {
+                error = "this property type does not support persisted settings";
+                return false;
+            }
+            else
+            {
+                priority_t priority{};
+                {
+                    std::lock_guard lock(m_mutex);
+                    const auto found = std::find_if(m_overrides.begin(), m_overrides.end(),
+                        [&](const auto& item) {
+                            return item.mod_id == mod_id && !item.handle;
+                        });
+                    if (found == m_overrides.end())
+                    {
+                        error = "mod does not currently override this property";
+                        return false;
+                    }
+                    priority = found->priority;
+                }
+
+                try
+                {
+                    const auto decoded = detail::setting_codec<T>::decode(value);
+                    if (!set_override(std::string(mod_id), decoded, priority))
+                    {
+                        error = "property validator rejected the setting value";
+                        return false;
+                    }
+                    return true;
+                }
+                catch (const std::exception& exception)
+                {
+                    error = exception.what();
+                    return false;
+                }
+            }
+        }
+
         struct override_value
         {
             std::string mod_id;
@@ -878,6 +1076,15 @@ namespace mngl::mods
 
             void remove_mod(std::string_view mod_id) override { slot.remove_mod(mod_id); }
             void remove_instance(instance_handle handle) override { slot.remove_instance(handle); }
+            [[nodiscard]] std::vector<mod_setting> get_mod_settings() const override
+            {
+                return slot.get_mod_settings();
+            }
+            bool set_mod_setting(std::string_view mod_id,
+                std::string_view value, std::string& error) override
+            {
+                return slot.set_mod_setting(mod_id, value, error);
+            }
         };
     }
 
@@ -1255,6 +1462,239 @@ namespace mngl::mods
             for (const auto& value : classes) value->remove_mod(mod_id);
         }
 
+        // Returns the active, non-instance property overrides that a host can expose.
+        [[nodiscard]] std::vector<mod_setting> settings() const
+        {
+            std::vector<std::shared_ptr<detail::property_slot_base>> properties;
+            {
+                std::lock_guard lock(m_mutex);
+                for (const auto& [_, value] : m_properties)
+                    properties.push_back(value);
+            }
+
+            std::vector<mod_setting> result;
+            for (const auto& property : properties)
+            {
+                auto entries = property->get_mod_settings();
+                result.insert(result.end(),
+                    std::make_move_iterator(entries.begin()),
+                    std::make_move_iterator(entries.end()));
+            }
+            std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) {
+                if (left.mod_id != right.mod_id) return left.mod_id < right.mod_id;
+                return left.property_id < right.property_id;
+            });
+            return result;
+        }
+
+        // Values use the text form shown by settings(); validators still apply.
+        bool set_setting(std::string_view mod_id, std::string_view property_id,
+            std::string_view value, std::string* error = nullptr)
+        {
+            std::lock_guard settings_io_lock(m_settings_io_mutex);
+            detail::require_id(mod_id, "mod_id");
+            detail::require_id(property_id, "property_id");
+            std::shared_ptr<detail::property_slot_base> property;
+            {
+                std::lock_guard lock(m_mutex);
+                const auto found = m_properties.find(std::string(property_id));
+                if (found != m_properties.end()) property = found->second;
+            }
+
+            std::string message;
+            if (!property)
+                message = "unknown property";
+            else if (!property->set_mod_setting(mod_id, value, message))
+            {
+                // The property supplies a type- or validator-specific explanation.
+            }
+            else
+            {
+                const auto entries = property->get_mod_settings();
+                const auto found = std::find_if(entries.begin(), entries.end(),
+                    [&](const mod_setting& setting) { return setting.mod_id == mod_id; });
+                if (found != entries.end())
+                {
+                    std::lock_guard lock(m_settings_mutex);
+                    m_saved_settings.insert_or_assign(
+                        std::pair(found->mod_id, found->property_id), *found);
+                }
+                if (error) error->clear();
+                return true;
+            }
+
+            if (message.empty()) message = "setting value was rejected";
+            if (error) *error = message;
+            m_diagnostics->add(diagnostic{ error_code::invalid_value,
+                std::string(mod_id), std::string(property_id), message });
+            return false;
+        }
+
+        // Load after mods have registered their overrides. Unknown entries are retained
+        // so settings for temporarily absent mods survive a save.
+        [[nodiscard]] std::vector<diagnostic> load_settings(
+            const std::filesystem::path& path)
+        {
+            std::lock_guard settings_io_lock(m_settings_io_mutex);
+            std::vector<diagnostic> diagnostics;
+            std::map<std::pair<std::string, std::string>, mod_setting> records;
+            try
+            {
+                std::error_code file_error;
+                if (!std::filesystem::exists(path, file_error))
+                {
+                    if (file_error)
+                        throw std::runtime_error("cannot inspect settings file: " +
+                            file_error.message());
+                    return diagnostics;
+                }
+                constexpr std::uintmax_t max_settings_size = 4 * 1024 * 1024;
+                if (std::filesystem::file_size(path) > max_settings_size)
+                    throw std::runtime_error("settings file exceeds the 4 MiB size limit");
+
+                std::ifstream input(path);
+                if (!input)
+                    throw std::runtime_error("cannot open settings file");
+                std::string line;
+                if (!std::getline(input, line) || line != "MNGL_MOD_SETTINGS\t1")
+                    throw std::runtime_error("unsupported settings file header or version");
+
+                std::size_t line_number = 1;
+                while (std::getline(input, line))
+                {
+                    ++line_number;
+                    if (!line.empty() && line.back() == '\r') line.pop_back();
+                    if (line.empty() || line.front() == '#') continue;
+                    const auto first = line.find('\t');
+                    const auto second = first == std::string::npos
+                        ? std::string::npos : line.find('\t', first + 1);
+                    const auto third = second == std::string::npos
+                        ? std::string::npos : line.find('\t', second + 1);
+                    if (first == std::string::npos || second == std::string::npos ||
+                        third == std::string::npos || line.find('\t', third + 1) != std::string::npos)
+                        throw std::runtime_error("malformed settings record on line " +
+                            std::to_string(line_number));
+
+                    auto mod_id = decode_setting_field(
+                        std::string_view(line).substr(0, first));
+                    auto property_id = decode_setting_field(
+                        std::string_view(line).substr(first + 1, second - first - 1));
+                    auto type = decode_setting_field(
+                        std::string_view(line).substr(second + 1, third - second - 1));
+                    auto value = decode_setting_field(
+                        std::string_view(line).substr(third + 1));
+                    detail::require_id(mod_id, "mod_id");
+                    detail::require_id(property_id, "property_id");
+                    if (type.empty())
+                        throw std::runtime_error("empty property type on line " +
+                            std::to_string(line_number));
+                    mod_setting setting{ mod_id, property_id, type, value };
+                    if (!records.emplace(std::pair(mod_id, property_id),
+                            std::move(setting)).second)
+                        throw std::runtime_error("duplicate setting on line " +
+                            std::to_string(line_number));
+                }
+                if (!input.eof())
+                    throw std::runtime_error("failed while reading settings file");
+            }
+            catch (const std::exception& exception)
+            {
+                diagnostics.push_back(diagnostic{ error_code::invalid_value, {}, {},
+                    exception.what() });
+                for (const auto& item : diagnostics) m_diagnostics->add(item);
+                return diagnostics;
+            }
+
+            {
+                std::lock_guard lock(m_settings_mutex);
+                m_saved_settings = records;
+            }
+
+            for (const auto& [key, saved] : records)
+            {
+                std::shared_ptr<detail::property_slot_base> property;
+                {
+                    std::lock_guard lock(m_mutex);
+                    const auto found = m_properties.find(saved.property_id);
+                    if (found != m_properties.end()) property = found->second;
+                }
+                if (!property)
+                {
+                    diagnostics.push_back(diagnostic{ error_code::unknown_extension,
+                        saved.mod_id, saved.property_id,
+                        "saved setting refers to an unknown property; entry was preserved" });
+                    continue;
+                }
+
+                const auto active = property->get_mod_settings();
+                const auto current = std::find_if(active.begin(), active.end(),
+                    [&](const mod_setting& setting) { return setting.mod_id == saved.mod_id; });
+                if (current == active.end())
+                {
+                    diagnostics.push_back(diagnostic{ error_code::invalid_value,
+                        saved.mod_id, saved.property_id,
+                        "saved setting has no active mod override; entry was preserved" });
+                    continue;
+                }
+                if (current->type != saved.type)
+                {
+                    diagnostics.push_back(diagnostic{ error_code::type_mismatch,
+                        saved.mod_id, saved.property_id,
+                        "saved setting type '" + saved.type + "' does not match '" +
+                            current->type + "'; entry was preserved" });
+                    continue;
+                }
+
+                std::string error_message;
+                if (!property->set_mod_setting(saved.mod_id, saved.value, error_message))
+                    diagnostics.push_back(diagnostic{ error_code::invalid_value,
+                        saved.mod_id, saved.property_id,
+                        "saved setting was rejected: " + error_message });
+            }
+
+            for (const auto& item : diagnostics) m_diagnostics->add(item);
+            return diagnostics;
+        }
+
+        void save_settings(const std::filesystem::path& path) const
+        {
+            std::lock_guard settings_io_lock(m_settings_io_mutex);
+            auto records = settings();
+            {
+                std::lock_guard lock(m_settings_mutex);
+                for (const auto& setting : records)
+                    m_saved_settings.insert_or_assign(
+                        std::pair(setting.mod_id, setting.property_id), setting);
+                records.clear();
+                records.reserve(m_saved_settings.size());
+                for (const auto& [_, setting] : m_saved_settings)
+                    records.push_back(setting);
+            }
+
+            if (!path.parent_path().empty())
+                std::filesystem::create_directories(path.parent_path());
+            auto temporary = path;
+            temporary += ".tmp";
+            {
+                std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+                if (!output)
+                    throw std::runtime_error("cannot create temporary settings file: " +
+                        temporary.string());
+                output << "MNGL_MOD_SETTINGS\t1\n"
+                    << "# columns: mod_id, property_id, type, value (percent-encoded UTF-8)\n";
+                for (const auto& setting : records)
+                    output << encode_setting_field(setting.mod_id) << '\t'
+                        << encode_setting_field(setting.property_id) << '\t'
+                        << encode_setting_field(setting.type) << '\t'
+                        << encode_setting_field(setting.value) << '\n';
+                output.flush();
+                if (!output)
+                    throw std::runtime_error("failed while writing settings file: " +
+                        temporary.string());
+            }
+            replace_settings_file(temporary, path);
+        }
+
         [[nodiscard]] std::vector<diagnostic> diagnostics() const
         {
             return m_diagnostics->snapshot();
@@ -1271,6 +1711,85 @@ namespace mngl::mods
         [[nodiscard]] mod_context for_mod(std::string mod_id);
 
     private:
+        [[nodiscard]] static std::string encode_setting_field(std::string_view value)
+        {
+            constexpr char hex[] = "0123456789ABCDEF";
+            std::string result;
+            result.reserve(value.size());
+            for (const unsigned char byte : value)
+            {
+                if (byte >= 0x21 && byte <= 0x7e && byte != '%')
+                    result.push_back(static_cast<char>(byte));
+                else
+                {
+                    result.push_back('%');
+                    result.push_back(hex[byte >> 4]);
+                    result.push_back(hex[byte & 0x0f]);
+                }
+            }
+            return result;
+        }
+
+        [[nodiscard]] static std::string decode_setting_field(std::string_view value)
+        {
+            const auto hex_value = [](char character) -> int {
+                if (character >= '0' && character <= '9') return character - '0';
+                if (character >= 'A' && character <= 'F') return character - 'A' + 10;
+                if (character >= 'a' && character <= 'f') return character - 'a' + 10;
+                return -1;
+            };
+            std::string result;
+            result.reserve(value.size());
+            for (std::size_t i = 0; i < value.size(); ++i)
+            {
+                if (value[i] != '%')
+                {
+                    result.push_back(value[i]);
+                    continue;
+                }
+                if (i + 2 >= value.size())
+                    throw std::runtime_error("invalid percent escape in settings file");
+                const auto high = hex_value(value[i + 1]);
+                const auto low = hex_value(value[i + 2]);
+                if (high < 0 || low < 0)
+                    throw std::runtime_error("invalid percent escape in settings file");
+                result.push_back(static_cast<char>((high << 4) | low));
+                i += 2;
+            }
+            return result;
+        }
+
+        static void replace_settings_file(const std::filesystem::path& temporary,
+            const std::filesystem::path& target)
+        {
+            std::error_code error;
+            std::filesystem::rename(temporary, target, error);
+            if (!error) return;
+            if (!std::filesystem::exists(target))
+                throw std::runtime_error("cannot replace settings file: " + error.message());
+
+            auto backup = target;
+            backup += ".bak";
+            std::error_code ignored;
+            std::filesystem::remove(backup, ignored);
+            error.clear();
+            std::filesystem::rename(target, backup, error);
+            if (error)
+                throw std::runtime_error("cannot back up existing settings file: " +
+                    error.message());
+
+            error.clear();
+            std::filesystem::rename(temporary, target, error);
+            if (error)
+            {
+                std::error_code restore_error;
+                std::filesystem::rename(backup, target, restore_error);
+                throw std::runtime_error("cannot install new settings file: " +
+                    error.message());
+            }
+            std::filesystem::remove(backup, ignored);
+        }
+
         [[nodiscard]] mod_context for_mod(std::string mod_id,
             std::shared_ptr<detail::module_lifetime> lifetime);
 
@@ -1288,6 +1807,9 @@ namespace mngl::mods
         std::unordered_map<std::string, std::shared_ptr<detail::function_slot_base>> m_functions;
         std::unordered_map<std::string, std::shared_ptr<detail::property_slot_base>> m_properties;
         std::unordered_map<std::string, std::shared_ptr<detail::class_registry_base>> m_classes;
+        mutable std::mutex m_settings_mutex;
+        mutable std::mutex m_settings_io_mutex;
+        mutable std::map<std::pair<std::string, std::string>, mod_setting> m_saved_settings;
 
         friend class mod_context;
         friend class mod_loader;

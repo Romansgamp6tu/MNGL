@@ -9,6 +9,7 @@ namespace mngl_mod_demo
     inline constexpr char tree_class_id[] = "demo.tree";
     inline constexpr char insert_extension_id[] = "demo.tree.insert";
     inline constexpr char tree_label_property_id[] = "demo.tree.label";
+    inline constexpr char tree_node_gap_property_id[] = "demo.tree.node-gap";
     inline constexpr char bst_implementation_id[] = "demo.tree.bst";
     inline constexpr char counting_implementation_id[] = "demo.tree.counting";
 
