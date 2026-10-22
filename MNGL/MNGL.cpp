@@ -2,6 +2,8 @@
 #include "imgui_compat.hpp"
 #include "render_window.hpp"
 #include "tree_practicum_ui.hpp"
+#include "tree_console.hpp"
+#include "logger.h"
 #include "compute_pass.hpp"
 #include "frame_graph.hpp"
 
@@ -36,7 +38,7 @@ static int run_demo()
 		throw std::runtime_error(SDL_Runtime.content());
 	}
 
-	SDL_Log("MNGL startup checkpoint: SDL initialized");
+	logger.info("Starting MNGL ImGui hit-test demo.");
 	mngl::window::flags window_flags;
 	window_flags.fullscreen = true;
 	window_flags.borderless = true;
@@ -53,12 +55,10 @@ static int run_demo()
 		static_cast<unsigned int>(std::max(1.0f, std::round(base_size.x * initial_scale))),
 		static_cast<unsigned int>(std::max(1.0f, std::round(base_size.y * initial_scale)))
 	};
-	SDL_Log("MNGL startup checkpoint: creating render window");
 	mngl::render_window window("MNGL — проверка ImGui", initial_size, window_flags);
-	SDL_Log("MNGL startup checkpoint: render window and GPU device ready");
+	logger.debug("Render window and GPU device initialized.");
 	mngl::resizable_texture workspace(window);
 	auto& workspace_texture = workspace.target();
-	SDL_Log("MNGL startup checkpoint: workspace texture ready");
 	auto& workspace_sprite = workspace.as_sprite();
 	const mngl::rectangle bounds{ 0.2f, 0.2f, 0.8f, 0.5f };
 	const mngl::rectangle panel_bounds{ 0.26666668f, 0.2f, 0.8f, 0.6f };
@@ -134,9 +134,8 @@ static int run_demo()
 	};
 	mngl::imgui_compat::font_config font_config;
 	font_config.regular.file = demo_font_path();
-	SDL_Log("MNGL startup checkpoint: creating ImGui context");
 	mngl::imgui_context gui(window, font_config);
-	SDL_Log("MNGL startup checkpoint: ImGui context ready");
+	logger.debug("ImGui context initialized.");
 	const std::vector<std::string> render_modes{ "Заливка", "Каркас", "Точки" };
 	const std::vector<int> frame_rates{ 30, 60, 120 };
 	const std::vector<mngl::scancode> keys{
@@ -155,10 +154,6 @@ static int run_demo()
 			SDL_Delay(10);
 			continue;
 		}
-		if (!has_completed_frame)
-		{
-			SDL_Log("MNGL startup checkpoint: entering first frame");
-		}
 		const auto logical_window_size = window.size();
 		(void)workspace.target();
 		(void)workspace.as_sprite();
@@ -175,10 +170,6 @@ static int run_demo()
 
 		{
 			gui.set_user_scale(ui_scale);
-			if (!has_completed_frame)
-			{
-				SDL_Log("MNGL startup checkpoint: beginning ImGui frame");
-			}
 			auto frame = gui.frame(workspace_texture);
 			{
 				auto menu_bar = frame.main_menu_bar();
@@ -361,11 +352,6 @@ static int run_demo()
 				}
 			}
 		}
-		if (!has_completed_frame)
-		{
-			SDL_Log("MNGL startup checkpoint: ImGui frame built");
-		}
-
 		glm::vec2 sprite_position{};
 		glm::vec2 sprite_size = workspace_size;
 		glm::vec4 sprite_uv{ 0.0f, 0.0f, 1.0f, 1.0f };
@@ -406,18 +392,10 @@ static int run_demo()
 			.rotation(sprite_rotation);
 		workspace_sprite.source.uv_bounds = sprite_uv;
 
-		if (!has_completed_frame)
-		{
-			SDL_Log("MNGL startup checkpoint: rendering workspace texture");
-		}
 		auto workspace_render_frame = window.frame(
 			workspace_texture,
 			mngl::color{ 0.0f, 0.0f, 0.0f, 0.0f });
 		workspace_render_frame.display();
-		if (!has_completed_frame)
-		{
-			SDL_Log("MNGL startup checkpoint: workspace texture rendered");
-		}
 
 		if (has_completed_frame &&
 			mngl::Input::is_mouse_button_pressed(mngl::mouse_button::left))
@@ -445,10 +423,6 @@ static int run_demo()
 			fill = { 0.2f, 0.75f, 0.3f, 1.0f };
 		}
 
-		if (!has_completed_frame)
-		{
-			SDL_Log("MNGL startup checkpoint: rendering panel texture");
-		}
 		auto panel_render_frame = panel.frame(mngl::color{ 0.08f, 0.09f, 0.12f, 1.0f });
 		panel_render_frame.draw([&](mngl::two_d::Frame2D& frame)
 		{
@@ -456,15 +430,6 @@ static int run_demo()
 			frame.draw(button);
 		});
 		panel_render_frame.display();
-		if (!has_completed_frame)
-		{
-			SDL_Log("MNGL startup checkpoint: panel texture rendered");
-		}
-
-		if (!has_completed_frame)
-		{
-			SDL_Log("MNGL startup checkpoint: rendering swapchain");
-		}
 		auto output_frame = window.frame(mngl::color{ 0.08f, 0.09f, 0.12f, 1.0f });
 		output_frame.draw(panel_sprite);
 		if (show_workspace_surface)
@@ -474,7 +439,7 @@ static int run_demo()
 		output_frame.display();
 		if (!has_completed_frame)
 		{
-			SDL_Log("MNGL startup checkpoint: first frame presented");
+			logger.success("MNGL ImGui demo rendered its first frame.");
 		}
 		has_completed_frame = true;
 	}
@@ -508,31 +473,39 @@ static int run_tree_practicum()
 	}
 
 	mngl::window::flags window_flags;
-	window_flags.fullscreen = true;
-	window_flags.borderless = true;
+	window_flags.resizeable = true;
 	window_flags.high_pixel_density = true;
 
-	float initial_scale = 1.0f;
-	if (auto display = SDL_GetPrimaryDisplay())
+	const auto primary_display = mngl::display::primary();
+	const auto usable_bounds = primary_display.usable_bounds();
+	constexpr glm::uvec2 base_size{ 1440, 900 };
+	const auto fit_window_dimension = [](float available, unsigned int desired)
 	{
-		const float display_scale = SDL_GetDisplayContentScale(display);
-		if (display_scale > 0.0f && std::isfinite(display_scale))
-		{
-			initial_scale = display_scale;
-		}
-	}
-
-	const glm::uvec2 base_size{ 1440, 900 };
+		const float safe_available = std::max(1.0f, available - 48.0f);
+		return static_cast<unsigned int>(std::floor(std::min(
+			static_cast<float>(desired),
+			safe_available)));
+	};
 	const glm::uvec2 initial_size{
-		static_cast<unsigned int>(
-			std::max(1.0f, std::round(base_size.x * initial_scale))),
-		static_cast<unsigned int>(
-			std::max(1.0f, std::round(base_size.y * initial_scale)))
+		fit_window_dimension(usable_bounds.size.x, base_size.x),
+		fit_window_dimension(usable_bounds.size.y, base_size.y)
 	};
 	mngl::render_window window(
 		"Планировщик деревьев",
 		initial_size,
 		window_flags);
+	window.min_size({
+		std::min(800u, initial_size.x),
+		std::min(600u, initial_size.y)
+	});
+	window.position({
+		static_cast<int>(std::lround(
+			usable_bounds.pos.x +
+			(usable_bounds.size.x - initial_size.x) * 0.5f)),
+		static_cast<int>(std::lround(
+			usable_bounds.pos.y +
+			(usable_bounds.size.y - initial_size.y) * 0.5f))
+	});
 
 	mngl::imgui_compat::font_config font_config;
 	font_config.regular.file = find_font_file("Roboto-Medium.ttf");
@@ -572,16 +545,21 @@ int main(int argc, char* argv[])
 		{
 			return run_demo();
 		}
+		if (argc > 1)
+		{
+			tree_practicum::console_cli::application cli;
+			return cli.run_process(argc, argv);
+		}
 		return run_tree_practicum();
 	}
 	catch (const std::exception& error)
 	{
-		SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION, "MNGL unhandled exception: %s", error.what());
+		logger.critical("MNGL stopped after an unhandled exception: ", error.what());
 		return 1;
 	}
 	catch (...)
 	{
-		SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION, "MNGL unhandled non-standard exception");
+		logger.critical("MNGL stopped after an unhandled non-standard exception.");
 		return 1;
 	}
 }

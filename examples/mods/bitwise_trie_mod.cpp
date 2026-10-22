@@ -25,6 +25,8 @@ namespace
 {
 	using namespace mngl::mods::tree;
 
+	inline constexpr tree_id tree_algorithm_id = "mngl.tree.bitwise-trie";
+
 	inline constexpr std::size_t maximum_key_count = 500'000;
 	inline constexpr std::size_t maximum_node_count = 1'000'000;
 	inline constexpr std::uint64_t sign_bit = std::uint64_t{ 1 } << 63;
@@ -40,13 +42,15 @@ namespace
 		operation::erase;
 
 	const algorithm_info bitwise_trie_info{
-		ids::bitwise_trie,
+		tree_algorithm_id,
 		"Битовый бор (Patricia)",
 		"bitwise-trie",
 		"bitwise_trie{",
 		supported_keys,
 		supported_operations,
-		{ layout_transitions, 0 }
+		{ layout_transitions, 0 },
+		{},
+		6
 	};
 
 	[[nodiscard]] std::uint64_t encode(std::int64_t value) noexcept
@@ -246,7 +250,7 @@ namespace
 	void validate_tree(const tree& value, key_kind keys)
 	{
 		require_integer_keys(keys);
-		if (value.b_plus || value.fanout != 0 ||
+		if (value.multiway || value.fanout != 0 ||
 			value.nodes.size() > maximum_node_count)
 		{
 			throw std::invalid_argument("Invalid Bitwise Trie metadata.");
@@ -279,7 +283,7 @@ namespace
 			}
 			visited[index] = true;
 			const auto& current = value.nodes[index];
-			if (current.red || current.next_leaf != no_tree_node)
+			if (current.emphasized || current.next_leaf != no_tree_node)
 			{
 				throw std::invalid_argument(
 					"Bitwise Trie node contains unsupported metadata.");
@@ -432,7 +436,7 @@ namespace
 				fail("unexpected data after tree");
 			}
 			return {
-				std::string(ids::bitwise_trie),
+				std::string(tree_algorithm_id),
 				build_tree(std::move(keys)),
 				key_kind::signed_integer
 			};
@@ -764,7 +768,7 @@ namespace
 	public:
 		[[nodiscard]] std::string_view algorithm_id() const noexcept override
 		{
-			return ids::bitwise_trie;
+			return tree_algorithm_id;
 		}
 
 		[[nodiscard]] invariant_report inspect(
@@ -840,18 +844,18 @@ mngl_mod_load_v1(mngl::mods::mod_context& context)
 	const bool algorithm_registered =
 		context.add_implementation<mngl::mods::tree::algorithm>(
 		mngl::mods::tree::algorithm_class_id,
-		std::string(mngl::mods::tree::ids::bitwise_trie),
+		std::string(tree_algorithm_id),
 		[] { return std::make_unique<bitwise_trie_algorithm>(); });
 	const bool command_handler_registered =
 		context.add_implementation<
 			mngl::mods::tree::custom_command_handler>(
 				mngl::mods::tree::custom_command_class_id,
-				std::string(mngl::mods::tree::ids::bitwise_trie),
+				std::string(tree_algorithm_id),
 				[] { return std::make_unique<bitwise_trie_command_handler>(); });
 	const bool inspector_registered = context.add_implementation<
 		mngl::mods::tree::invariant_inspector>(
 			mngl::mods::tree::invariant_inspector_class_id,
-			std::string(mngl::mods::tree::ids::bitwise_trie),
+			std::string(tree_algorithm_id),
 			[] { return std::make_unique<bitwise_trie_invariant_inspector>(); });
 	return algorithm_registered && command_handler_registered &&
 		inspector_registered;

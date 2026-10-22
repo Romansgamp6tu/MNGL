@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "commands": [
+    {
+      "algorithm_id": "mngl.tree.b-plus",
+      "name": "find",
+      "signature": "find(key: int64_t | double) [F]",
+      "description": "Ищет точный ключ в листьях B+ дерева и подсвечивает путь через узлы-разделители. Дерево не меняется."
+    },
+    {
+      "algorithm_id": "mngl.tree.b-plus",
+      "name": "insert",
+      "signature": "insert(key: int64_t | double) [A / Ins]",
+      "description": "Добавляет уникальный ключ в лист B+ дерева. При переполнении лист разделяется, а разделители и связи листьев обновляются."
+    },
+    {
+      "algorithm_id": "mngl.tree.b-plus",
+      "name": "erase",
+      "signature": "erase(key: int64_t | double) [D / Del]",
+      "description": "Удаляет ключ из листа. Недозаполненные узлы заимствуют ключи у соседей или объединяются; родительские разделители пересчитываются."
+    },
+    {
+      "algorithm_id": "mngl.tree.b-plus",
+      "name": "merge",
+      "signature": "merge(source: .tree) [M]",
+      "description": "Перестраивает B+ дерево из ключей текущего дерева и источника, если max(current) < min(source). Fanout текущего дерева сохраняется, исходная запись остаётся нетронутой."
+    },
+    {
+      "algorithm_id": "mngl.tree.b-plus",
+      "name": "split",
+      "signature": "split(pivot: int64_t | double) [C]",
+      "description": "Перестраивает две B+ структуры с тем же fanout: листья слева содержат ключи < pivot, справа — ключи >= pivot. Результаты сохраняются в отдельных вкладках."
+    },
+    {
+      "algorithm_id": "mngl.tree.b-plus",
+      "name": "insert_random",
+      "signature": "insert_random(count: uint64_t) [R]",
+      "description": "Добавляет указанное число уникальных случайных ключей без анимации. Алиасы: mass insert, random test, mass random insert."
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "utilities.hpp"
+#include "logger.h"
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -885,9 +886,14 @@ namespace mngl
             }
             catch (const std::bad_alloc&)
             {
-                SDL_LogError(
-                    SDL_LOG_CATEGORY_APPLICATION,
-                    "Unable to queue an SDL input event for Dear ImGui.");
+                try
+                {
+                    logger.error(
+                        "Unable to queue an SDL input event for Dear ImGui.");
+                }
+                catch (...)
+                {
+                }
             }
         }
 

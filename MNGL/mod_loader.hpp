@@ -103,6 +103,7 @@ namespace mngl::mods
 
     [[nodiscard]] inline std::string native_binary_abi_tag()
     {
+        constexpr std::string_view mngl_mod_abi_revision = "mngl-mod-2";
 #if defined(_WIN32)
         constexpr std::string_view operating_system = "windows";
 #elif defined(__APPLE__)
@@ -144,7 +145,8 @@ namespace mngl::mods
         return "msvc-" + std::to_string(_MSC_VER) + "-" +
             std::string(architecture) + "-" + std::string(crt) + "-it" +
             std::to_string(iterator_debug_level) + "-" + std::string(config) + "-" +
-            std::string(operating_system);
+            std::string(operating_system) + "-" +
+            std::string(mngl_mod_abi_revision);
 #elif defined(__clang__)
 #if defined(__x86_64__) || defined(_M_X64)
         constexpr std::string_view architecture = "x64";
@@ -164,7 +166,8 @@ namespace mngl::mods
         return "clang-" + std::to_string(__clang_major__) + "." +
             std::to_string(__clang_minor__) + "-" + std::string(architecture) +
             "-cxx" + std::to_string(__cplusplus) + "-" + std::string(operating_system) +
-            "-" + standard_library;
+            "-" + standard_library + "-" +
+            std::string(mngl_mod_abi_revision);
 #elif defined(__GNUC__)
 #if defined(__x86_64__)
         constexpr std::string_view architecture = "x64";
@@ -190,9 +193,10 @@ namespace mngl::mods
             std::to_string(__GNUC_MINOR__) + "-" + std::string(architecture) +
             "-cxx" + std::to_string(__cplusplus) + "-glibcxx" +
             std::to_string(libstdcxx_abi) + "-" + std::string(operating_system) +
-            "-" + standard_library;
+            "-" + standard_library + "-" +
+            std::string(mngl_mod_abi_revision);
 #else
-        return "unknown-native-abi";
+        return "unknown-native-abi-" + std::string(mngl_mod_abi_revision);
 #endif
     }
 
@@ -639,6 +643,16 @@ namespace mngl::mods
             std::string m_mod_id;
         };
 
+        [[nodiscard]] inline std::filesystem::path path_from_utf8(
+            std::string_view value)
+        {
+            std::u8string encoded;
+            encoded.reserve(value.size());
+            for (const unsigned char byte : value)
+                encoded.push_back(static_cast<char8_t>(byte));
+            return std::filesystem::path(std::move(encoded));
+        }
+
         inline mod_manifest parse_manifest_file(const std::filesystem::path& package_directory)
         {
             const auto package = std::filesystem::canonical(package_directory);
@@ -711,7 +725,7 @@ namespace mngl::mods
                 if (binary.find('\\') != std::string::npos)
                     throw std::runtime_error("binary path must use forward slashes");
 
-                const auto relative_binary = std::filesystem::u8path(binary);
+                const auto relative_binary = path_from_utf8(binary);
                 if (relative_binary.empty() || relative_binary.is_absolute() ||
                     relative_binary.has_root_name() || relative_binary.has_root_directory())
                     throw std::runtime_error("binary path must be relative to the mod package");

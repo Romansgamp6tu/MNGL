@@ -4,4 +4,15 @@
     <Platform Name="x86" />
   </Configurations>
   <Project Path="MNGL/MNGL.vcxproj" Id="0e156573-e0a8-4fce-ac45-d0fb02c394b6" />
+  <Folder Name="/Tree Algorithm Mods/">
+    <Project Path="examples/mods/visual_studio/MNGL.Mod.Treap.vcxproj" Id="F594BA07-182D-4DF2-BBD9-36D9C7A55C01" />
+    <Project Path="examples/mods/visual_studio/MNGL.Mod.Splay.vcxproj" Id="F594BA07-182D-4DF2-BBD9-36D9C7A55C02" />
+    <Project Path="examples/mods/visual_studio/MNGL.Mod.AVL.vcxproj" Id="F594BA07-182D-4DF2-BBD9-36D9C7A55C03" />
+    <Project Path="examples/mods/visual_studio/MNGL.Mod.RedBlack.vcxproj" Id="F594BA07-182D-4DF2-BBD9-36D9C7A55C04" />
+    <Project Path="examples/mods/visual_studio/MNGL.Mod.BPlus.vcxproj" Id="F594BA07-182D-4DF2-BBD9-36D9C7A55C05" />
+    <Project Path="examples/mods/visual_studio/MNGL.Mod.BitwiseTrie.vcxproj" Id="F594BA07-182D-4DF2-BBD9-36D9C7A55C06" />
+  </Folder>
+  <Folder Name="/Build Tools/">
+    <Project Path="examples/mods/visual_studio/MNGL.TreeModManifestWriter.vcxproj" Id="674275D1-5AA2-4D7B-9C92-E015E8391833" />
+  </Folder>
 </Solution>

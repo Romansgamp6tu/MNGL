@@ -39,10 +39,10 @@ namespace mngl::two_d
 	enum class tree_node_style : unsigned char
 	{
 		normal,
-		red,
-		black,
-		b_plus_leaf,
-		b_plus_internal
+		emphasized,
+		neutral,
+		multiway_leaf,
+		multiway_internal
 	};
 
 	struct tree_draw_node
@@ -131,11 +131,11 @@ namespace mngl::two_d
 		color value_color{ 0.94f, 0.96f, 0.99f, 1.0f };
 		bool show_leaf_links = true;
 		float metadata_text_height = 0.018f;
-		color red_node_fill{ 0.67f, 0.14f, 0.18f, 1.0f };
-		color black_node_fill{ 0.10f, 0.11f, 0.14f, 1.0f };
+		color emphasized_node_fill{ 0.67f, 0.14f, 0.18f, 1.0f };
+		color neutral_node_fill{ 0.10f, 0.11f, 0.14f, 1.0f };
 		color metadata_color{ 0.72f, 0.78f, 0.87f, 1.0f };
-		color b_plus_leaf_fill{ 0.12f, 0.32f, 0.29f, 1.0f };
-		color b_plus_internal_fill{ 0.15f, 0.22f, 0.36f, 1.0f };
+		color multiway_leaf_fill{ 0.12f, 0.32f, 0.29f, 1.0f };
+		color multiway_internal_fill{ 0.15f, 0.22f, 0.36f, 1.0f };
 		color highlight_border{ 1.0f, 0.87f, 0.50f, 1.0f };
 		color leaf_link_color{ 0.29f, 0.82f, 0.75f, 1.0f };
 		const tree_draw_visibility* visibility = nullptr;
@@ -184,17 +184,17 @@ namespace mngl::two_d
 			height,
 			priority,
 			integer_metadata,
-			red,
-			black,
-			b_plus_leaf,
-			b_plus_internal
+			emphasized,
+			neutral,
+			multiway_leaf,
+			multiway_internal
 		};
 
 		enum class tree_node_fill_role : unsigned char
 		{
 			default_fill,
-			red,
-			black
+			emphasized,
+			neutral
 		};
 
 		struct tree_node_snapshot
@@ -276,16 +276,16 @@ namespace mngl::two_d
 						if (metadata == metadata_type::red)
 						{
 							snapshot_node.annotation =
-								tree_node_annotation::red;
+								tree_node_annotation::emphasized;
 							snapshot_node.fill_role =
-								tree_node_fill_role::red;
+								tree_node_fill_role::emphasized;
 						}
 						else if (metadata == metadata_type::black)
 						{
 							snapshot_node.annotation =
-								tree_node_annotation::black;
+								tree_node_annotation::neutral;
 							snapshot_node.fill_role =
-								tree_node_fill_role::black;
+								tree_node_fill_role::neutral;
 						}
 						else
 						{
@@ -408,8 +408,8 @@ namespace mngl::two_d
 				node.key_begin = result.keys.size();
 				node.key_count = source->keys().size();
 				node.annotation = source->is_leaf()
-					? tree_node_annotation::b_plus_leaf
-					: tree_node_annotation::b_plus_internal;
+					? tree_node_annotation::multiway_leaf
+					: tree_node_annotation::multiway_internal;
 				for (const auto& key : source->keys())
 				{
 					result.keys.push_back(static_cast<std::int64_t>(key));
@@ -576,12 +576,12 @@ namespace mngl::two_d
 			if (!finite_color(options.edge_color) ||
 				!finite_color(options.node_border) ||
 				!finite_color(options.node_fill) ||
-				!finite_color(options.red_node_fill) ||
-				!finite_color(options.black_node_fill) ||
+				!finite_color(options.emphasized_node_fill) ||
+				!finite_color(options.neutral_node_fill) ||
 				!finite_color(options.value_color) ||
 				!finite_color(options.metadata_color) ||
-				!finite_color(options.b_plus_leaf_fill) ||
-				!finite_color(options.b_plus_internal_fill) ||
+				!finite_color(options.multiway_leaf_fill) ||
+				!finite_color(options.multiway_internal_fill) ||
 				!finite_color(options.highlight_border) ||
 				!finite_color(options.leaf_link_color))
 			{
@@ -661,13 +661,13 @@ namespace mngl::two_d
 			{
 			case tree_node_annotation::none:
 				return {};
-			case tree_node_annotation::red:
+			case tree_node_annotation::emphasized:
 				return "red";
-			case tree_node_annotation::black:
+			case tree_node_annotation::neutral:
 				return "black";
-			case tree_node_annotation::b_plus_leaf:
+			case tree_node_annotation::multiway_leaf:
 				return "leaf";
-			case tree_node_annotation::b_plus_internal:
+			case tree_node_annotation::multiway_internal:
 				return "index";
 			case tree_node_annotation::height:
 				buffer[0] = 'h';
@@ -1115,10 +1115,10 @@ namespace mngl::two_d
 						switch (node.style)
 						{
 						case tree_node_style::normal:
-						case tree_node_style::red:
-						case tree_node_style::black:
-						case tree_node_style::b_plus_leaf:
-						case tree_node_style::b_plus_internal:
+						case tree_node_style::emphasized:
+						case tree_node_style::neutral:
+						case tree_node_style::multiway_leaf:
+						case tree_node_style::multiway_internal:
 							break;
 						default:
 							throw std::invalid_argument(
@@ -1574,17 +1574,17 @@ namespace mngl::two_d
 							node_radius - options.border_width);
 						switch (node.style)
 						{
-						case tree_node_style::red:
-							fill.tint = options.red_node_fill;
+						case tree_node_style::emphasized:
+							fill.tint = options.emphasized_node_fill;
 							break;
-						case tree_node_style::black:
-							fill.tint = options.black_node_fill;
+						case tree_node_style::neutral:
+							fill.tint = options.neutral_node_fill;
 							break;
-						case tree_node_style::b_plus_leaf:
-							fill.tint = options.b_plus_leaf_fill;
+						case tree_node_style::multiway_leaf:
+							fill.tint = options.multiway_leaf_fill;
 							break;
-						case tree_node_style::b_plus_internal:
-							fill.tint = options.b_plus_internal_fill;
+						case tree_node_style::multiway_internal:
+							fill.tint = options.multiway_internal_fill;
 							break;
 						default:
 							fill.tint = options.node_fill;
@@ -1750,11 +1750,11 @@ namespace mngl::two_d
 					node_radius - options.border_width);
 				switch (node.fill_role)
 				{
-				case tree_node_fill_role::red:
-					fill.tint = options.red_node_fill;
+				case tree_node_fill_role::emphasized:
+					fill.tint = options.emphasized_node_fill;
 					break;
-				case tree_node_fill_role::black:
-					fill.tint = options.black_node_fill;
+				case tree_node_fill_role::neutral:
+					fill.tint = options.neutral_node_fill;
 					break;
 				default:
 					fill.tint = options.node_fill;
@@ -1941,10 +1941,10 @@ namespace mngl::two_d
 				switch (node.style)
 				{
 				case tree_node_style::normal:
-				case tree_node_style::red:
-				case tree_node_style::black:
-				case tree_node_style::b_plus_leaf:
-				case tree_node_style::b_plus_internal:
+				case tree_node_style::emphasized:
+				case tree_node_style::neutral:
+				case tree_node_style::multiway_leaf:
+				case tree_node_style::multiway_internal:
 					break;
 				default:
 					throw std::invalid_argument(
@@ -2513,17 +2513,17 @@ namespace mngl::two_d
 					node_radius - options.border_width);
 				switch (node.style)
 				{
-				case tree_node_style::red:
-					fill.tint = options.red_node_fill;
+				case tree_node_style::emphasized:
+					fill.tint = options.emphasized_node_fill;
 					break;
-				case tree_node_style::black:
-					fill.tint = options.black_node_fill;
+				case tree_node_style::neutral:
+					fill.tint = options.neutral_node_fill;
 					break;
-				case tree_node_style::b_plus_leaf:
-					fill.tint = options.b_plus_leaf_fill;
+				case tree_node_style::multiway_leaf:
+					fill.tint = options.multiway_leaf_fill;
 					break;
-				case tree_node_style::b_plus_internal:
-					fill.tint = options.b_plus_internal_fill;
+				case tree_node_style::multiway_internal:
+					fill.tint = options.multiway_internal_fill;
 					break;
 				default:
 					fill.tint = options.node_fill;

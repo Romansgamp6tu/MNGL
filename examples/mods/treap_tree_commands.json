@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "commands": [
+    {
+      "algorithm_id": "mngl.tree.treap",
+      "name": "find",
+      "signature": "find(key: int64_t | double) [F]",
+      "description": "Находит точный ключ и подсвечивает путь до узла. Treap не меняется."
+    },
+    {
+      "algorithm_id": "mngl.tree.treap",
+      "name": "insert",
+      "signature": "insert(key: int64_t | double) [A / Ins]",
+      "description": "Добавляет уникальный ключ с новым случайным приоритетом и поворотами восстанавливает min-heap порядок Treap поверх порядка BST."
+    },
+    {
+      "algorithm_id": "mngl.tree.treap",
+      "name": "erase",
+      "signature": "erase(key: int64_t | double) [D / Del]",
+      "description": "Удаляет ключ поворотами вниз по приоритетам, сохраняя одновременно BST-порядок и min-heap инвариант Treap."
+    },
+    {
+      "algorithm_id": "mngl.tree.treap",
+      "name": "merge",
+      "signature": "merge(source: .tree) [M]",
+      "description": "Объединяет Treap линейным слиянием по приоритетам при условии max(current) < min(source). Приоритеты существующих узлов сохраняются; источник остаётся доступен."
+    },
+    {
+      "algorithm_id": "mngl.tree.treap",
+      "name": "split",
+      "signature": "split(pivot: int64_t | double) [C]",
+      "description": "Разделяет Treap на ключи < pivot и >= pivot без повторной генерации приоритетов; обе части сохраняют BST- и heap-инварианты."
+    },
+    {
+      "algorithm_id": "mngl.tree.treap",
+      "name": "insert_random",
+      "signature": "insert_random(count: uint64_t) [R]",
+      "description": "Добавляет указанное число уникальных случайных ключей без анимации. Алиасы: mass insert, random test, mass random insert."
+    }
+  ]
+}

@@ -26,6 +26,8 @@ namespace
 {
 	using namespace mngl::mods::tree;
 
+	inline constexpr tree_id tree_algorithm_id = "mngl.tree.treap";
+
 	inline constexpr std::string_view mod_id =
 		"mngl.tree-practicum.treap";
 	inline constexpr std::size_t maximum_node_count = 1'000'000;
@@ -47,13 +49,15 @@ namespace
 		operation::split;
 
 	const algorithm_info treap_info{
-		ids::treap,
+		tree_algorithm_id,
 		"Treap",
 		"treap",
 		"treap{",
 		supported_keys,
 		supported_operations,
-		{ layout_transitions, 0 }
+		{ layout_transitions, 0 },
+		{ .key_detail_prefix = "p=" },
+		4
 	};
 
 	[[nodiscard]] bool is_integer_token(std::string_view text) noexcept
@@ -188,7 +192,7 @@ namespace
 			}
 
 			document parsed{
-				std::string(ids::treap),
+				std::string(tree_algorithm_id),
 				std::move(result),
 				keys
 			};
@@ -385,7 +389,7 @@ namespace
 	template<class Value>
 	void validate_typed_tree(const tree& value)
 	{
-		if (value.b_plus || value.fanout != 0 ||
+		if (value.multiway || value.fanout != 0 ||
 			value.nodes.size() > maximum_node_count)
 		{
 			throw std::invalid_argument(
@@ -881,7 +885,7 @@ namespace
 	public:
 		[[nodiscard]] std::string_view algorithm_id() const noexcept override
 		{
-			return ids::treap;
+			return tree_algorithm_id;
 		}
 
 		[[nodiscard]] invariant_report inspect(
@@ -962,7 +966,7 @@ namespace
 extern "C" MNGL_MOD_EXPORT bool MNGL_MOD_CALL
 mngl_mod_load_v1(mngl::mods::mod_context& context)
 {
-	const auto id = std::string(mngl::mods::tree::ids::treap);
+	const auto id = std::string(tree_algorithm_id);
 	const bool algorithm_registered =
 		context.add_implementation<mngl::mods::tree::algorithm>(
 		mngl::mods::tree::algorithm_class_id,

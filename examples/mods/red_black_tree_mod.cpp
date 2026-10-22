@@ -26,6 +26,8 @@ namespace
 {
 	using namespace mngl::mods::tree;
 
+	inline constexpr tree_id tree_algorithm_id = "mngl.tree.red-black";
+
 	inline constexpr std::size_t maximum_node_count = 1'000'000;
 	inline constexpr std::size_t maximum_tree_depth = 1'024;
 	inline constexpr key_kind_mask supported_keys =
@@ -45,13 +47,20 @@ namespace
 		operation::split;
 
 	const algorithm_info red_black_info{
-		ids::red_black,
+		tree_algorithm_id,
 		"Красно-чёрное дерево",
 		"red-black",
 		"rb_tree{",
 		supported_keys,
 		supported_operations,
-		{ layout_transitions, 0 }
+		{ layout_transitions, 0 },
+		{
+			.node_variants = node_variant_mode::emphasis,
+			.node_variant_labels = { "black", "red" },
+			.show_key_details = false
+		},
+		2,
+		{ "rb\\_tree{", {} }
 	};
 
 	[[nodiscard]] bool is_integer_token(std::string_view text) noexcept
@@ -130,7 +139,18 @@ namespace
 		[[nodiscard]] document parse()
 		{
 			skip_whitespace();
-			expect("rb_tree{");
+			if (m_source.substr(m_position).starts_with("rb_tree{"))
+			{
+				expect("rb_tree{");
+			}
+			else if (m_source.substr(m_position).starts_with("rb\\_tree{"))
+			{
+				expect("rb\\_tree{");
+			}
+			else
+			{
+				fail("unexpected serialization prefix");
+			}
 			tree result;
 			result.root = parse_node(result, 0);
 			expect_character('}');
@@ -185,7 +205,7 @@ namespace
 					keys = key_kind::signed_integer;
 				}
 			}
-			return { std::string(ids::red_black), std::move(result), keys };
+			return { std::string(tree_algorithm_id), std::move(result), keys };
 		}
 
 	private:
@@ -320,7 +340,7 @@ namespace
 				std::string(trim(std::string_view(header).substr(0, separator))),
 				std::to_string(color),
 				true });
-			current.red = color == 0;
+			current.emphasized = color == 0;
 			result.nodes.push_back(std::move(current));
 			const auto left = parse_node(result, depth + 1);
 			expect_character(',');
@@ -381,7 +401,7 @@ namespace
 	template<class Value>
 	void validate_typed_tree(const tree& value)
 	{
-		if (value.b_plus || value.fanout != 0 || value.nodes.size() > maximum_node_count)
+		if (value.multiway || value.fanout != 0 || value.nodes.size() > maximum_node_count)
 		{
 			throw std::invalid_argument("Red-black tree model has invalid binary-tree metadata.");
 		}
@@ -410,7 +430,7 @@ namespace
 				throw std::invalid_argument("Red-black node color must be 0 (red) or 1 (black).");
 			}
 			const bool red = color == "0";
-			if (current.red != red)
+			if (current.emphasized != red)
 			{
 				throw std::invalid_argument("Red-black node color metadata is inconsistent.");
 			}
@@ -583,7 +603,7 @@ namespace
 			node converted;
 			converted.keys.push_back({ current->value(),
 				std::to_string(static_cast<int>(current->metadata())), false });
-			converted.red = current->metadata() == rb_color::red;
+			converted.emphasized = current->metadata() == rb_color::red;
 			if (current->left())
 			{
 				converted.binary_children[0] = pending.size();
@@ -867,7 +887,7 @@ namespace
 	public:
 		[[nodiscard]] std::string_view algorithm_id() const noexcept override
 		{
-			return ids::red_black;
+			return tree_algorithm_id;
 		}
 
 		[[nodiscard]] invariant_report inspect(
@@ -923,7 +943,7 @@ namespace
 			const auto& current = value.nodes[node_index];
 			return std::format(
 				"Цвет: {} · чёрная высота поддерева: {} · ключ: {}",
-				current.red ? "красный" : "чёрный",
+				current.emphasized ? "красный" : "чёрный",
 				subtree_black_height(value, node_index),
 				key_text(current.keys.front()));
 		}
@@ -969,7 +989,7 @@ namespace
 						"Red-black subtree has inconsistent black height.");
 				}
 				heights[index] = left_height +
-					(current.red ? 0 : 1);
+					(current.emphasized ? 0 : 1);
 			}
 			return heights[subtree_root];
 		}
@@ -979,7 +999,7 @@ namespace
 extern "C" MNGL_MOD_EXPORT bool MNGL_MOD_CALL
 mngl_mod_load_v1(mngl::mods::mod_context& context)
 {
-	const auto id = std::string(mngl::mods::tree::ids::red_black);
+	const auto id = std::string(tree_algorithm_id);
 	const bool algorithm_registered = context.add_implementation<
 		mngl::mods::tree::algorithm>(
 			mngl::mods::tree::algorithm_class_id,

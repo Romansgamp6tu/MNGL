@@ -173,6 +173,15 @@
     <ClInclude Include="tree_practicum_ui.hpp">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
+    <ClInclude Include="tree_document.hpp">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="tree_console.hpp">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="tree_python_bridge.hpp">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
     <ClInclude Include="tree_custom_command_api.hpp">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>

@@ -17,7 +17,21 @@ python -m mkdocs build --strict
 ```
 
 Для сборки демо через Visual Studio используйте `MNGL.slnx`, платформу `x64`
-и конфигурацию `Debug` или `Release`. Экспериментальная сборка через CMake:
+и конфигурацию `Debug` или `Release`. Сборка из PowerShell:
+
+```powershell
+.\scripts\build-practicum.ps1 -Configuration Debug
+```
+
+Скрипт находит установленную Visual Studio через `vswhere` (из `Program Files
+(x86)`) и запускает 64-битный MSBuild.
+
+`MNGL.slnx` также содержит отдельные проекты алгоритмов Treap, Splay, AVL,
+Red-Black, B+ и Patricia trie. Сборка решения создаёт DLL и размещает каждую
+в `x64/<Configuration>/mods` с ABI-манифестом; при запуске приложения эти
+моды доступны в выборе нового дерева.
+
+Экспериментальная сборка через CMake:
 
 ```powershell
 cmake -S . -B build -A x64

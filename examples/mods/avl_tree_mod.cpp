@@ -26,6 +26,8 @@ namespace
 {
 	using namespace mngl::mods::tree;
 
+	inline constexpr tree_id tree_algorithm_id = "mngl.tree.avl";
+
 	inline constexpr std::size_t maximum_node_count = 1'000'000;
 	inline constexpr std::size_t maximum_tree_depth = 1'024;
 	inline constexpr key_kind_mask supported_keys =
@@ -45,13 +47,15 @@ namespace
 		operation::split;
 
 	const algorithm_info avl_info{
-		ids::avl,
+		tree_algorithm_id,
 		"AVL",
 		"avl",
 		"avl{",
 		supported_keys,
 		supported_operations,
-		{ layout_transitions, 0 }
+		{ layout_transitions, 0 },
+		{ .key_detail_prefix = "h=" },
+		1
 	};
 
 	[[nodiscard]] bool is_integer_token(std::string_view text) noexcept
@@ -185,7 +189,7 @@ namespace
 					keys = key_kind::signed_integer;
 				}
 			}
-			return { std::string(ids::avl), std::move(result), keys };
+			return { std::string(tree_algorithm_id), std::move(result), keys };
 		}
 
 	private:
@@ -381,7 +385,7 @@ namespace
 	template<class Value>
 	void validate_typed_tree(const tree& value)
 	{
-		if (value.b_plus || value.fanout != 0 || value.nodes.size() > maximum_node_count)
+		if (value.multiway || value.fanout != 0 || value.nodes.size() > maximum_node_count)
 		{
 			throw std::invalid_argument("AVL model has invalid binary-tree metadata.");
 		}
@@ -427,7 +431,7 @@ namespace
 				}
 				state[current.index] = 1;
 				++visited_count;
-				if (current_node.keys.size() != 1 || current_node.red ||
+				if (current_node.keys.size() != 1 || current_node.emphasized ||
 					current_node.next_leaf != no_tree_node)
 				{
 					throw std::invalid_argument("AVL nodes must contain one key and binary-tree metadata.");
@@ -857,7 +861,7 @@ namespace
 	public:
 		[[nodiscard]] std::string_view algorithm_id() const noexcept override
 		{
-			return ids::avl;
+			return tree_algorithm_id;
 		}
 
 		[[nodiscard]] invariant_report inspect(
@@ -944,7 +948,7 @@ namespace
 extern "C" MNGL_MOD_EXPORT bool MNGL_MOD_CALL
 mngl_mod_load_v1(mngl::mods::mod_context& context)
 {
-	const auto id = std::string(mngl::mods::tree::ids::avl);
+	const auto id = std::string(tree_algorithm_id);
 	const bool algorithm_registered = context.add_implementation<
 		mngl::mods::tree::algorithm>(
 			mngl::mods::tree::algorithm_class_id,

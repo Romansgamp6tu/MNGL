@@ -2,6 +2,7 @@
 
 #include "gpu_buffer.hpp"
 #include "texture.hpp"
+#include "logger.h"
 
 #include <algorithm>
 #include <concepts>
@@ -892,16 +893,26 @@ namespace mngl::gpu
 			}
 			catch (const std::exception& error)
 			{
-				SDL_LogError(
-					SDL_LOG_CATEGORY_APPLICATION,
-					"Failed to cancel a frame-graph command buffer: %s",
-					error.what());
+				try
+				{
+					logger.error(
+						"Failed to cancel a frame-graph command buffer: ",
+						error.what());
+				}
+				catch (...)
+				{
+				}
 			}
 			catch (...)
 			{
-				SDL_LogError(
-					SDL_LOG_CATEGORY_APPLICATION,
-					"Failed to cancel a frame-graph command buffer");
+				try
+				{
+					logger.error(
+						"Failed to cancel a frame-graph command buffer.");
+				}
+				catch (...)
+				{
+				}
 			}
 		}
 

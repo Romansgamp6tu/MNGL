@@ -1,6 +1,7 @@
 #pragma once
 #include "utilities.hpp"
 #include "window.hpp"
+#include "logger.h"
 
 #include <SDL3/SDL_gpu.h>
 
@@ -192,10 +193,13 @@ namespace mngl::gpu
 
 			if (!SDL_WaitForGPUIdle(handle))
 			{
-				SDL_LogError(
-					SDL_LOG_CATEGORY_APPLICATION,
-					"Failed to wait for GPU idle: %s",
-					SDL_GetError());
+				try
+				{
+					logger.error("Failed to wait for GPU idle: ", SDL_GetError());
+				}
+				catch (...)
+				{
+				}
 				return false;
 			}
 			return true;
@@ -220,11 +224,13 @@ namespace mngl::gpu
 		device(SDL_GPUShaderFormat allowed_formats = -1)
 		{
 			if (allowed_formats == -1) allowed_formats = base_formats;
-			SDL_Log("MNGL startup checkpoint: creating SDL GPU device");
+			logger.debug("Creating SDL GPU device.");
 			TRY_SDL(handle = SDL_CreateGPUDevice(allowed_formats, debug_mode, nullptr));
 			const char* driver = SDL_GetGPUDeviceDriver(handle);
-			SDL_Log("MNGL startup checkpoint: SDL GPU device created with driver %s",
-				driver ? driver : "<unknown>");
+			logger.success(
+				"SDL GPU device initialized with driver ",
+				driver ? driver : "<unknown>",
+				".");
 		}
 
 		~device()
@@ -239,9 +245,9 @@ namespace mngl::gpu
 
 		void claim_window(window& win) const
 		{
-			SDL_Log("MNGL startup checkpoint: claiming window for GPU device");
+			logger.debug("Claiming window for SDL GPU rendering.");
 			TRY_SDL(SDL_ClaimWindowForGPUDevice(handle, win.raw()));
-			SDL_Log("MNGL startup checkpoint: window claimed for GPU device");
+			logger.info("Window claimed for SDL GPU rendering.");
 		}
 		void release_window(window& win) const
 		{

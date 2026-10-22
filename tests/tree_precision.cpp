@@ -220,7 +220,7 @@ static void check_b_plus(const std::filesystem::path& render_directory)
 	model.nodes.resize(3);
 	model.nodes[0].keys = { "100", "200" };
 	model.nodes[0].children = { 1, 2 };
-	model.nodes[0].style = tree_node_style::b_plus_internal;
+	model.nodes[0].style = tree_node_style::multiway_internal;
 	model.nodes[0].width = 156.0f;
 	model.nodes[0].cell_widths = { 68.25f, 87.75f };
 	model.nodes[1].keys = { "0", "50", "99" };
@@ -228,7 +228,7 @@ static void check_b_plus(const std::filesystem::path& render_directory)
 	model.nodes[2].keys = { "100", "150", "200" };
 	for (const auto i : { 1, 2 })
 	{
-		model.nodes[i].style = tree_node_style::b_plus_leaf;
+		model.nodes[i].style = tree_node_style::multiway_leaf;
 		model.nodes[i].width = 156.0f;
 	}
 	const auto options = practicum_options();

@@ -267,5 +267,5 @@ namespace mngl
 			return a.intersectionArea(b);
 		}
 	};
-	using rectangleProxy = Proxy < rectangle, SDL_Rect, [](const rectangle& r) { return SDL_Rect{ (int)r.pos.x, (int)r.pos.y, (int)r.size.x, (int)r.size.y }; }, [](rectangle& r, const SDL_Rect& s) { r.pos.x = s.x; r.pos.y = s.y; r.size.x = s.w; r.size.y = s.h; } > ;
+	using rectangleProxy = Proxy < rectangle, SDL_Rect, [](const rectangle& r) { return SDL_Rect{ (int)r.pos.x, (int)r.pos.y, (int)r.size.x, (int)r.size.y }; }, [](rectangle& r, const SDL_Rect& s) { r.pos.x = static_cast<float>(s.x); r.pos.y = static_cast<float>(s.y); r.size.x = static_cast<float>(s.w); r.size.y = static_cast<float>(s.h); } > ;
 }

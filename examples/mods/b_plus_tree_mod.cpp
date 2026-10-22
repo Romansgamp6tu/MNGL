@@ -28,6 +28,8 @@ namespace
 {
 	using namespace mngl::mods::tree;
 
+	inline constexpr tree_id tree_algorithm_id = "mngl.tree.b-plus";
+
 	inline constexpr std::size_t maximum_node_count = 1'000'000;
 	inline constexpr std::size_t maximum_tree_depth = 1'024;
 	inline constexpr std::size_t maximum_fanout = 1'024;
@@ -49,13 +51,16 @@ namespace
 		operation::split;
 
 	const algorithm_info b_plus_info{
-		ids::b_plus,
+		tree_algorithm_id,
 		"B+ tree",
 		"b-plus",
 		"b_plus_tree[",
 		supported_keys,
 		supported_operations,
-		{ layout_transitions, 0 }
+		{ layout_transitions, 0 },
+		{},
+		5,
+		{ "b\\_plus\\_tree[", {} }
 	};
 
 	[[nodiscard]] bool is_integer_token(std::string_view text) noexcept
@@ -191,7 +196,7 @@ namespace
 			}
 			normalize_keys();
 			return {
-				std::string(ids::b_plus),
+				std::string(tree_algorithm_id),
 				std::move(m_result),
 				m_key_kind
 			};
@@ -435,7 +440,7 @@ namespace
 
 		std::string_view m_source;
 		std::size_t m_position = 0;
-		tree m_result{ .root = no_tree_node, .b_plus = true };
+		tree m_result{ .root = no_tree_node, .multiway = true };
 		std::optional<key_kind> m_key_kind;
 	};
 
@@ -461,7 +466,7 @@ namespace
 	template<class Value>
 	void validate_tree(const tree& value)
 	{
-		if (!value.b_plus || value.fanout < 3 ||
+		if (!value.multiway || value.fanout < 3 ||
 			value.fanout > maximum_fanout ||
 			value.nodes.size() > maximum_node_count)
 		{
@@ -503,7 +508,7 @@ namespace
 			++visited_count;
 			const auto& current = value.nodes[index];
 			if (current.binary_children[0] != no_tree_node ||
-				current.binary_children[1] != no_tree_node || current.red)
+				current.binary_children[1] != no_tree_node || current.emphasized)
 			{
 				throw std::invalid_argument("B+ nodes cannot contain binary-tree metadata.");
 			}
@@ -655,7 +660,7 @@ namespace
 		tree result;
 		result.root = no_tree_node;
 		result.fanout = source.max_children();
-		result.b_plus = true;
+		result.multiway = true;
 		if (!source.root())
 		{
 			return result;
@@ -836,7 +841,7 @@ namespace
 			tree result;
 			result.root = no_tree_node;
 			result.fanout = default_fanout;
-			result.b_plus = true;
+			result.multiway = true;
 			return result;
 		}
 
@@ -1118,7 +1123,7 @@ namespace
 	public:
 		[[nodiscard]] std::string_view algorithm_id() const noexcept override
 		{
-			return ids::b_plus;
+			return tree_algorithm_id;
 		}
 
 		[[nodiscard]] invariant_report inspect(
@@ -1205,7 +1210,7 @@ namespace
 extern "C" MNGL_MOD_EXPORT bool MNGL_MOD_CALL
 mngl_mod_load_v1(mngl::mods::mod_context& context)
 {
-	const auto id = std::string(mngl::mods::tree::ids::b_plus);
+	const auto id = std::string(tree_algorithm_id);
 	const bool algorithm_registered = context.add_implementation<
 		mngl::mods::tree::algorithm>(
 			mngl::mods::tree::algorithm_class_id,

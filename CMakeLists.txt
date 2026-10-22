@@ -173,6 +173,9 @@ if(MNGL_BUILD_TREAP_TREE_MOD)
 		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
 			"${CMAKE_CURRENT_BINARY_DIR}/tree-treap-module/$<CONFIG>/mngl_treap_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
 			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.treap/bin/mngl_treap_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+			"${CMAKE_CURRENT_SOURCE_DIR}/examples/mods/treap_tree_commands.json"
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.treap/commands.json"
 		COMMAND "${CMAKE_CURRENT_BINARY_DIR}/tree-mod-tools/$<CONFIG>/mngl_tree_mod_manifest_writer${CMAKE_EXECUTABLE_SUFFIX}"
 			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.treap"
 			"mngl_treap_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
@@ -248,6 +251,9 @@ if(MNGL_BUILD_SPLAY_TREE_MOD)
 		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
 			"${CMAKE_CURRENT_BINARY_DIR}/tree-splay-module/$<CONFIG>/mngl_splay_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
 			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.splay/bin/mngl_splay_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+			"${CMAKE_CURRENT_SOURCE_DIR}/examples/mods/splay_tree_commands.json"
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.splay/commands.json"
 		COMMAND "${CMAKE_CURRENT_BINARY_DIR}/splay-mod-tools/$<CONFIG>/mngl_splay_mod_manifest_writer${CMAKE_EXECUTABLE_SUFFIX}"
 			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.splay"
 			"mngl_splay_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
@@ -323,6 +329,9 @@ if(MNGL_BUILD_AVL_TREE_MOD)
 		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
 			"${CMAKE_CURRENT_BINARY_DIR}/tree-avl-module/$<CONFIG>/mngl_avl_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
 			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.avl/bin/mngl_avl_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+			"${CMAKE_CURRENT_SOURCE_DIR}/examples/mods/avl_tree_commands.json"
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.avl/commands.json"
 		COMMAND "${CMAKE_CURRENT_BINARY_DIR}/avl-mod-tools/$<CONFIG>/mngl_avl_mod_manifest_writer${CMAKE_EXECUTABLE_SUFFIX}"
 			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.avl"
 			"mngl_avl_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
@@ -374,6 +383,9 @@ if(MNGL_BUILD_RED_BLACK_TREE_MOD)
 		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
 			"${CMAKE_CURRENT_BINARY_DIR}/tree-red-black-module/$<CONFIG>/mngl_red_black_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
 			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.red-black/bin/mngl_red_black_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+			"${CMAKE_CURRENT_SOURCE_DIR}/examples/mods/red_black_tree_commands.json"
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.red-black/commands.json"
 		COMMAND "${CMAKE_CURRENT_BINARY_DIR}/red-black-mod-tools/$<CONFIG>/mngl_red_black_mod_manifest_writer${CMAKE_EXECUTABLE_SUFFIX}"
 			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.red-black"
 			"mngl_red_black_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
@@ -425,6 +437,9 @@ if(MNGL_BUILD_B_PLUS_TREE_MOD)
 		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
 			"${CMAKE_CURRENT_BINARY_DIR}/tree-b-plus-module/$<CONFIG>/mngl_b_plus_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
 			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.b-plus/bin/mngl_b_plus_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
+		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+			"${CMAKE_CURRENT_SOURCE_DIR}/examples/mods/b_plus_tree_commands.json"
+			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.b-plus/commands.json"
 		COMMAND "${CMAKE_CURRENT_BINARY_DIR}/b-plus-mod-tools/$<CONFIG>/mngl_b_plus_mod_manifest_writer${CMAKE_EXECUTABLE_SUFFIX}"
 			"$<TARGET_FILE_DIR:mngl_demo>/mods/mngl.tree-practicum.b-plus"
 			"mngl_b_plus_tree_mod${CMAKE_SHARED_MODULE_SUFFIX}"
@@ -556,6 +571,32 @@ if(MNGL_BUILD_TESTS)
 			"$<TARGET_FILE_DIR:mngl_tree_precision>/shaders"
 		VERBATIM)
 	add_test(NAME tree_precision COMMAND mngl_tree_precision)
+endif()
+
+if(BUILD_TESTING)
+	add_executable(mngl_python_bridge_protocol_test
+		tests/python_bridge_protocol.cpp
+	)
+	target_compile_features(mngl_python_bridge_protocol_test PRIVATE cxx_std_23)
+	target_include_directories(mngl_python_bridge_protocol_test PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
+	)
+	if(MSVC)
+		target_compile_options(mngl_python_bridge_protocol_test PRIVATE /utf-8)
+	endif()
+	add_test(NAME mngl_python_bridge_protocol
+		COMMAND mngl_python_bridge_protocol_test)
+
+	find_package(Python3 COMPONENTS Interpreter QUIET)
+	if(Python3_Interpreter_FOUND)
+		add_test(NAME mngl_python_gui_client
+			COMMAND "${Python3_EXECUTABLE}" -m unittest discover
+				-s "${CMAKE_CURRENT_SOURCE_DIR}/python/tests"
+				-v)
+		set_tests_properties(mngl_python_gui_client PROPERTIES
+			ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/python"
+			TIMEOUT 20)
+	endif()
 endif()
 
 option(MNGL_BUILD_WINDOWS_DEVEL_PACKAGE "Create a Windows x64 MNGL development ZIP" OFF)

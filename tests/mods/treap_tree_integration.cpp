@@ -1,5 +1,6 @@
 #include <mod_loader.hpp>
 #include <tree_algorithm_api.hpp>
+#include <tree_invariant_api.hpp>
 #include <tree_practicum_storage.hpp>
 
 #include <algorithm>
@@ -21,6 +22,8 @@ namespace
 	using mngl::mods::mod_unload_state;
 	using mngl::mods::registry;
 	using namespace mngl::mods::tree;
+
+	inline constexpr tree_id tree_algorithm_id = "mngl.tree.treap";
 
 	void require(bool condition, std::string_view message)
 	{
@@ -50,7 +53,7 @@ namespace
 
 	void check_model_for_display(const tree& value)
 	{
-		require(!value.b_plus, "Treap must use the binary tree model");
+		require(!value.multiway, "Treap must use the binary tree model");
 		if (value.nodes.empty())
 		{
 			require(value.root == no_tree_node,
@@ -92,8 +95,12 @@ namespace
 		mod_registry.apply_declarations();
 		auto& classes = mod_registry.define_class<algorithm>(
 			std::string(algorithm_class_id));
+		auto& invariant_inspectors = mod_registry.define_class<invariant_inspector>(
+			std::string(invariant_inspector_class_id));
 		require(classes.implementations().empty(),
 			"Treap must not appear before its mod is loaded");
+		require(invariant_inspectors.implementations().empty(),
+			"Treap invariant inspector must not appear before its mod is loaded");
 
 		mod_loader loader(mod_registry);
 		const auto loaded = loader.load_package(package);
@@ -106,16 +113,31 @@ namespace
 			implementations.end(),
 			[](const auto& item)
 			{
-				return item.id == ids::treap;
+				return item.id == tree_algorithm_id;
 			});
 		require(registered != implementations.end() && !registered->builtin &&
 			registered->owner_mod_id == "mngl.tree-practicum.treap",
 			"Loaded Treap must appear in the factory registry as a mod implementation");
+		const auto inspectors = invariant_inspectors.implementations();
+		const auto inspector_registration = std::find_if(
+			inspectors.begin(),
+			inspectors.end(),
+			[](const auto& item)
+			{
+				return item.id == tree_algorithm_id;
+			});
+		require(inspector_registration != inspectors.end() &&
+			!inspector_registration->builtin &&
+			inspector_registration->owner_mod_id == "mngl.tree-practicum.treap",
+			"Loaded Treap invariant inspector must appear as mod-owned");
+		auto inspector = invariant_inspectors.create(tree_algorithm_id);
+		require(inspector && inspector->algorithm_id() == tree_algorithm_id,
+			"Treap invariant inspector factory did not create its implementation");
 
-		auto implementation = classes.create(ids::treap);
+		auto implementation = classes.create(tree_algorithm_id);
 		require(implementation != nullptr,
 			"Treap factory did not create an algorithm instance");
-		require(implementation->info().id == ids::treap &&
+		require(implementation->info().id == tree_algorithm_id &&
 			implementation->info().display_name == "Treap",
 			"Treap factory returned incorrect public metadata");
 
@@ -132,6 +154,20 @@ namespace
 		insert(*implementation, value, 70);
 		check_model_for_display(value);
 		implementation->validate(value, key_kind::signed_integer);
+		const auto invariant_report = inspector->inspect(
+			value,
+			key_kind::signed_integer);
+		require(!invariant_report.checks.empty() &&
+			std::all_of(
+				invariant_report.checks.begin(),
+				invariant_report.checks.end(),
+				[](const invariant_check& check) { return check.passed; }),
+			"Treap invariant inspector must report valid invariants for a valid tree");
+		require(!inspector->describe_node(
+			value,
+			key_kind::signed_integer,
+			value.root).empty(),
+			"Treap invariant inspector must describe the selected node");
 
 		const auto duplicate = implementation->insert(
 			value,
@@ -152,7 +188,7 @@ namespace
 		require(first_serialization.starts_with("treap{"),
 			"Treap must keep the existing .tree serialization format");
 		auto reopened = implementation->deserialize(first_serialization);
-		require(reopened.algorithm_id == ids::treap &&
+		require(reopened.algorithm_id == tree_algorithm_id &&
 			reopened.keys == key_kind::signed_integer,
 			"Treap serialization should reopen as the same tree type and key kind");
 		implementation->validate(reopened.value, key_kind::signed_integer);
@@ -215,10 +251,11 @@ namespace
 		const auto saved_document = implementation->deserialize(loaded_contents);
 		std::error_code ignored;
 		std::filesystem::remove(save_path, ignored);
-		require(saved_document.algorithm_id == ids::treap &&
+		require(saved_document.algorithm_id == tree_algorithm_id &&
 			implementation->serialize(saved_document.value) == saved_serialization,
 			"Saved .tree file should reopen with the same Treap data");
 
+		inspector.reset();
 		const auto unload = loader.unload("mngl.tree-practicum.treap");
 		require(unload.state == mod_unload_state::deferred &&
 			unload.live_objects > 0,

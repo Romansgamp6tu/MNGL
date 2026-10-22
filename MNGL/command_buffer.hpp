@@ -2,6 +2,7 @@
 #include "utilities.hpp"
 #include "device.hpp"
 #include "gpu_texture.hpp"
+#include "logger.h"
 
 #include <stdexcept>
 #include <thread>
@@ -159,10 +160,15 @@ namespace mngl::gpu
 		{
 			if (!on_owner_thread())
 			{
-				SDL_LogError(
-					SDL_LOG_CATEGORY_APPLICATION,
-					"GPU command buffer was destroyed on a thread other than the one that acquired it; "
-					"it was not submitted");
+				try
+				{
+					logger.error(
+						"GPU command buffer was destroyed on a thread other than "
+						"the one that acquired it; it was not submitted.");
+				}
+				catch (...)
+				{
+				}
 				return;
 			}
 
@@ -172,10 +178,15 @@ namespace mngl::gpu
 				dev = nullptr;
 				if (!SDL_SubmitGPUCommandBuffer(pending))
 				{
-					SDL_LogError(
-						SDL_LOG_CATEGORY_APPLICATION,
-						"Failed to submit GPU command buffer during cleanup: %s",
-						SDL_GetError());
+					try
+					{
+						logger.error(
+							"Failed to submit GPU command buffer during cleanup: ",
+							SDL_GetError());
+					}
+					catch (...)
+					{
+					}
 				}
 			}
 		}

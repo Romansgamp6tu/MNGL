@@ -1026,6 +1026,10 @@ namespace mngl
 			[[nodiscard]] window_scope window(std::string_view title) const;
 			[[nodiscard]] window_scope window(
 				std::string_view title,
+				bool& open
+			) const;
+			[[nodiscard]] window_scope window(
+				std::string_view title,
 				ImGuiWindowFlags flags) const;
 
 		private:
@@ -2625,6 +2629,18 @@ namespace mngl
 			throw std::logic_error("Cannot create an ImGui window from an inactive frame scope");
 		}
 		return window_scope(*owner, title);
+	}
+
+	inline imgui_context::window_scope imgui_context::frame_scope::window(
+		std::string_view title,
+		bool& open
+	) const
+	{
+		if (!owner)
+		{
+			throw std::logic_error("Cannot create an ImGui window from an inactive frame scope");
+		}
+		return window_scope(*owner, title, std::nullopt, &open);
 	}
 
 	inline imgui_context::window_scope imgui_context::frame_scope::window(

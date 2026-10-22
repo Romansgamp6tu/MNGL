@@ -59,6 +59,44 @@
   </ImportGroup>
   <ImportGroup Label="Shared">
   </ImportGroup>
+  <ItemGroup Label="ProjectDependencies">
+    <ProjectReference Include="..\examples\mods\visual_studio\MNGL.Mod.AVL.vcxproj">
+      <Project>{F594BA07-182D-4DF2-BBD9-36D9C7A55C03}</Project>
+      <BuildReference>true</BuildReference>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+    <ProjectReference Include="..\examples\mods\visual_studio\MNGL.Mod.BPlus.vcxproj">
+      <Project>{F594BA07-182D-4DF2-BBD9-36D9C7A55C05}</Project>
+      <BuildReference>true</BuildReference>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+    <ProjectReference Include="..\examples\mods\visual_studio\MNGL.Mod.BitwiseTrie.vcxproj">
+      <Project>{F594BA07-182D-4DF2-BBD9-36D9C7A55C06}</Project>
+      <BuildReference>true</BuildReference>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+    <ProjectReference Include="..\examples\mods\visual_studio\MNGL.Mod.RedBlack.vcxproj">
+      <Project>{F594BA07-182D-4DF2-BBD9-36D9C7A55C04}</Project>
+      <BuildReference>true</BuildReference>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+    <ProjectReference Include="..\examples\mods\visual_studio\MNGL.Mod.Splay.vcxproj">
+      <Project>{F594BA07-182D-4DF2-BBD9-36D9C7A55C02}</Project>
+      <BuildReference>true</BuildReference>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+    <ProjectReference Include="..\examples\mods\visual_studio\MNGL.Mod.Treap.vcxproj">
+      <Project>{F594BA07-182D-4DF2-BBD9-36D9C7A55C01}</Project>
+      <BuildReference>true</BuildReference>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
@@ -83,8 +121,9 @@
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp23</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)MNGL\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)MNGL;$(SolutionDir)MNGL\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <!-- Concurrent CL workers intermittently fail while writing the shared compiler PDB. -->
+      <MultiProcessorCompilation>false</MultiProcessorCompilation>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
@@ -111,8 +150,8 @@
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp23</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)MNGL\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)MNGL;$(SolutionDir)MNGL\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <MultiProcessorCompilation>false</MultiProcessorCompilation>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
@@ -137,8 +176,8 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp23</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)MNGL\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)MNGL;$(SolutionDir)MNGL\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <MultiProcessorCompilation>false</MultiProcessorCompilation>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
@@ -166,8 +205,8 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp23</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)MNGL\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)MNGL;$(SolutionDir)MNGL\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <MultiProcessorCompilation>false</MultiProcessorCompilation>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
@@ -202,6 +241,9 @@
     <ClInclude Include="tree_renderer.hpp" />
     <ClInclude Include="text.hpp" />
     <ClInclude Include="tree_practicum_ui.hpp" />
+    <ClInclude Include="tree_document.hpp" />
+    <ClInclude Include="tree_console.hpp" />
+    <ClInclude Include="tree_python_bridge.hpp" />
     <ClInclude Include="tree_custom_command_api.hpp" />
     <ClInclude Include="tree_invariant_api.hpp" />
     <ClInclude Include="tree_practicum_storage.hpp" />

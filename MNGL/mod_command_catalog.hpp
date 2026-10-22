@@ -1,6 +1,8 @@
 #pragma once
 
 #include <algorithm>
+#include <charconv>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -46,6 +48,8 @@ namespace mngl::mods::command_catalog
 				std::nullptr_t,
 				bool,
 				std::uint64_t,
+				std::int64_t,
+				double,
 				std::string,
 				array,
 				object>;
@@ -297,23 +301,85 @@ namespace mngl::mods::command_catalog
 					m_position += 4;
 					return { nullptr };
 				}
-				if (character < '0' || character > '9')
+				if ((character < '0' || character > '9') && character != '-')
+					fail("expected a JSON value");
+
+				const std::size_t start = m_position;
+				const bool negative = character == '-';
+				if (negative) ++m_position;
+				if (m_position == m_source.size() ||
+					m_source[m_position] < '0' || m_source[m_position] > '9')
+					fail("invalid JSON number");
+				if (m_source[m_position] == '0')
 				{
-					fail("expected string, object, array, or unsigned integer");
+					++m_position;
+					if (m_position < m_source.size() &&
+						m_source[m_position] >= '0' && m_source[m_position] <= '9')
+						fail("JSON numbers cannot contain leading zeroes");
+				}
+				else
+				{
+					while (m_position < m_source.size() &&
+						m_source[m_position] >= '0' && m_source[m_position] <= '9')
+						++m_position;
+				}
+				bool floating_point = false;
+				if (m_position < m_source.size() && m_source[m_position] == '.')
+				{
+					floating_point = true;
+					++m_position;
+					const auto fraction_start = m_position;
+					while (m_position < m_source.size() &&
+						m_source[m_position] >= '0' && m_source[m_position] <= '9')
+						++m_position;
+					if (fraction_start == m_position)
+						fail("JSON fraction requires at least one digit");
+				}
+				if (m_position < m_source.size() &&
+					(m_source[m_position] == 'e' || m_source[m_position] == 'E'))
+				{
+					floating_point = true;
+					++m_position;
+					if (m_position < m_source.size() &&
+						(m_source[m_position] == '+' || m_source[m_position] == '-'))
+						++m_position;
+					const auto exponent_start = m_position;
+					while (m_position < m_source.size() &&
+						m_source[m_position] >= '0' && m_source[m_position] <= '9')
+						++m_position;
+					if (exponent_start == m_position)
+						fail("JSON exponent requires at least one digit");
+				}
+
+				const auto token = m_source.substr(start, m_position - start);
+				if (floating_point)
+				{
+					double number = 0.0;
+					const auto parsed = std::from_chars(
+						token.data(), token.data() + token.size(), number,
+						std::chars_format::general);
+					if (parsed.ec != std::errc{} ||
+						parsed.ptr != token.data() + token.size() ||
+						!std::isfinite(number))
+						fail("JSON floating-point number is out of range");
+					return { number };
+				}
+				if (negative)
+				{
+					std::int64_t number = 0;
+					const auto parsed = std::from_chars(
+						token.data(), token.data() + token.size(), number);
+					if (parsed.ec != std::errc{} ||
+						parsed.ptr != token.data() + token.size())
+						fail("JSON signed integer is out of range");
+					return { number };
 				}
 				std::uint64_t number = 0;
-				do
-				{
-					const auto digit = static_cast<std::uint64_t>(
-						m_source[m_position++] - '0');
-					if (number > (UINT64_MAX - digit) / 10)
-					{
-						fail("unsigned integer is out of range");
-					}
-					number = number * 10 + digit;
-				}
-				while (m_position < m_source.size() &&
-					m_source[m_position] >= '0' && m_source[m_position] <= '9');
+				const auto parsed = std::from_chars(
+					token.data(), token.data() + token.size(), number);
+				if (parsed.ec != std::errc{} ||
+					parsed.ptr != token.data() + token.size())
+					fail("JSON unsigned integer is out of range");
 				return { number };
 			}
 

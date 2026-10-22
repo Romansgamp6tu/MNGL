@@ -25,12 +25,6 @@ namespace mngl::mods::tree
 	namespace ids
 	{
 		inline constexpr tree_id bst = "mngl.tree.bst";
-		inline constexpr tree_id avl = "mngl.tree.avl";
-		inline constexpr tree_id red_black = "mngl.tree.red-black";
-		inline constexpr tree_id splay = "mngl.tree.splay";
-		inline constexpr tree_id treap = "mngl.tree.treap";
-		inline constexpr tree_id b_plus = "mngl.tree.b-plus";
-		inline constexpr tree_id bitwise_trie = "mngl.tree.bitwise-trie";
 	}
 
 	inline constexpr std::size_t no_tree_node =
@@ -64,7 +58,7 @@ namespace mngl::mods::tree
 			no_tree_node
 		};
 		bool leaf = false;
-		bool red = false;
+		bool emphasized = false;
 		std::size_t next_leaf = no_tree_node;
 	};
 
@@ -73,7 +67,7 @@ namespace mngl::mods::tree
 		std::vector<node> nodes;
 		std::size_t root = 0;
 		std::size_t fanout = 0;
-		bool b_plus = false;
+		bool multiway = false;
 	};
 
 	enum class key_kind : std::uint8_t
@@ -136,6 +130,20 @@ namespace mngl::mods::tree
 		operation_mask step_event_operations = 0;
 	};
 
+	enum class node_variant_mode : std::uint8_t
+	{
+		uniform,
+		emphasis
+	};
+
+	struct visualization_hints
+	{
+		node_variant_mode node_variants = node_variant_mode::uniform;
+		std::array<std::string_view, 2> node_variant_labels{};
+		std::string_view key_detail_prefix;
+		bool show_key_details = true;
+	};
+
 	struct algorithm_info
 	{
 		tree_id id;
@@ -145,7 +153,53 @@ namespace mngl::mods::tree
 		std::uint8_t supported_key_kinds = 0;
 		operation_mask supported_operations = 0;
 		animation_capabilities animations;
+		visualization_hints visualization;
+		int legacy_tree_catalog_index = -1;
+		std::array<std::string_view, 2> legacy_serialization_prefixes{};
 	};
+
+	inline constexpr operation_mask standard_search_tree_operations =
+		static_cast<operation_mask>(operation::find) |
+		operation::insert |
+		operation::random_insert |
+		operation::erase |
+		operation::merge |
+		operation::split;
+	inline constexpr operation_mask standard_search_tree_layout_transitions =
+		static_cast<operation_mask>(operation::insert) |
+		operation::erase |
+		operation::merge |
+		operation::split;
+	inline constexpr algorithm_info builtin_bst_info{
+		ids::bst,
+		"BST",
+		"bst",
+		"bst{",
+		key_kind_bit(key_kind::signed_integer) |
+			key_kind_bit(key_kind::floating_point),
+		standard_search_tree_operations,
+		{ standard_search_tree_layout_transitions, 0 },
+		{},
+		0
+	};
+
+	[[nodiscard]] inline key_kind default_key_kind_for(
+		const algorithm_info& info)
+	{
+		for (const auto kind : {
+			key_kind::signed_integer,
+			key_kind::floating_point,
+			key_kind::text,
+			key_kind::big_integer })
+		{
+			if (supports(info.supported_key_kinds, kind))
+			{
+				return kind;
+			}
+		}
+		throw std::invalid_argument(
+			"Tree algorithm does not support any key kind");
+	}
 
 	struct visual_event
 	{

@@ -8,8 +8,10 @@
 #include "render_window.hpp"
 #include "tree_algorithm_api.hpp"
 #include "tree_custom_command_api.hpp"
+#include "tree_document.hpp"
 #include "tree_invariant_api.hpp"
 #include "tree_practicum_storage.hpp"
+#include "tree_python_bridge.hpp"
 #include "tree_renderer.hpp"
 #include "undo_redo_stack.hpp"
 #include "../tree/bst.hpp"
@@ -45,6 +47,13 @@
 #include <utility>
 #include <variant>
 #include <vector>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace tree_practicum
 {
@@ -86,14 +95,6 @@ namespace tree_practicum
 		{
 			std::filesystem::path path;
 			bool directory;
-		};
-
-		struct tree_document_state
-		{
-			std::filesystem::path local_path;
-			std::string display_name;
-			std::uint64_t current_state_id = 0;
-			std::uint64_t saved_state_id = 0;
 		};
 
 		enum class file_dialog_mode
@@ -209,6 +210,16 @@ namespace tree_practicum
 			mngl::two_d::tree_draw_model model;
 			mngl::two_d::tree_layout layout;
 			mngl::two_d::tree_draw_options draw_options;
+			struct statistics
+			{
+				std::size_t node_count = 0;
+				std::size_t key_count = 0;
+				std::size_t leaf_count = 0;
+				std::size_t height = 0;
+				std::size_t maximum_branching = 0;
+				std::string key_type = "не задан";
+				std::string root_value = "—";
+			} properties;
 			std::uint64_t revision = 0;
 			std::uint64_t source_tree_signature = 0;
 			std::size_t animation_step = 0;
@@ -253,6 +264,17 @@ namespace tree_practicum
 			std::uint64_t visibility_request_id = 0;
 			mngl::two_d::tree_draw_area visibility_request_bounds{};
 			mngl::two_d::tree_draw_culler culler;
+		};
+
+		struct tree_document_window_state
+		{
+			tree_canvas_view_state canvas;
+			tree_preview_cache_state preview;
+			visual_tree tree;
+			std::string algorithm_id;
+			std::string source_contents;
+			std::string parse_error;
+			bool parsed = false;
 		};
 
 		using tree_visual_event = tree_practicum::mods::visual_event;
@@ -656,74 +678,6 @@ namespace tree_practicum
 			std::size_t offset = 0;
 		};
 
-		inline static constexpr tree_practicum::mods::operation_mask all_tree_operations =
-			static_cast<tree_practicum::mods::operation_mask>(
-				tree_practicum::mods::operation::find) |
-			tree_practicum::mods::operation::insert |
-			tree_practicum::mods::operation::random_insert |
-			tree_practicum::mods::operation::erase |
-			tree_practicum::mods::operation::merge |
-			tree_practicum::mods::operation::split;
-		inline static constexpr auto numeric_key_kinds =
-			tree_practicum::mods::key_kind_bit(
-				tree_practicum::mods::key_kind::signed_integer) |
-			tree_practicum::mods::key_kind_bit(
-				tree_practicum::mods::key_kind::floating_point);
-		inline static constexpr auto layout_transition_operations =
-			static_cast<tree_practicum::mods::operation_mask>(
-				tree_practicum::mods::operation::insert) |
-			tree_practicum::mods::operation::erase |
-			tree_practicum::mods::operation::merge |
-			tree_practicum::mods::operation::split;
-		inline static constexpr auto bitwise_trie_operations =
-			static_cast<tree_practicum::mods::operation_mask>(
-				tree_practicum::mods::operation::find) |
-				tree_practicum::mods::operation::insert |
-				tree_practicum::mods::operation::random_insert |
-				tree_practicum::mods::operation::erase;
-		inline static constexpr auto bitwise_trie_layout_operations =
-			static_cast<tree_practicum::mods::operation_mask>(
-				tree_practicum::mods::operation::insert) |
-				tree_practicum::mods::operation::erase;
-		inline static constexpr std::array<tree_type_descriptor, 7> tree_types{{
-			{ { tree_practicum::mods::ids::bst, "BST", "bst", "bst{",
-				numeric_key_kinds, all_tree_operations,
-				{ layout_transition_operations, 0 } } },
-			{ { tree_practicum::mods::ids::avl, "AVL", "avl", "avl{",
-				numeric_key_kinds, all_tree_operations,
-				{ layout_transition_operations, 0 } } },
-			{ { tree_practicum::mods::ids::red_black, "Красно-чёрное", "red-black", "rb_tree{",
-				numeric_key_kinds, all_tree_operations,
-				{ layout_transition_operations, 0 } } },
-			{ { tree_practicum::mods::ids::splay, "Splay", "splay", "splay{",
-				numeric_key_kinds, all_tree_operations,
-				{ layout_transition_operations,
-					static_cast<tree_practicum::mods::operation_mask>(
-						tree_practicum::mods::operation::insert) } } },
-			{ { tree_practicum::mods::ids::treap, "Декартово (Treap)", "treap", "treap{",
-				numeric_key_kinds, all_tree_operations,
-				{ layout_transition_operations, 0 } } },
-			{ { tree_practicum::mods::ids::b_plus, "B+ tree", "b-plus", "b_plus_tree[",
-				numeric_key_kinds, all_tree_operations,
-				{ layout_transition_operations, 0 } } },
-			{ { tree_practicum::mods::ids::bitwise_trie, "Битовый бор (Patricia)",
-				"bitwise-trie", "bitwise_trie{",
-				tree_practicum::mods::key_kind_bit(
-					tree_practicum::mods::key_kind::signed_integer),
-				bitwise_trie_operations,
-				{ bitwise_trie_layout_operations, 0 } } }
-		}};
-
-		[[nodiscard]] static const tree_type_descriptor* tree_type_for(
-			tree_practicum::mods::tree_id id) noexcept
-		{
-			const auto found = std::find_if(
-				tree_types.begin(),
-				tree_types.end(),
-				[id](const auto& type) { return type.algorithm.id == id; });
-			return found == tree_types.end() ? nullptr : std::addressof(*found);
-		}
-
 		[[nodiscard]] const tree_type_descriptor* available_tree_type_for(
 			tree_practicum::mods::tree_id id) const noexcept
 		{
@@ -748,22 +702,24 @@ namespace tree_practicum
 			}
 
 			const tree_type_descriptor* match = nullptr;
+			std::size_t match_prefix_size = 0;
 			for (const auto& type : m_available_tree_types)
 			{
-				const auto prefix = type.algorithm.serialization_prefix;
-				const bool legacy_escaped_prefix =
-					(type.algorithm.id == tree_practicum::mods::ids::red_black &&
-						source.starts_with("rb\\_tree{")) ||
-					(type.algorithm.id == tree_practicum::mods::ids::b_plus &&
-						source.starts_with("b\\_plus\\_tree["));
-				if ((!prefix.empty() && source.starts_with(prefix)) ||
-					legacy_escaped_prefix)
+				const auto& info = type.algorithm;
+				const auto consider_prefix = [&](std::string_view prefix)
 				{
-					if (!match || prefix.size() >
-						match->algorithm.serialization_prefix.size())
+					if (!prefix.empty() && source.starts_with(prefix) &&
+						prefix.size() > match_prefix_size)
 					{
 						match = std::addressof(type);
+						match_prefix_size = prefix.size();
 					}
+				};
+				consider_prefix(info.serialization_prefix);
+				for (const auto alias :
+					info.legacy_serialization_prefixes)
+				{
+					consider_prefix(alias);
 				}
 			}
 			return match;
@@ -810,32 +766,7 @@ namespace tree_practicum
 		[[nodiscard]] static search_tree_key_kind default_tree_key_kind(
 			const tree_practicum::mods::algorithm_info& info)
 		{
-			if (tree_practicum::mods::supports(
-				info.supported_key_kinds,
-				tree_practicum::mods::key_kind::signed_integer))
-			{
-				return tree_practicum::mods::key_kind::signed_integer;
-			}
-			if (tree_practicum::mods::supports(
-				info.supported_key_kinds,
-				tree_practicum::mods::key_kind::floating_point))
-			{
-				return tree_practicum::mods::key_kind::floating_point;
-			}
-			if (tree_practicum::mods::supports(
-				info.supported_key_kinds,
-				tree_practicum::mods::key_kind::text))
-			{
-				return tree_practicum::mods::key_kind::text;
-			}
-			if (tree_practicum::mods::supports(
-				info.supported_key_kinds,
-				tree_practicum::mods::key_kind::big_integer))
-			{
-				return tree_practicum::mods::key_kind::big_integer;
-			}
-			throw std::invalid_argument(
-				"Алгоритм дерева не поддерживает ни один тип ключей.");
+			return tree_practicum::mods::default_key_kind_for(info);
 		}
 
 		inline static constexpr std::array<workspace_entry, 4> workspace_entries{ {
@@ -898,10 +829,6 @@ namespace tree_practicum
 
 			for (const auto& type : m_available_tree_types)
 			{
-				if (!supports_numeric_input(type))
-				{
-					continue;
-				}
 				for (const auto& [operation, generic] : generic_operations)
 				{
 					if (!tree_practicum::mods::supports(
@@ -939,6 +866,7 @@ namespace tree_practicum
 			, m_native_window(
 				native_window ? native_window : render_window.raw())
 		{
+			load_application_settings();
 			initialize_tree_mods();
 			register_tree_animation_queue();
 			register_file_drop_listener();
@@ -954,6 +882,7 @@ namespace tree_practicum
 			set_path_buffer(m_explorer_path, path_to_utf8(m_explorer_directory));
 			set_path_buffer(m_key_input, "42");
 			begin_new_workspace();
+			initialize_live_python_bridge();
 			m_show_demo_trees = false;
 			refresh_explorer();
 			if (!initial_directory_error.empty())
@@ -967,8 +896,16 @@ namespace tree_practicum
 
 		~tree_practicum_ui() noexcept
 		{
+			save_application_settings();
 			std::lock_guard lock(tree_animation_queues_mutex);
 			tree_animation_event_queues.erase(m_tree_animation_source_id);
+			if (!m_live_python_directory.empty())
+			{
+				std::error_code error;
+				std::filesystem::remove_all(
+					m_live_python_directory,
+					error);
+			}
 		}
 
 		tree_practicum_ui(const tree_practicum_ui&) = delete;
@@ -978,8 +915,20 @@ namespace tree_practicum
 
 		void draw(mngl::imgui_context::frame_scope& frame)
 		{
+			// A closed window can still have its texture referenced by this
+			// frame's ImGui draw data. Release its GPU resources on the next frame.
+			std::erase_if(
+				m_tree_document_window_states,
+				[this](const auto& item)
+				{
+					return std::find(
+						m_open_tree_tabs.begin(),
+						m_open_tree_tabs.end(),
+						item.first) == m_open_tree_tabs.end();
+				});
 			m_hovered_tree_key.reset();
 			m_hovered_tree_comparison_pane.reset();
+			m_hovered_tree_archive_path.clear();
 			process_pending_tree_files();
 			draw_menu(frame);
 			ImGui::DockSpaceOverViewport();
@@ -987,6 +936,7 @@ namespace tree_practicum
 			const ImGuiViewport* viewport = ImGui::GetMainViewport();
 			if (!viewport)
 			{
+				process_live_python_bridge();
 				commit_pending_input_edits();
 				process_keyboard_shortcuts();
 				return;
@@ -996,6 +946,7 @@ namespace tree_practicum
 			const ImVec2 area = viewport->WorkSize;
 			if (area.x <= 0.0f || area.y <= 0.0f)
 			{
+				process_live_python_bridge();
 				commit_pending_input_edits();
 				process_keyboard_shortcuts();
 				return;
@@ -1024,6 +975,10 @@ namespace tree_practicum
 					workspace_origin,
 					{ workspace_width, top_height });
 			}
+			// Tree-window focus is resolved while drawing the workspace. Process
+			// Python requests afterwards so selected_tree() observes this frame's
+			// active document instead of the previous frame's selection.
+			process_live_python_bridge();
 			if (m_show_functions)
 			{
 				draw_functions(
@@ -1050,6 +1005,7 @@ namespace tree_practicum
 				commit_pending_input_edits();
 			}
 			draw_tool_parameters(frame);
+			draw_new_tree_dialog(frame);
 			draw_file_dialog();
 			draw_file_delete_dialog();
 			draw_unsaved_changes_dialog();
@@ -1110,19 +1066,24 @@ namespace tree_practicum
 			writer.write_unsigned(state.random_count);
 		}
 
-		[[nodiscard]] static std::string tree_id_from_legacy_index(int index)
+		[[nodiscard]] std::string tree_id_from_legacy_index(int index) const
 		{
-			if (index < 0 ||
-				static_cast<std::size_t>(index) >= tree_types.size())
+			const auto found = std::find_if(
+				m_available_tree_types.begin(),
+				m_available_tree_types.end(),
+				[index](const auto& type)
+				{
+					return type.algorithm.legacy_tree_catalog_index == index;
+				});
+			if (found == m_available_tree_types.end())
 			{
 				throw std::invalid_argument(
 					"Undo history contains an invalid legacy tree index");
 			}
-			return std::string(
-				tree_types[static_cast<std::size_t>(index)].algorithm.id);
+			return std::string(found->algorithm.id);
 		}
 
-		[[nodiscard]] static interface_state read_interface_state(
+		[[nodiscard]] interface_state read_interface_state(
 			history_binary_reader& reader,
 			std::uint32_t version)
 		{
@@ -1254,7 +1215,7 @@ namespace tree_practicum
 			}
 		}
 
-		[[nodiscard]] static tree_history_snapshot
+		[[nodiscard]] tree_history_snapshot
 			read_tree_history_snapshot(
 				history_binary_reader& reader,
 				std::uint32_t version)
@@ -1343,7 +1304,7 @@ namespace tree_practicum
 				tree.transition->after);
 		}
 
-		[[nodiscard]] static history_state read_history_state(
+		[[nodiscard]] history_state read_history_state(
 			history_binary_reader& reader,
 			std::uint32_t version)
 		{
@@ -1440,7 +1401,7 @@ namespace tree_practicum
 			return std::move(writer.data);
 		}
 
-		[[nodiscard]] static history_document deserialize_history_document(
+		[[nodiscard]] history_document deserialize_history_document(
 			std::string_view contents)
 		{
 			history_binary_reader reader(contents);
@@ -1675,17 +1636,32 @@ namespace tree_practicum
 				throw std::logic_error(
 					"Анимация дерева содержит ссылку на отсутствующий узел.");
 			}
-			rotate_splay_node_up(
+			rotate_binary_node_up(
 				tree,
 				step.parent_index,
 				step.node_index,
 				step.grandparent_index);
 		}
 
+		[[nodiscard]] float tree_animation_duration(
+			float base_duration) const noexcept
+		{
+			const float speed = std::clamp(
+				m_tree_animation_speed,
+				0.5f,
+				4.0f);
+			return base_duration / speed;
+		}
+
 		void advance_tree_animation(
 			std::string_view algorithm_id,
 			float delta_time)
 		{
+			if (!m_tree_animations_enabled)
+			{
+				cancel_tree_animation();
+				return;
+			}
 			if (!m_tree_animation.has_value())
 			{
 				return;
@@ -1702,11 +1678,14 @@ namespace tree_practicum
 
 			auto& animation = m_tree_animation.value();
 			animation.elapsed_seconds += delta_time;
+			const float step_duration = tree_animation_duration(
+				tree_animation_step_seconds);
 			if (animation.mode ==
 				tree_animation_mode::layout_transition)
 			{
 				if (animation.elapsed_seconds >=
-					tree_layout_animation_seconds)
+					tree_animation_duration(
+						tree_layout_animation_seconds))
 				{
 					m_tree_animation.reset();
 				}
@@ -1714,19 +1693,18 @@ namespace tree_practicum
 			}
 			if (animation.next_event >= animation.events.size())
 			{
-				if (animation.elapsed_seconds >=
-					tree_animation_step_seconds)
+				if (animation.elapsed_seconds >= step_duration)
 				{
 					m_tree_animation.reset();
 				}
 				return;
 			}
-			if (animation.elapsed_seconds < tree_animation_step_seconds)
+			if (animation.elapsed_seconds < step_duration)
 			{
 				return;
 			}
 
-			animation.elapsed_seconds -= tree_animation_step_seconds;
+			animation.elapsed_seconds -= step_duration;
 			const auto& step = animation.events[animation.next_event++];
 			try
 			{
@@ -1907,6 +1885,8 @@ namespace tree_practicum
 			m_current_tree_path = state.current_tree_path;
 			m_current_archive_member_path =
 				state.current_archive_member_path;
+			m_tree_tab_requested_path =
+				state.current_archive_member_path;
 			m_merge_source_archive_path =
 				state.merge_source_archive_path;
 			m_split_result_member_paths =
@@ -1954,6 +1934,8 @@ namespace tree_practicum
 					break;
 				}
 			}
+			restore_active_tree_document_view();
+			remember_active_tree_document();
 			update_session_metadata();
 		}
 
@@ -2103,6 +2085,120 @@ namespace tree_practicum
 			record_interface_change(previous);
 		}
 
+		void request_new_tree_dialog()
+		{
+			m_pending_new_tree_id.clear();
+			m_new_tree_dialog_open = true;
+			m_new_tree_dialog_recenter = true;
+		}
+
+		void draw_new_tree_dialog(
+			mngl::imgui_context::frame_scope& frame)
+		{
+			if (!m_new_tree_dialog_open)
+			{
+				return;
+			}
+
+			if (m_new_tree_dialog_recenter)
+			{
+				if (const ImGuiViewport* viewport = ImGui::GetMainViewport())
+				{
+					const ImVec2 center{
+						viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
+						viewport->WorkPos.y + viewport->WorkSize.y * 0.5f
+					};
+					ImGui::SetNextWindowPos(
+						center,
+						ImGuiCond_Always,
+						{ 0.5f, 0.5f });
+				}
+				m_new_tree_dialog_recenter = false;
+			}
+
+			auto dialog = frame.window(
+				"Создать дерево###TreePracticum.NewTreeDialog",
+				ImGuiWindowFlags_AlwaysAutoResize |
+					ImGuiWindowFlags_NoCollapse |
+					ImGuiWindowFlags_NoDocking |
+					ImGuiWindowFlags_NoSavedSettings);
+			if (!dialog)
+			{
+				return;
+			}
+			if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+			{
+				m_new_tree_dialog_open = false;
+				m_pending_new_tree_id.clear();
+				return;
+			}
+
+			ImGui::TextWrapped(
+				"Выберите встроенный алгоритм или одно из загруженных расширений.");
+
+			std::string preview = "Выберите реализацию...";
+			for (const auto& type : m_available_tree_types)
+			{
+				if (type.algorithm.id == m_pending_new_tree_id)
+				{
+					preview = std::string(type.algorithm.display_name);
+					preview += type.algorithm.id ==
+						tree_practicum::mods::ids::bst
+						? " (встроенный)"
+						: " (расширение)";
+					break;
+				}
+			}
+
+			ImGui::SetNextItemWidth(380.0f);
+			if (ImGui::BeginCombo("Алгоритм дерева", preview.c_str()))
+			{
+				for (const auto& type : m_available_tree_types)
+				{
+					const std::string id(type.algorithm.id);
+					std::string label(type.algorithm.display_name);
+					label += type.algorithm.id ==
+						tree_practicum::mods::ids::bst
+						? " (встроенный)"
+						: " (расширение)";
+					ImGui::PushID(id.c_str());
+					const bool selected = id == m_pending_new_tree_id;
+					if (ImGui::Selectable(label.c_str(), selected))
+					{
+						m_pending_new_tree_id = id;
+					}
+					if (selected)
+					{
+						ImGui::SetItemDefaultFocus();
+					}
+					ImGui::PopID();
+				}
+				ImGui::EndCombo();
+			}
+
+			const bool selected_type_available =
+				available_tree_type_for(m_pending_new_tree_id) != nullptr;
+			ImGui::BeginDisabled(!selected_type_available);
+			if (ImGui::Button("Создать дерево"))
+			{
+				const std::string selected_id = m_pending_new_tree_id;
+				m_new_tree_dialog_open = false;
+				m_pending_new_tree_id.clear();
+				(void)perform_io([this, selected_id]
+				{
+					select_tree(selected_id);
+					create_new_tree();
+				});
+			}
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+			if (ImGui::Button("Отмена"))
+			{
+				m_new_tree_dialog_open = false;
+				m_pending_new_tree_id.clear();
+			}
+		}
+
 		void clear_tree_find_result() noexcept
 		{
 			m_tree_find_path.clear();
@@ -2208,12 +2304,16 @@ namespace tree_practicum
 						std::move(m_hovered_tree_key);
 					auto comparison_pane =
 						std::move(m_hovered_tree_comparison_pane);
+					const auto source_archive_path =
+						m_hovered_tree_archive_path;
 					m_hovered_tree_key.reset();
 					m_hovered_tree_comparison_pane.reset();
 					invoke_tree_tool(
 						tree_tool_operation::erase,
 						std::move(key),
-						std::move(comparison_pane));
+						std::move(comparison_pane),
+						source_archive_path);
+					m_hovered_tree_archive_path.clear();
 					return;
 				}
 				if (ImGui::IsKeyPressed(ImGuiKey_F, false))
@@ -2239,12 +2339,16 @@ namespace tree_practicum
 					auto key = std::move(m_hovered_tree_key);
 					auto comparison_pane =
 						std::move(m_hovered_tree_comparison_pane);
+					const auto source_archive_path =
+						m_hovered_tree_archive_path;
 					m_hovered_tree_key.reset();
 					m_hovered_tree_comparison_pane.reset();
 					invoke_tree_tool(
 						tree_tool_operation::erase,
 						std::move(key),
-						std::move(comparison_pane));
+						std::move(comparison_pane),
+						source_archive_path);
+					m_hovered_tree_archive_path.clear();
 					return;
 				}
 				if (ImGui::IsKeyPressed(ImGuiKey_M, false))
@@ -2257,12 +2361,16 @@ namespace tree_practicum
 					auto key = std::move(m_hovered_tree_key);
 					auto comparison_pane =
 						std::move(m_hovered_tree_comparison_pane);
+					const auto source_archive_path =
+						m_hovered_tree_archive_path;
 					m_hovered_tree_key.reset();
 					m_hovered_tree_comparison_pane.reset();
 					invoke_tree_tool(
 						tree_tool_operation::split,
 						std::move(key),
-						std::move(comparison_pane));
+						std::move(comparison_pane),
+						source_archive_path);
+					m_hovered_tree_archive_path.clear();
 					return;
 				}
 			}
@@ -2321,10 +2429,7 @@ namespace tree_practicum
 				}
 				if (ImGui::MenuItem("Новое дерево"))
 				{
-					(void)perform_io([&]
-					{
-						create_new_tree();
-					});
+					request_new_tree_dialog();
 				}
 				if (ImGui::MenuItem("Открыть..."))
 				{
@@ -2389,41 +2494,78 @@ namespace tree_practicum
 
 			if (ImGui::BeginMenu("Настройки"))
 			{
-				ImGui::MenuItem(
+				ImGui::TextDisabled("Анимации дерева");
+				if (ImGui::MenuItem(
+					"Показывать анимации операций",
+					nullptr,
+					&m_tree_animations_enabled))
+				{
+					if (!m_tree_animations_enabled)
+					{
+						cancel_tree_animation();
+					}
+					save_application_settings();
+				}
+				if (ImGui::BeginMenu(
+					"Скорость анимации",
+					m_tree_animations_enabled))
+				{
+					constexpr std::array speeds{ 0.5f, 1.0f, 2.0f, 4.0f };
+					constexpr std::array labels{
+						"0,5×",
+						"1×",
+						"2×",
+						"4×"
+					};
+					for (std::size_t index = 0;
+						index < speeds.size();
+						++index)
+					{
+						if (ImGui::MenuItem(
+							labels[index],
+							nullptr,
+							m_tree_animation_speed == speeds[index]))
+						{
+							m_tree_animation_speed = speeds[index];
+							save_application_settings();
+						}
+					}
+					ImGui::EndMenu();
+				}
+
+				ImGui::Separator();
+				ImGui::TextDisabled("Поведение операций");
+				if (ImGui::MenuItem(
 					"Сразу выполнять Erase/Split по наведённому ключу",
 					nullptr,
-					&m_execute_hovered_key_tools_immediately);
+					&m_execute_hovered_key_tools_immediately))
+				{
+					save_application_settings();
+				}
 				ImGui::TextDisabled(
 					m_execute_hovered_key_tools_immediately
 						? "Выключите для подтверждения в окне параметров."
 						: "Включите для немедленного выполнения.");
+				ImGui::Separator();
+				if (ImGui::MenuItem("Сбросить настройки по умолчанию"))
+				{
+					m_tree_animations_enabled = true;
+					m_tree_animation_speed = 1.0f;
+					m_execute_hovered_key_tools_immediately = true;
+					cancel_tree_animation();
+					save_application_settings();
+				}
+				ImGui::TextDisabled("Настройки сохраняются автоматически.");
 				ImGui::EndMenu();
 			}
 
 			if (ImGui::BeginMenu("Вид"))
 			{
 				ImGui::MenuItem("Проводник", nullptr, &m_show_explorer);
-				ImGui::MenuItem("Окно дерева", nullptr, &m_show_workspace);
+				ImGui::MenuItem("Документы дерева", nullptr, &m_show_workspace);
 				ImGui::MenuItem("Панель операций", nullptr, &m_show_tools);
 				ImGui::MenuItem("Поиск функций", nullptr, &m_show_functions);
 				ImGui::MenuItem("Информация", nullptr, &m_show_information);
-				ImGui::EndMenu();
-			}
-
-			if (ImGui::BeginMenu("Тип нового дерева"))
-			{
-				for (const auto& type : m_available_tree_types)
-				{
-					const std::string display_name(
-						type.algorithm.display_name);
-					if (ImGui::MenuItem(
-						display_name.c_str(),
-						nullptr,
-						m_new_tree_id == type.algorithm.id))
-					{
-						select_tree(type.algorithm.id);
-					}
-				}
 				ImGui::EndMenu();
 			}
 
@@ -2481,21 +2623,11 @@ namespace tree_practicum
 				if (!can_insert_into_selected_search_tree())
 				{
 					ImGui::TextDisabled(
-						"Для операций выберите корректное дерево с ключами int64_t или double.");
+						"Для операций выберите корректное дерево с поддерживаемым типом ключей.");
 				}
 				ImGui::EndMenu();
 			}
 
-			if (ImGui::BeginMenu("Справка"))
-			{
-				ImGui::MenuItem("Прототип интерфейса", nullptr, false, false);
-				ImGui::MenuItem(
-					"Доступные операции зависят от выбранного алгоритма дерева",
-					nullptr,
-					false,
-					false);
-				ImGui::EndMenu();
-			}
 		}
 
 		static void set_initial_window_rect(ImVec2 position, ImVec2 size)
@@ -2718,6 +2850,136 @@ namespace tree_practicum
 				value.size()));
 		}
 
+		[[nodiscard]] static std::filesystem::path application_settings_path()
+		{
+			std::unique_ptr<char, decltype(&SDL_free)> preference_directory(
+				SDL_GetPrefPath("MNGL", "MNGL"),
+				SDL_free);
+			if (!preference_directory)
+			{
+				return {};
+			}
+			const auto directory = path_from_utf8(preference_directory.get());
+			return directory / "settings.ini";
+		}
+
+		void load_application_settings() noexcept
+		{
+			try
+			{
+				const auto path = application_settings_path();
+				if (path.empty())
+				{
+					return;
+				}
+				std::ifstream stream(path);
+				std::string line;
+				if (!std::getline(stream, line) ||
+					line != "MNGL_APP_SETTINGS\t1")
+				{
+					return;
+				}
+
+				while (std::getline(stream, line))
+				{
+					const auto separator = line.find('=');
+					if (separator == std::string::npos)
+					{
+						continue;
+					}
+					const auto name = std::string_view(line).substr(0, separator);
+					const auto value = std::string_view(line).substr(separator + 1);
+					if (name == "tree_animations")
+					{
+						if (value == "true")
+						{
+							m_tree_animations_enabled = true;
+						}
+						else if (value == "false")
+						{
+							m_tree_animations_enabled = false;
+						}
+					}
+					else if (name == "tree_animation_speed")
+					{
+						float speed = 0.0f;
+						const auto [end, error] = std::from_chars(
+							value.data(),
+							value.data() + value.size(),
+							speed);
+						if (error == std::errc{} &&
+							end == value.data() + value.size() &&
+							std::isfinite(speed) &&
+							(speed == 0.5f || speed == 1.0f ||
+								speed == 2.0f || speed == 4.0f))
+						{
+							m_tree_animation_speed = speed;
+						}
+					}
+					else if (name == "execute_hovered_key_tools_immediately")
+					{
+						if (value == "true")
+						{
+							m_execute_hovered_key_tools_immediately = true;
+						}
+						else if (value == "false")
+						{
+							m_execute_hovered_key_tools_immediately = false;
+						}
+					}
+				}
+			}
+			catch (const std::exception& error)
+			{
+				logger.warning(
+					"Unable to load application settings: ",
+					error.what());
+			}
+		}
+
+		void save_application_settings() noexcept
+		{
+			try
+			{
+				const auto path = application_settings_path();
+				if (path.empty())
+				{
+					return;
+				}
+				std::ofstream stream(
+					path,
+					std::ios::trunc);
+				if (!stream)
+				{
+					logger.warning(
+						"Unable to save application settings to ",
+						path_to_utf8(path));
+					return;
+				}
+				stream << "MNGL_APP_SETTINGS\t1\n"
+					<< "tree_animations="
+					<< (m_tree_animations_enabled ? "true" : "false") << '\n'
+					<< "tree_animation_speed="
+					<< std::format("{:.1f}", m_tree_animation_speed) << '\n'
+					<< "execute_hovered_key_tools_immediately="
+					<< (m_execute_hovered_key_tools_immediately
+						? "true"
+						: "false") << '\n';
+				if (!stream)
+				{
+					logger.warning(
+						"Failed while writing application settings to ",
+						path_to_utf8(path));
+				}
+			}
+			catch (const std::exception& error)
+			{
+				logger.warning(
+					"Unable to save application settings: ",
+					error.what());
+			}
+		}
+
 		template<std::size_t Size>
 		static void set_path_buffer(
 			std::array<char, Size>& buffer,
@@ -2846,9 +3108,14 @@ namespace tree_practicum
 			}
 			catch (const std::bad_alloc&)
 			{
-				SDL_LogError(
-					SDL_LOG_CATEGORY_APPLICATION,
-					"Unable to queue a selected or dropped tree file.");
+				try
+				{
+					logger.error(
+						"Could not queue the selected or dropped tree file.");
+				}
+				catch (...)
+				{
+				}
 			}
 		}
 
@@ -2861,9 +3128,14 @@ namespace tree_practicum
 			}
 			catch (const std::bad_alloc&)
 			{
-				SDL_LogError(
-					SDL_LOG_CATEGORY_APPLICATION,
-					"Unable to queue the native file dialog error.");
+				try
+				{
+					logger.error(
+						"Could not queue the native file dialog error.");
+				}
+				catch (...)
+				{
+				}
 			}
 		}
 
@@ -2930,6 +3202,485 @@ namespace tree_practicum
 				}
 				open_file(path);
 			});
+		}
+
+		void initialize_live_python_bridge() noexcept
+		{
+			try
+			{
+				std::random_device random;
+				for (int attempt = 0; attempt < 8; ++attempt)
+				{
+					const auto random_hex = [&]
+					{
+						std::string value;
+						value.reserve(32);
+						for (int word = 0; word < 4; ++word)
+						{
+							value += std::format("{:08x}", random());
+						}
+						return value;
+					};
+					const auto session_id = random_hex();
+					const auto token = random_hex();
+					const auto directory =
+						std::filesystem::temp_directory_path() /
+						("mngl-live-" + session_id);
+					std::error_code error;
+					if (!std::filesystem::create_directory(directory, error))
+					{
+						continue;
+					}
+					m_live_python_directory = directory;
+					m_live_python_session_id = session_id;
+					m_live_python_token = token;
+					#if defined(_WIN32)
+					const auto process_id = static_cast<std::uint64_t>(
+						GetCurrentProcessId());
+					#else
+					const auto process_id = static_cast<std::uint64_t>(::getpid());
+					#endif
+					std::ofstream metadata(
+						directory / "session.meta",
+						std::ios::binary | std::ios::trunc);
+					metadata << "protocol=1\n"
+						"session_id=" << session_id << "\n"
+						"process_id=" << process_id << "\n"
+						"token=" << token << "\n";
+					metadata.flush();
+					if (!metadata)
+					{
+						throw std::runtime_error(
+							"Could not publish the live Python bridge session.");
+					}
+					logger.info(
+						"Live Python bridge session is ready (ID ",
+						session_id,
+						").");
+					return;
+				}
+				throw std::runtime_error(
+					"Could not allocate a unique live Python bridge directory.");
+			}
+			catch (const std::exception& error)
+			{
+				if (!m_live_python_directory.empty())
+				{
+					std::error_code cleanup_error;
+					std::filesystem::remove_all(
+						m_live_python_directory,
+						cleanup_error);
+				}
+				m_live_python_directory.clear();
+				m_live_python_session_id.clear();
+				m_live_python_token.clear();
+				logger.warning(
+					"Live Python bridge is unavailable: ",
+					error.what());
+			}
+		}
+
+		void write_live_python_response(
+			const python_bridge::response& response) noexcept
+		{
+			if (m_live_python_directory.empty() ||
+				!python_bridge::valid_request_id(response.request_id))
+			{
+				return;
+			}
+			try
+			{
+				const auto filename = "response-" + response.request_id;
+				const auto temporary =
+					m_live_python_directory / (filename + ".tmp");
+				const auto target =
+					m_live_python_directory / (filename + ".ready");
+				std::ofstream output(
+					temporary,
+					std::ios::binary | std::ios::trunc);
+				output << python_bridge::encode_response(
+					response,
+					m_live_python_token);
+				output.flush();
+				if (!output)
+				{
+					throw std::runtime_error(
+						"Could not write a live Python bridge response.");
+				}
+				output.close();
+				std::error_code error;
+				std::filesystem::rename(temporary, target, error);
+				if (error)
+				{
+					std::filesystem::remove(temporary);
+					throw std::filesystem::filesystem_error(
+						"Could not publish a live Python bridge response",
+						temporary,
+						target,
+						error);
+				}
+			}
+			catch (const std::exception& error)
+			{
+				logger.error(
+					"Unable to return a live Python result: ",
+					error.what());
+			}
+		}
+
+		[[nodiscard]] std::string live_python_tree_inventory(
+			std::string_view scope) const
+		{
+			std::vector<const tree_practicum::archive_entry*> entries;
+			if (scope == "tree.selected")
+			{
+				if (const auto* entry = find_archive_entry(
+					m_session_entries,
+					m_current_archive_member_path);
+					entry && archive_extension(entry->path) == ".tree")
+				{
+					entries.push_back(entry);
+				}
+			}
+			else if (scope == "trees.opened")
+			{
+				entries.reserve(m_open_tree_tabs.size());
+				for (const auto& path : m_open_tree_tabs)
+				{
+					if (const auto* entry = find_archive_entry(
+						m_session_entries,
+						path);
+						entry && archive_extension(entry->path) == ".tree")
+					{
+						entries.push_back(entry);
+					}
+				}
+			}
+			else if (scope == "trees.loaded")
+			{
+				entries.reserve(m_session_entries.size());
+				for (const auto& entry : m_session_entries)
+				{
+					if (archive_extension(entry.path) == ".tree")
+					{
+						entries.push_back(std::addressof(entry));
+					}
+				}
+			}
+			else
+			{
+				throw std::invalid_argument(
+					"Unknown live Python tree inventory scope.");
+			}
+
+			std::string result = std::format(
+				"tree_count={}\n",
+				entries.size());
+			const auto append_field = [&result](
+				std::string_view name,
+				std::string_view value)
+			{
+				result.append(name);
+				result.push_back('=');
+				result.append(value);
+				result.push_back('\n');
+			};
+			for (std::size_t index = 0; index < entries.size(); ++index)
+			{
+				const auto& entry = *entries[index];
+				const auto document = m_tree_documents.find(entry.path);
+				std::string name;
+				if (document != m_tree_documents.end() &&
+					!document->second.display_name.empty())
+				{
+					name = document->second.display_name;
+				}
+				else if (document != m_tree_documents.end() &&
+					!document->second.local_path.empty())
+				{
+					name = path_to_utf8(
+						document->second.local_path.filename());
+				}
+			else
+			{
+				const auto separator = entry.path.find_last_of('/');
+				const auto filename = std::string_view(entry.path).substr(
+					separator == std::string::npos ? 0 : separator + 1);
+				const auto extension = filename.find_last_of('.');
+				name = std::string(filename.substr(
+					0,
+					extension == std::string_view::npos
+						? filename.size()
+						: extension));
+			}
+
+				const auto* type = available_tree_type_for_serialization(
+					entry.contents);
+				const auto prefix = std::format("tree_{}", index);
+				append_field(
+					prefix + "_reference_hex",
+					python_bridge::hex_encode("archive:" + entry.path));
+				append_field(
+					prefix + "_name_hex",
+					python_bridge::hex_encode(name));
+				append_field(
+					prefix + "_algorithm_hex",
+					python_bridge::hex_encode(
+						type ? type->algorithm.id : std::string_view{}));
+				append_field(
+					prefix + "_is_open",
+					std::find(
+						m_open_tree_tabs.begin(),
+						m_open_tree_tabs.end(),
+						entry.path) != m_open_tree_tabs.end()
+						? "true"
+						: "false");
+				append_field(
+					prefix + "_is_selected",
+					entry.path == m_current_archive_member_path
+						? "true"
+						: "false");
+				append_field(
+					prefix + "_is_dirty",
+					tree_document_is_dirty(entry.path)
+						? "true"
+						: "false");
+			}
+			return result;
+		}
+
+		[[nodiscard]] std::string find_workspace_tree_document(
+			std::string_view tree_reference) const
+		{
+			std::string member_path;
+			if (tree_reference.starts_with("archive:"))
+			{
+				member_path = std::string(tree_reference.substr(8));
+			}
+			else
+			{
+				member_path = find_tree_document_for_local_path(
+					path_from_utf8(tree_reference));
+			}
+			if (member_path.empty())
+			{
+				throw std::invalid_argument(
+					"This tree is not loaded in the current MNGL workspace.");
+			}
+			const auto* entry = find_archive_entry(
+				m_session_entries,
+				member_path);
+			if (!entry || archive_extension(entry->path) != ".tree")
+			{
+				throw std::invalid_argument(
+					"This workspace item is not a loaded .tree document.");
+			}
+			return member_path;
+		}
+
+		[[nodiscard]] python_bridge::response execute_live_python_request(
+			const python_bridge::request& request)
+		{
+			python_bridge::response response;
+			response.request_id = request.request_id;
+			try
+			{
+				const auto& operation = request.operation;
+				const auto& tree_reference = request.tree_reference;
+				const auto& key = request.key;
+				if (operation == "tree.selected" ||
+					operation == "trees.opened" ||
+					operation == "trees.loaded")
+				{
+					response.stdout_text =
+						live_python_tree_inventory(operation);
+					return response;
+				}
+
+				const auto archive_path = find_workspace_tree_document(
+					tree_reference);
+				const auto* entry = find_archive_entry(
+					m_session_entries,
+					archive_path);
+				if (!entry)
+				{
+					throw std::logic_error(
+						"The requested tree is missing from the current workspace.");
+				}
+				const auto selected_entry = *entry;
+				const bool tree_tab_is_open = std::find(
+					m_open_tree_tabs.begin(),
+					m_open_tree_tabs.end(),
+					archive_path) != m_open_tree_tabs.end();
+				m_tree_comparison_mode = false;
+				if (m_current_archive_member_path != archive_path ||
+					!tree_tab_is_open)
+				{
+					open_archive_tree(selected_entry);
+				}
+				if (operation == "select")
+				{
+					m_tree_tab_requested_path = archive_path;
+					response.stdout_text =
+						"selected=true\nreference_hex=" +
+						python_bridge::hex_encode(
+							"archive:" + archive_path) + "\n";
+					return response;
+				}
+
+				if (key.size() >= m_key_input.size())
+				{
+					throw std::invalid_argument(
+						"Tree key text is too long for the MNGL operation input.");
+				}
+				m_tree_comparison_mode = false;
+				if (m_current_archive_member_path != archive_path)
+				{
+					open_archive_tree(selected_entry);
+				}
+				m_tree_tab_requested_path = archive_path;
+				m_key_input_edit_start.reset();
+				set_path_buffer(m_key_input, key);
+				const std::string serialization_before =
+					m_current_tree_serialization;
+
+				if (operation == "find")
+				{
+					if (!supports_tool_operation(tree_tool_operation::find))
+					{
+						throw std::invalid_argument(
+							"Find is not supported by the open tree or its key type.");
+					}
+					perform_search_tree_find();
+					if (!m_tree_operation_error.empty())
+					{
+						throw std::runtime_error(m_tree_operation_error);
+					}
+					response.stdout_text = std::format(
+						"operation=find\nfound={}\nchanged={}\nkey={}\n",
+						m_tree_find_found ? "true" : "false",
+						m_current_tree_serialization != serialization_before
+							? "true"
+							: "false",
+						key);
+				}
+				else if (operation == "insert")
+				{
+					if (!supports_tool_operation(tree_tool_operation::insert))
+					{
+						throw std::invalid_argument(
+							"Insert is not supported by the open tree or its key type.");
+					}
+					perform_search_tree_insert();
+					if (!m_tree_operation_error.empty())
+					{
+						throw std::runtime_error(m_tree_operation_error);
+					}
+					response.stdout_text = std::format(
+						"operation=insert\nchanged={}\nkey={}\n",
+						m_current_tree_serialization != serialization_before
+							? "true"
+							: "false",
+						key);
+				}
+				else if (operation == "erase")
+				{
+					if (!supports_tool_operation(tree_tool_operation::erase))
+					{
+						throw std::invalid_argument(
+							"Erase is not supported by the open tree or its key type.");
+					}
+					perform_search_tree_erase();
+					if (!m_tree_operation_error.empty())
+					{
+						throw std::runtime_error(m_tree_operation_error);
+					}
+					response.stdout_text = std::format(
+						"operation=erase\nchanged={}\nkey={}\n",
+						m_current_tree_serialization != serialization_before
+							? "true"
+							: "false",
+						key);
+				}
+				else
+				{
+					throw std::invalid_argument(
+						"Live Python supports find, insert, and erase operations.");
+				}
+				logger.success(
+					"Live Python command completed: ",
+					operation,
+					" (request ",
+					request.request_id,
+					").");
+			}
+			catch (const std::exception& error)
+			{
+				response.exit_code = 1;
+				response.stderr_text = error.what();
+				m_tree_operation_error = error.what();
+				m_last_action = std::format(
+					"Команда Python не выполнена: {}",
+					error.what());
+				logger.error(
+					"Live Python command failed (request ",
+					request.request_id,
+					"): ",
+					error.what());
+			}
+			return response;
+		}
+
+		void process_live_python_bridge() noexcept
+		{
+			if (m_live_python_directory.empty())
+			{
+				return;
+			}
+			if (m_live_python_response)
+			{
+				if (m_tree_animation)
+				{
+					return;
+				}
+				write_live_python_response(*m_live_python_response);
+				m_live_python_response.reset();
+				return;
+			}
+
+			const auto request_path = m_live_python_directory / "request.pending";
+			std::ifstream request_file(request_path, std::ios::binary);
+			if (!request_file)
+			{
+				return;
+			}
+			const std::string request_contents{
+				std::istreambuf_iterator<char>(request_file),
+				std::istreambuf_iterator<char>() };
+			request_file.close();
+			std::error_code remove_error;
+			std::filesystem::remove(request_path, remove_error);
+
+			try
+			{
+				auto request = python_bridge::decode_request(
+					request_contents,
+					m_live_python_token);
+				auto response = execute_live_python_request(request);
+				if (!python_bridge::valid_request_id(response.request_id))
+				{
+					logger.error(
+						"Ignored a live Python request without a request ID.");
+					return;
+				}
+				m_live_python_response = std::move(response);
+			}
+			catch (const std::exception& error)
+			{
+				logger.warning(
+					"Rejected a live Python request: ",
+					error.what());
+			}
 		}
 
 		void request_tree_file_picker()
@@ -3019,8 +3770,7 @@ namespace tree_practicum
 			if (extension == ".tree")
 			{
 				const bool already_open = !m_current_tree_path.empty() &&
-					local_tree_document_identity(m_current_tree_path) ==
-						local_tree_document_identity(path);
+					same_local_tree_document_path(m_current_tree_path, path);
 				if (!already_open && !perform_io([&]
 				{
 					open_tree_file(path);
@@ -3034,10 +3784,9 @@ namespace tree_practicum
 				return;
 			}
 
-			const auto identity = local_tree_document_identity(path);
 			if ((extension == ".stree" || extension == ".tar") &&
 				!m_session_path.empty() &&
-				local_tree_document_identity(m_session_path) == identity)
+				same_local_tree_document_path(m_session_path, path))
 			{
 				request_file_dialog(
 					file_dialog_mode::save_session,
@@ -3165,6 +3914,7 @@ namespace tree_practicum
 				document != m_tree_documents.end())
 			{
 				auto state = document->second;
+				state.workspace_path = new_path;
 				const auto separator = new_path.find_last_of('/');
 				state.display_name = new_path.substr(
 					separator == std::string::npos ? 0 : separator + 1);
@@ -3265,6 +4015,10 @@ namespace tree_practicum
 					m_open_tree_tabs.end(),
 					path),
 				m_open_tree_tabs.end());
+			if (m_tree_tab_requested_path == path)
+			{
+				m_tree_tab_requested_path.clear();
+			}
 			m_tree_documents.erase(path);
 			if (m_merge_source_archive_path == path)
 			{
@@ -3333,14 +4087,15 @@ namespace tree_practicum
 			}
 
 			const auto source_identity =
-				local_tree_document_identity(source);
+				normalized_local_tree_document_path(source);
 			std::filesystem::rename(source, target);
 			for (auto& [archive_path, document] : m_tree_documents)
 			{
 				(void)archive_path;
 				if (!document.local_path.empty() &&
-					local_tree_document_identity(document.local_path) ==
-						source_identity)
+					same_local_tree_document_path(
+						document.local_path,
+						source_identity))
 				{
 					document.local_path = target;
 					document.display_name = path_to_utf8(
@@ -3348,15 +4103,17 @@ namespace tree_practicum
 				}
 			}
 			if (!m_current_tree_path.empty() &&
-				local_tree_document_identity(m_current_tree_path) ==
-					source_identity)
+				same_local_tree_document_path(
+					m_current_tree_path,
+					source_identity))
 			{
 				m_current_tree_path = target;
 				m_current_tree_name = path_to_utf8(target.stem());
 			}
 			if (!m_session_path.empty() &&
-				local_tree_document_identity(m_session_path) ==
-					source_identity)
+				same_local_tree_document_path(
+					m_session_path,
+					source_identity))
 			{
 				m_session_path = target;
 			}
@@ -3373,7 +4130,6 @@ namespace tree_practicum
 			{
 				throw std::invalid_argument("Не выбран файл для удаления.");
 			}
-			const auto identity = local_tree_document_identity(path);
 			if (!std::filesystem::remove(path))
 			{
 				throw std::filesystem::filesystem_error(
@@ -3385,18 +4141,18 @@ namespace tree_practicum
 			{
 				(void)archive_path;
 				if (!document.local_path.empty() &&
-					local_tree_document_identity(document.local_path) == identity)
+					same_local_tree_document_path(document.local_path, path))
 				{
 					document.local_path.clear();
 				}
 			}
 			if (!m_current_tree_path.empty() &&
-				local_tree_document_identity(m_current_tree_path) == identity)
+				same_local_tree_document_path(m_current_tree_path, path))
 			{
 				m_current_tree_path.clear();
 			}
 			if (!m_session_path.empty() &&
-				local_tree_document_identity(m_session_path) == identity)
+				same_local_tree_document_path(m_session_path, path))
 			{
 				m_session_path.clear();
 				m_workspace_structure_dirty = true;
@@ -3751,8 +4507,9 @@ namespace tree_practicum
 			const std::filesystem::path& local_path = {},
 			bool open_tab = true)
 		{
-			auto [document, inserted] = m_tree_documents.try_emplace(
-				std::string(archive_member_path));
+			auto document = m_tree_documents.try_emplace(
+				std::string(archive_member_path)).first;
+			document->second.workspace_path = archive_member_path;
 			if (!local_path.empty())
 			{
 				document->second.local_path = local_path;
@@ -3770,7 +4527,6 @@ namespace tree_practicum
 			{
 				m_open_tree_tabs.emplace_back(archive_member_path);
 			}
-			(void)inserted;
 		}
 
 		void remember_active_tree_document()
@@ -3787,6 +4543,81 @@ namespace tree_practicum
 				m_current_archive_member_path);
 			document.current_state_id = m_current_document_state_id;
 			document.saved_state_id = m_saved_document_state_id;
+			remember_active_tree_document_view();
+		}
+
+		void remember_active_tree_document_view() noexcept
+		{
+			if (m_current_archive_member_path.empty())
+			{
+				return;
+			}
+			const auto found = m_tree_documents.find(
+				m_current_archive_member_path);
+			if (found == m_tree_documents.end())
+			{
+				return;
+			}
+			auto& view = found->second.view;
+			if (const auto canvas = m_tree_document_window_states.find(
+				m_current_archive_member_path);
+				canvas != m_tree_document_window_states.end() && canvas->second)
+			{
+				const auto& document_canvas = canvas->second->canvas;
+				view.zoom = document_canvas.zoom;
+				view.pan_x = document_canvas.pan.x;
+				view.pan_y = document_canvas.pan.y;
+				view.initialized = document_canvas.view_initialized;
+				view.fit_requested = document_canvas.fit_requested;
+				return;
+			}
+			view.zoom = m_tree_canvas_zoom;
+			view.pan_x = m_tree_canvas_pan.x;
+			view.pan_y = m_tree_canvas_pan.y;
+			view.initialized = m_tree_canvas_view_initialized;
+			view.fit_requested = m_tree_canvas_fit_requested;
+		}
+
+		void restore_active_tree_document_view() noexcept
+		{
+			if (m_current_archive_member_path.empty())
+			{
+				return;
+			}
+			const auto found = m_tree_documents.find(
+				m_current_archive_member_path);
+			if (found == m_tree_documents.end())
+			{
+				return;
+			}
+			const auto& view = found->second.view;
+			m_tree_canvas_zoom = view.zoom;
+			m_tree_canvas_pan = { view.pan_x, view.pan_y };
+			m_tree_canvas_view_initialized = view.initialized;
+			m_tree_canvas_fit_requested = view.fit_requested;
+			if (const auto canvas = m_tree_document_window_states.find(
+				m_current_archive_member_path);
+				canvas != m_tree_document_window_states.end() && canvas->second)
+			{
+				canvas->second->canvas.zoom = view.zoom;
+				canvas->second->canvas.pan = {
+					view.pan_x,
+					view.pan_y
+				};
+				canvas->second->canvas.view_initialized = view.initialized;
+				canvas->second->canvas.fit_requested = view.fit_requested;
+			}
+		}
+
+		void request_fit_active_tree_document() noexcept
+		{
+			m_tree_canvas_fit_requested = true;
+			if (const auto canvas = m_tree_document_window_states.find(
+				m_current_archive_member_path);
+				canvas != m_tree_document_window_states.end() && canvas->second)
+			{
+				canvas->second->canvas.fit_requested = true;
+			}
 		}
 
 		[[nodiscard]] bool tree_document_is_dirty(
@@ -3795,8 +4626,7 @@ namespace tree_practicum
 			const auto found = m_tree_documents.find(
 				std::string(archive_member_path));
 			return found != m_tree_documents.end() &&
-				found->second.current_state_id !=
-					found->second.saved_state_id;
+				found->second.is_dirty();
 		}
 
 		[[nodiscard]] bool any_tree_document_is_dirty() const
@@ -3806,13 +4636,13 @@ namespace tree_practicum
 				m_tree_documents.end(),
 				[](const auto& item)
 				{
-					return item.second.current_state_id !=
-						item.second.saved_state_id;
+					return item.second.is_dirty();
 				});
 		}
 
-		[[nodiscard]] std::string local_tree_document_identity(
-			const std::filesystem::path& path) const
+		[[nodiscard]] static std::filesystem::path
+			normalized_local_tree_document_path(
+			const std::filesystem::path& path)
 		{
 			std::error_code error;
 			auto absolute = std::filesystem::absolute(path, error);
@@ -3820,17 +4650,59 @@ namespace tree_practicum
 			{
 				absolute = path;
 			}
-			return lowercase_ascii(path_to_utf8(absolute.lexically_normal()));
+			return absolute.lexically_normal();
+		}
+
+		[[nodiscard]] static bool same_local_tree_document_path(
+			const std::filesystem::path& left,
+			const std::filesystem::path& right)
+		{
+			const auto normalized_left =
+				normalized_local_tree_document_path(left);
+			const auto normalized_right =
+				normalized_local_tree_document_path(right);
+			if (normalized_left == normalized_right)
+			{
+				return true;
+			}
+
+			std::error_code error;
+			const bool equivalent = std::filesystem::equivalent(
+				normalized_left,
+				normalized_right,
+				error);
+			if (!error)
+			{
+				return equivalent;
+			}
+
+#if defined(_WIN32)
+			const auto& left_native = normalized_left.native();
+			const auto& right_native = normalized_right.native();
+			if (!left_native.empty() && !right_native.empty() &&
+				left_native.size() <=
+					static_cast<std::size_t>(std::numeric_limits<int>::max()) &&
+				right_native.size() <=
+					static_cast<std::size_t>(std::numeric_limits<int>::max()))
+			{
+				return CompareStringOrdinal(
+					left_native.data(),
+					static_cast<int>(left_native.size()),
+					right_native.data(),
+					static_cast<int>(right_native.size()),
+					TRUE) == CSTR_EQUAL;
+			}
+#endif
+			return false;
 		}
 
 		[[nodiscard]] std::string find_tree_document_for_local_path(
 			const std::filesystem::path& path) const
 		{
-			const auto identity = local_tree_document_identity(path);
 			for (const auto& [archive_path, document] : m_tree_documents)
 			{
 				if (!document.local_path.empty() &&
-					local_tree_document_identity(document.local_path) == identity)
+					same_local_tree_document_path(document.local_path, path))
 				{
 					return archive_path;
 				}
@@ -3863,7 +4735,8 @@ namespace tree_practicum
 
 			set_archive_entry(path, std::string(serialization));
 			register_tree_document(path);
-			m_tree_documents.at(path).saved_state_id =
+			auto& document = m_tree_documents.at(path);
+			document.saved_state_id =
 				std::numeric_limits<std::uint64_t>::max();
 			update_session_metadata();
 			return path;
@@ -3908,6 +4781,7 @@ namespace tree_practicum
 						: extension));
 			m_current_tree_path.clear();
 			m_current_archive_member_path = archive_member_path;
+			m_tree_tab_requested_path = archive_member_path;
 			m_current_document_state_id = 0;
 			m_saved_document_state_id =
 				m_tree_documents.at(archive_member_path).saved_state_id;
@@ -4089,6 +4963,7 @@ namespace tree_practicum
 			m_random_count_edit_start.reset();
 			m_session_entries.clear();
 			m_tree_documents.clear();
+			m_tree_document_window_states.clear();
 			m_open_tree_tabs.clear();
 			m_tree_tab_requested_path.clear();
 			m_session_path.clear();
@@ -4101,6 +4976,7 @@ namespace tree_practicum
 			m_show_demo_trees = false;
 			m_current_tree_path.clear();
 			m_current_archive_member_path.clear();
+			m_tree_tab_requested_path.clear();
 			m_merge_source_archive_path.clear();
 			m_split_result_member_paths = {};
 			m_split_result_key_kind.reset();
@@ -4161,6 +5037,7 @@ namespace tree_practicum
 				m_tree_documents.at(member_path).current_state_id = 0;
 				m_tree_documents.at(member_path).saved_state_id = 0;
 				m_tree_dirty = false;
+				remember_active_tree_document();
 				update_session_metadata();
 			}
 			navigate_to_directory(path.has_parent_path()
@@ -4201,6 +5078,7 @@ namespace tree_practicum
 			m_session_entries = std::move(entries);
 			m_workspace_structure_dirty = false;
 			m_tree_documents.clear();
+			m_tree_document_window_states.clear();
 			m_open_tree_tabs.clear();
 			m_tree_tab_requested_path.clear();
 			for (const auto& entry : m_session_entries)
@@ -4382,15 +5260,17 @@ namespace tree_practicum
 					throw tree_serialization_error(
 						"Алгоритм вернул документ с другим ID дерева.");
 				}
+				const auto inferred_key_kind =
+					infer_search_tree_key_kind(document.value);
+				const auto key_kind = document.keys.value_or(
+					inferred_key_kind.value_or(
+						default_tree_key_kind(type->algorithm)));
 				m_active_tree_id = document.algorithm_id;
 				m_loaded_tree_id = m_active_tree_id;
-				m_loaded_search_tree_key_kind = document.keys;
+				m_loaded_search_tree_key_kind = key_kind;
 				try
 				{
-					algorithm->validate(
-						document.value,
-						document.keys.value_or(
-							search_tree_key_kind::text));
+					algorithm->validate(document.value, key_kind);
 					m_loaded_search_tree_valid = true;
 				}
 				catch (const std::exception& error)
@@ -4420,7 +5300,7 @@ namespace tree_practicum
 			}
 		}
 
-		[[nodiscard]] bool has_loaded_numeric_tree() const
+		[[nodiscard]] bool has_loaded_supported_tree() const
 		{
 			const auto* type = available_tree_type_for(m_active_tree_id);
 			if (!type || !tree_algorithm_for(m_active_tree_id) ||
@@ -4434,27 +5314,19 @@ namespace tree_practicum
 
 			if (m_loaded_search_tree_key_kind)
 			{
-				const auto kind = *m_loaded_search_tree_key_kind;
-				return (kind == search_tree_key_kind::signed_integer ||
-					kind == search_tree_key_kind::floating_point) &&
-					tree_practicum::mods::supports(
-						type->algorithm.supported_key_kinds,
-						kind);
+				return tree_practicum::mods::supports(
+					type->algorithm.supported_key_kinds,
+					*m_loaded_search_tree_key_kind);
 			}
 
-			return tree_practicum::mods::supports(
-					type->algorithm.supported_key_kinds,
-					search_tree_key_kind::signed_integer) ||
-				tree_practicum::mods::supports(
-					type->algorithm.supported_key_kinds,
-					search_tree_key_kind::floating_point);
+			return type->algorithm.supported_key_kinds != 0;
 		}
 
 		[[nodiscard]] bool supports_current_tree_operation(
 			tree_practicum::mods::operation operation) const
 		{
 			const auto* type = available_tree_type_for(m_active_tree_id);
-			return has_loaded_numeric_tree() && type &&
+			return has_loaded_supported_tree() && type &&
 				tree_practicum::mods::supports(
 					type->algorithm.supported_operations,
 					operation);
@@ -4469,23 +5341,12 @@ namespace tree_practicum
 
 		[[nodiscard]] bool can_insert_into_selected_search_tree() const
 		{
-			if (!has_loaded_numeric_tree())
+			if (!has_loaded_supported_tree())
 			{
 				return false;
 			}
 			const auto* type = available_tree_type_for(m_active_tree_id);
 			return type && type->algorithm.supported_operations != 0;
-		}
-
-		[[nodiscard]] bool supports_numeric_input(
-			const tree_type_descriptor& type) const noexcept
-		{
-			return tree_practicum::mods::supports(
-					type.algorithm.supported_key_kinds,
-					search_tree_key_kind::signed_integer) ||
-				tree_practicum::mods::supports(
-					type.algorithm.supported_key_kinds,
-					search_tree_key_kind::floating_point);
 		}
 
 		[[nodiscard]] const tree_practicum::archive_entry*
@@ -5039,7 +5900,7 @@ namespace tree_practicum
 			if (!supports_tool_operation(tree_tool_operation::find))
 			{
 				m_last_action =
-					"Поиск доступен для загруженного дерева с ключами int64_t или double.";
+					"Поиск доступен для загруженного дерева с поддерживаемым типом ключей.";
 				return;
 			}
 
@@ -5048,7 +5909,7 @@ namespace tree_practicum
 				commit_pending_input_edits();
 				cancel_tree_animation();
 				m_tree_operation_error.clear();
-				auto key = parse_numeric_search_tree_key_input(
+				auto key = parse_search_tree_key_input(
 					std::string_view(m_key_input.data()),
 					m_loaded_search_tree_key_kind);
 				const auto key_kind =
@@ -5140,7 +6001,7 @@ namespace tree_practicum
 			if (!supports_tool_operation(tree_tool_operation::insert))
 			{
 				m_last_action =
-					"Операция недоступна: выберите корректное числовое дерево с ключами int64_t или double.";
+					"Операция недоступна: выберите корректное дерево с поддерживаемым типом ключей.";
 				return;
 			}
 
@@ -5149,7 +6010,7 @@ namespace tree_practicum
 				commit_pending_input_edits();
 				cancel_tree_animation();
 				m_tree_operation_error.clear();
-				auto key = parse_numeric_search_tree_key_input(
+				auto key = parse_search_tree_key_input(
 					std::string_view(m_key_input.data()),
 					m_loaded_search_tree_key_kind);
 				const auto effective_key_kind =
@@ -5166,6 +6027,7 @@ namespace tree_practicum
 				auto previous_state = capture_tree_history_state();
 				auto updated_tree = *m_loaded_visual_tree;
 				const bool tree_is_small_enough_to_animate =
+					m_tree_animations_enabled &&
 					updated_tree.nodes.size() <
 						maximum_animated_tree_nodes;
 				const bool collect_animation_events =
@@ -5184,16 +6046,15 @@ namespace tree_practicum
 					animation_start = updated_tree;
 				}
 				const visual_key animation_key = key;
-				const std::size_t animation_cache_index =
-					m_tree_comparison_mode
-					? static_cast<std::size_t>(std::clamp(
-						m_active_comparison_pane,
-						0,
-						static_cast<int>(
-							m_tree_preview_caches.size() - 1)))
-					: 0;
+				const auto active_document_window =
+					m_tree_document_window_states.find(
+						m_current_archive_member_path);
 				const auto pre_operation_geometry =
-					m_tree_preview_caches[animation_cache_index].geometry;
+					active_document_window !=
+						m_tree_document_window_states.end() &&
+					active_document_window->second
+					? active_document_window->second->preview.geometry
+					: m_tree_preview_caches.front().geometry;
 				const bool has_pre_operation_layout =
 					updated_tree.nodes.empty() ||
 					(tree_is_small_enough_to_animate &&
@@ -5346,7 +6207,11 @@ namespace tree_practicum
 						"Duplicate key changed the tree structure: ",
 						inserted_value);
 				}
-				if (!tree_is_small_enough_to_animate)
+				if (!m_tree_animations_enabled)
+				{
+					m_last_action += " Анимации отключены в настройках.";
+				}
+				else if (!tree_is_small_enough_to_animate)
 				{
 					m_last_action +=
 						" Анимация отключена для деревьев от 512 узлов.";
@@ -5368,7 +6233,7 @@ namespace tree_practicum
 			if (!supports_tool_operation(tree_tool_operation::random_insert))
 			{
 				m_last_action =
-					"Операция недоступна: выберите корректное числовое дерево с ключами int64_t или double.";
+					"Операция недоступна: выберите корректное дерево с поддерживаемым типом ключей.";
 				return;
 			}
 
@@ -5388,7 +6253,7 @@ namespace tree_practicum
 				if (!key_kind)
 				{
 					const auto type_probe =
-						parse_numeric_search_tree_key_input(
+						parse_search_tree_key_input(
 							std::string_view(m_key_input.data()),
 							std::nullopt);
 					key_kind = search_tree_key_kind_for_value(
@@ -5464,7 +6329,7 @@ namespace tree_practicum
 			if (!supports_tool_operation(tree_tool_operation::erase))
 			{
 				m_last_action =
-					"Удаление недоступно: выберите корректное дерево с ключами int64_t или double.";
+					"Удаление недоступно: выберите корректное дерево с поддерживаемым типом ключей.";
 				return;
 			}
 
@@ -5475,12 +6340,16 @@ namespace tree_practicum
 				m_tree_operation_error.clear();
 				auto key = hovered_key
 					? std::move(*hovered_key)
-					: parse_numeric_search_tree_key_input(
+					: parse_search_tree_key_input(
 						std::string_view(m_key_input.data()),
 						m_loaded_search_tree_key_kind);
 				const auto key_kind = m_loaded_search_tree_key_kind.value_or(
 					search_tree_key_kind_for_value(key.value));
 				const std::string key_text = full_visual_value(key.value);
+				const std::string tree_document_label =
+					m_current_archive_member_path.empty()
+					? m_current_tree_name
+					: m_current_archive_member_path;
 				const auto* algorithm =
 					tree_algorithm_for(m_active_tree_id);
 				if (!algorithm)
@@ -5497,12 +6366,15 @@ namespace tree_practicum
 				if (!result.changed)
 				{
 					m_last_action = std::format(
-						"Ключ «{}» не найден в {}.",
+						"Ключ «{}» не найден в {} ({}).",
 						key_text,
-						algorithm->name());
+						algorithm->name(),
+						tree_document_label);
 					logger.warning(
 						algorithm->name(),
-						" erase skipped because the key was not found: ",
+						" erase skipped because the key was not found in tree '",
+						tree_document_label,
+						"': ",
 						key_text);
 					return;
 				}
@@ -5552,7 +6424,7 @@ namespace tree_practicum
 			if (!can_merge_selected_search_tree())
 			{
 				m_last_action =
-					"Слияние недоступно: выберите числовое дерево и отдельную запись .tree-источника.";
+					"Слияние недоступно: выберите поддерживаемое дерево и отдельную запись .tree-источника.";
 				return;
 			}
 
@@ -5578,30 +6450,34 @@ namespace tree_practicum
 				}
 
 				auto& source_tree = source_document.value;
-				const auto source_key_kind = source_document.keys;
-				if (source_key_kind &&
-					*source_key_kind != search_tree_key_kind::signed_integer &&
-					*source_key_kind != search_tree_key_kind::floating_point)
+				const auto* algorithm =
+					tree_algorithm_for(m_active_tree_id);
+				const auto* type =
+					available_tree_type_for(m_active_tree_id);
+				if (!algorithm || !type)
 				{
-					throw std::invalid_argument(
-						"Merge поддерживает только деревья с ключами int64_t или double.");
+					throw std::logic_error(
+						"Для выбранного дерева нет алгоритма merge.");
 				}
-				if (m_loaded_search_tree_key_kind &&
-					source_key_kind &&
-					*m_loaded_search_tree_key_kind != *source_key_kind)
+				auto source_key_kind = source_document.keys;
+				if (!source_key_kind)
+				{
+					source_key_kind = infer_search_tree_key_kind(source_tree);
+				}
+				const auto key_kind = m_loaded_search_tree_key_kind.value_or(
+					source_key_kind.value_or(
+						default_tree_key_kind(type->algorithm)));
+				if (source_key_kind && *source_key_kind != key_kind)
 				{
 					throw std::invalid_argument(
 						"Тип ключей дерева-источника должен совпадать с текущим деревом.");
 				}
-				const auto key_kind = m_loaded_search_tree_key_kind.value_or(
-					source_key_kind.value_or(
-						search_tree_key_kind::signed_integer));
-				const auto* algorithm =
-					tree_algorithm_for(m_active_tree_id);
-				if (!algorithm)
+				if (!tree_practicum::mods::supports(
+					type->algorithm.supported_key_kinds,
+					key_kind))
 				{
-					throw std::logic_error(
-						"Для выбранного дерева нет алгоритма merge.");
+					throw std::invalid_argument(
+						"Тип ключей дерева-источника не поддерживается выбранным алгоритмом.");
 				}
 				algorithm->validate(source_tree, key_kind);
 
@@ -5651,7 +6527,7 @@ namespace tree_practicum
 			if (!supports_tool_operation(tree_tool_operation::split))
 			{
 				m_last_action =
-					"Split недоступен: выберите корректное дерево с ключами int64_t или double.";
+					"Split недоступен: выберите корректное дерево с поддерживаемым типом ключей.";
 				return;
 			}
 
@@ -5662,7 +6538,7 @@ namespace tree_practicum
 				m_tree_operation_error.clear();
 				auto pivot = hovered_key
 					? std::move(*hovered_key)
-					: parse_numeric_search_tree_key_input(
+					: parse_search_tree_key_input(
 						std::string_view(m_key_input.data()),
 						m_loaded_search_tree_key_kind);
 				const auto key_kind = m_loaded_search_tree_key_kind.value_or(
@@ -5762,18 +6638,50 @@ namespace tree_practicum
 			}
 		}
 
+		[[nodiscard]] bool activate_tree_document_for_operation(
+			std::string_view archive_path)
+		{
+			if (archive_path.empty() ||
+				archive_path == m_current_archive_member_path)
+			{
+				return true;
+			}
+
+			const auto* entry = find_archive_entry(
+				m_session_entries,
+				archive_path);
+			if (!entry)
+			{
+				m_file_error =
+					"Документ дерева больше не доступен в рабочей области.";
+				m_last_action = m_file_error;
+				return false;
+			}
+
+			const tree_practicum::archive_entry entry_copy = *entry;
+			return perform_io([&]
+			{
+				open_archive_tree(entry_copy);
+			});
+		}
+
 		void invoke_tree_tool(
 			tree_tool_operation operation,
 			std::optional<visual_key> selected_key = std::nullopt,
-			std::optional<std::size_t> comparison_pane = std::nullopt)
+			std::optional<std::size_t> comparison_pane = std::nullopt,
+			std::string_view source_archive_path = {})
 		{
-			if (selected_key &&
-				comparison_pane &&
+			if (comparison_pane &&
 				m_tree_comparison_mode &&
 				!perform_io([&]
 				{
 					focus_comparison_pane(*comparison_pane);
 				}))
+			{
+				return;
+			}
+			if (!comparison_pane &&
+				!activate_tree_document_for_operation(source_archive_path))
 			{
 				return;
 			}
@@ -5989,7 +6897,7 @@ namespace tree_practicum
 			}
 			sync_comparison_pane_with_active_tree(true);
 			register_tree_document(entry.path);
-			const auto& document = m_tree_documents.at(entry.path);
+			auto& document = m_tree_documents.at(entry.path);
 			m_current_tree_path = document.local_path;
 			m_current_archive_member_path = entry.path;
 			m_tree_tab_requested_path = entry.path;
@@ -6012,6 +6920,8 @@ namespace tree_practicum
 				document.saved_state_id;
 			m_tree_dirty = m_current_document_state_id !=
 				m_saved_document_state_id;
+			restore_active_tree_document_view();
+			remember_active_tree_document();
 			update_session_metadata();
 		}
 
@@ -6100,6 +7010,13 @@ namespace tree_practicum
 			const auto target_name = path_to_utf8(path.stem());
 			const auto original_archive_path =
 				m_current_archive_member_path;
+			std::optional<tree_document_view_state> original_view;
+			if (const auto original = m_tree_documents.find(
+				original_archive_path);
+				original != m_tree_documents.end())
+			{
+				original_view = original->second.view;
+			}
 			tree_practicum::write_tree_file(path, m_current_tree_serialization);
 			if (!m_current_archive_member_path.empty() &&
 				target_name == m_current_tree_name)
@@ -6114,6 +7031,11 @@ namespace tree_practicum
 				m_current_archive_member_path = add_tree_to_session(
 					target_name,
 					m_current_tree_serialization);
+				if (original_view)
+				{
+					m_tree_documents.at(
+						m_current_archive_member_path).view = *original_view;
+				}
 				if (!original_archive_path.empty())
 				{
 					const auto original =
@@ -6137,6 +7059,7 @@ namespace tree_practicum
 			m_saved_document_state_id = m_current_document_state_id;
 			m_tree_dirty = false;
 			m_tree_tab_requested_path = m_current_archive_member_path;
+			remember_active_tree_document();
 			update_session_metadata();
 			m_last_action = std::format(
 				"Текущий файл сохранён: {}",
@@ -6348,10 +7271,13 @@ namespace tree_practicum
 				return;
 			}
 
-			ImGui::TextDisabled("РАБОЧАЯ ОБЛАСТЬ · ФАЙЛЫ НА ДИСКЕ");
-			ImGui::TextWrapped(
-				"%s",
-				path_to_utf8(m_explorer_directory).c_str());
+			ImGui::TextDisabled("ПАПКА НА ДИСКЕ");
+			const auto explorer_directory_name =
+				path_to_utf8(m_explorer_directory.filename());
+			const auto explorer_directory_label = explorer_directory_name.empty()
+				? path_to_utf8(m_explorer_directory)
+				: explorer_directory_name;
+			ImGui::Text("%s", explorer_directory_label.c_str());
 			if (ImGui::Button("Вверх"))
 			{
 				(void)perform_io([&]
@@ -6410,7 +7336,13 @@ namespace tree_practicum
 					m_file_error.c_str());
 			}
 
-			ImGui::TextDisabled("ПАПКА");
+			const bool show_local_files = ImGui::CollapsingHeader(
+				"Файлы на диске",
+				ImGuiTreeNodeFlags_DefaultOpen);
+			const float local_files_height = std::clamp(
+				ImGui::GetContentRegionAvail().y * 0.42f,
+				110.0f,
+				260.0f);
 			enum class explorer_context_action
 			{
 				open,
@@ -6432,99 +7364,210 @@ namespace tree_practicum
 				archive_context_action,
 				std::string>> archive_context_action_request;
 			std::optional<explorer_entry> activated_entry;
-			if (ImGui::BeginChild(
+			if (show_local_files && ImGui::BeginChild(
 				"ExplorerDiskFiles",
-				{ 0.0f, 230.0f },
+				{ 0.0f, local_files_height },
 				ImGuiChildFlags_Borders))
 			{
-				bool found_local_file = false;
-				for (std::size_t i = 0; i < m_explorer_entries.size(); ++i)
+				auto render_directory = [&](auto&& self,
+					const std::filesystem::path& directory,
+					const std::vector<explorer_entry>* cached_entries) -> void
 				{
-					const auto& entry = m_explorer_entries[i];
-					const auto file_name = path_to_utf8(entry.path.filename());
-					if (!contains_text(file_name, query))
+					std::vector<explorer_entry> discovered_entries;
+					std::string read_error;
+					if (cached_entries)
 					{
-						continue;
+						discovered_entries = *cached_entries;
 					}
-					found_local_file = true;
-					const auto entry_path = entry.path;
-					std::string label = entry.directory ? "[DIR]  " : "[FILE] ";
-					label += file_name;
-
-					ImGui::PushID(static_cast<int>(i));
-					const bool selected =
-						m_selected_local_path &&
-						*m_selected_local_path == entry.path;
-					const bool clicked = ImGui::Selectable(label.c_str(), selected);
-					if (clicked)
+					else
 					{
-						m_selected_local_path = entry.path;
-						m_selected_archive_entry = -1;
-					}
-					if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-					{
-						m_selected_local_path = entry.path;
-						m_selected_archive_entry = -1;
-					}
-					if (ImGui::BeginPopupContextItem(
-						"ExplorerDiskFileContext"))
-					{
-						if (ImGui::MenuItem("Открыть"))
+						std::error_code error;
+						std::filesystem::directory_iterator iterator(directory, error);
+						if (error)
 						{
-							local_context_action = {
-								explorer_context_action::open,
-								entry_path
+							read_error = error.message();
+						}
+						else
+						{
+							const std::filesystem::directory_iterator end;
+							while (iterator != end)
+							{
+								const auto& item = *iterator;
+								std::error_code status_error;
+								const bool is_directory = item.is_directory(status_error);
+								if (status_error)
+								{
+									read_error = status_error.message();
+								}
+								else if (is_directory ||
+									file_extension(item.path()) == ".tree" ||
+									file_extension(item.path()) == ".stree" ||
+									file_extension(item.path()) == ".tar")
+								{
+									discovered_entries.push_back({ item.path(), is_directory });
+								}
+								iterator.increment(error);
+								if (error)
+								{
+									read_error = error.message();
+									break;
+								}
+							}
+						}
+					}
+
+					std::sort(
+						discovered_entries.begin(),
+						discovered_entries.end(),
+						[](const explorer_entry& left, const explorer_entry& right)
+						{
+							if (left.directory != right.directory)
+							{
+								return left.directory;
+							}
+							return lowercase_ascii(path_to_utf8(left.path.filename())) <
+								lowercase_ascii(path_to_utf8(right.path.filename()));
+						});
+
+					if (discovered_entries.empty())
+					{
+						ImGui::TextDisabled(
+							read_error.empty()
+								? (query.empty()
+									? "Здесь пока нет файлов дерева."
+									: "Совпадений нет.")
+								: "Не удалось прочитать папку.");
+						return;
+					}
+
+					bool drew_entry = false;
+					for (const auto& entry : discovered_entries)
+					{
+						const auto file_name = path_to_utf8(entry.path.filename());
+						if (!entry.directory && !contains_text(file_name, query))
+						{
+							continue;
+						}
+						drew_entry = true;
+						const auto entry_path = entry.path;
+						const bool selected = m_selected_local_path &&
+							*m_selected_local_path == entry_path;
+						const auto path_id = path_to_utf8(entry_path);
+						ImGui::PushID(path_id.c_str());
+						bool clicked = false;
+						bool opened = false;
+						if (entry.directory)
+						{
+							if (selected)
+							{
+								ImGui::PushStyleColor(
+									ImGuiCol_Header,
+									ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
+								ImGui::PushStyleColor(
+									ImGuiCol_Text,
+									{ 0.55f, 0.76f, 0.98f, 1.0f });
+							}
+							opened = ImGui::TreeNodeEx(
+								"##ExplorerFolder",
+								ImGuiTreeNodeFlags_OpenOnArrow |
+									ImGuiTreeNodeFlags_OpenOnDoubleClick |
+									ImGuiTreeNodeFlags_SpanAvailWidth |
+									ImGuiTreeNodeFlags_FramePadding,
+								"%s",
+								file_name.c_str());
+							clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+							if (selected)
+							{
+								ImGui::PopStyleColor(2);
+							}
+						}
+						else
+						{
+							const auto extension = file_extension(entry_path);
+							const ImVec4 marker_color = extension == ".tree"
+								? ImVec4{ 0.43f, 0.72f, 0.98f, 1.0f }
+								: extension == ".stree"
+									? ImVec4{ 0.75f, 0.60f, 0.96f, 1.0f }
+									: ImVec4{ 0.86f, 0.67f, 0.38f, 1.0f };
+							ImGui::TextColored(marker_color, "●");
+							ImGui::SameLine(0.0f, 5.0f);
+							clicked = ImGui::Selectable(file_name.c_str(), selected);
+						}
+						if (clicked ||
+							ImGui::IsItemClicked(ImGuiMouseButton_Right))
+						{
+							m_selected_local_path = entry_path;
+							m_selected_archive_entry = -1;
+						}
+						if (ImGui::BeginPopupContextItem("ExplorerDiskFileContext"))
+						{
+							if (ImGui::MenuItem("Открыть"))
+							{
+								local_context_action = {
+									explorer_context_action::open,
+									entry_path
+								};
+							}
+							if (!entry.directory)
+							{
+								ImGui::Separator();
+								if (ImGui::MenuItem("Переименовать..."))
+								{
+									local_context_action = {
+										explorer_context_action::rename,
+										entry_path
+									};
+								}
+								if (ImGui::MenuItem("Удалить..."))
+								{
+									local_context_action = {
+										explorer_context_action::remove,
+										entry_path
+									};
+								}
+								if (ImGui::MenuItem("Сохранить как..."))
+								{
+									local_context_action = {
+										explorer_context_action::save_as,
+										entry_path
+									};
+								}
+							}
+							ImGui::EndPopup();
+						}
+						const bool double_clicked = clicked &&
+							ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+						if (opened)
+						{
+							self(self, entry_path, nullptr);
+							ImGui::TreePop();
+						}
+						ImGui::PopID();
+
+						if (double_clicked)
+						{
+							activated_entry = explorer_entry{
+								entry_path,
+								entry.directory
 							};
+							return;
 						}
-						if (!entry.directory)
+						if (activated_entry)
 						{
-							ImGui::Separator();
-							if (ImGui::MenuItem("Переименовать..."))
-							{
-								local_context_action = {
-									explorer_context_action::rename,
-									entry_path
-								};
-							}
-							if (ImGui::MenuItem("Удалить..."))
-							{
-								local_context_action = {
-									explorer_context_action::remove,
-									entry_path
-								};
-							}
-							if (ImGui::MenuItem("Сохранить как..."))
-							{
-								local_context_action = {
-									explorer_context_action::save_as,
-									entry_path
-								};
-							}
+							return;
 						}
-						ImGui::EndPopup();
 					}
-					const bool double_clicked = clicked &&
-						ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
-					ImGui::PopID();
-
-					if (double_clicked)
+					if (!drew_entry)
 					{
-						activated_entry = explorer_entry{
-							entry_path,
-							entry.directory
-						};
-						break;
+						ImGui::TextDisabled("Совпадений нет.");
 					}
-				}
-				if (!found_local_file)
-				{
-					ImGui::TextDisabled(
-						query.empty()
-							? "В этой папке нет .tree, .stree или .tar."
-							: "Совпадений нет.");
-				}
+				};
+				render_directory(render_directory, m_explorer_directory, &m_explorer_entries);
 			}
-			ImGui::EndChild();
+			if (show_local_files)
+			{
+				ImGui::EndChild();
+			}
 			if (activated_entry)
 			{
 				(void)perform_io([&]
@@ -6607,13 +7650,9 @@ namespace tree_practicum
 					});
 				}
 				const auto extension = file_extension(selected_path);
-				const bool selected_is_directory = std::any_of(
-					m_explorer_entries.begin(),
-					m_explorer_entries.end(),
-					[&](const auto& entry)
-					{
-						return entry.path == selected_path && entry.directory;
-					});
+				std::error_code selected_path_error;
+				const bool selected_is_directory =
+					std::filesystem::is_directory(selected_path, selected_path_error);
 				if (!selected_is_directory && extension == ".tree")
 				{
 					ImGui::SameLine();
@@ -6628,104 +7667,222 @@ namespace tree_practicum
 			}
 
 			ImGui::Separator();
-			ImGui::TextDisabled("ВИРТУАЛЬНАЯ РАБОЧАЯ ОБЛАСТЬ · TAR");
-			if (ImGui::BeginChild(
+			const bool show_archive_files = ImGui::CollapsingHeader(
+				"Состав рабочей области",
+				ImGuiTreeNodeFlags_DefaultOpen);
+			std::optional<std::size_t> activated_archive_entry;
+			if (show_archive_files && ImGui::BeginChild(
 				"ExplorerArchiveFiles",
 				{ 0.0f, 0.0f },
 				ImGuiChildFlags_Borders))
 			{
+				struct archive_explorer_node
+				{
+					std::string name;
+					std::string path;
+					std::vector<archive_explorer_node> children;
+					std::optional<std::size_t> entry_index;
+				};
+				std::vector<archive_explorer_node> roots;
+				for (std::size_t i = 0; i < m_session_entries.size(); ++i)
+				{
+					const auto& path = m_session_entries[i].path;
+					if (!contains_text(path, query))
+					{
+						continue;
+					}
+
+					auto* siblings = &roots;
+					std::size_t component_begin = 0;
+					while (component_begin < path.size())
+					{
+						const auto slash = path.find('/', component_begin);
+						const auto component_end = slash == std::string::npos
+							? path.size()
+							: slash;
+						const auto component = path.substr(
+							component_begin,
+							component_end - component_begin);
+						if (component.empty())
+						{
+							component_begin = component_end + 1;
+							continue;
+						}
+
+						auto child = std::find_if(
+							siblings->begin(),
+							siblings->end(),
+							[&](const archive_explorer_node& node)
+							{
+								return node.name == component;
+							});
+						if (child == siblings->end())
+						{
+							siblings->push_back({ component, {}, {}, std::nullopt });
+							child = std::prev(siblings->end());
+						}
+						if (child->path.empty())
+						{
+							child->path = component_begin == 0
+								? component
+								: path.substr(0, component_end);
+						}
+
+						const bool is_last = slash == std::string::npos;
+						if (is_last)
+						{
+							child->entry_index = i;
+						}
+						else
+						{
+							siblings = &child->children;
+						}
+						component_begin = component_end + 1;
+					}
+				}
+
+				auto sort_nodes = [&](auto&& self,
+					std::vector<archive_explorer_node>& nodes) -> void
+				{
+					std::sort(
+						nodes.begin(),
+						nodes.end(),
+						[](const archive_explorer_node& left,
+							const archive_explorer_node& right)
+						{
+							const bool left_directory = !left.entry_index.has_value();
+							const bool right_directory = !right.entry_index.has_value();
+							if (left_directory != right_directory)
+							{
+								return left_directory;
+							}
+							return lowercase_ascii(left.name) < lowercase_ascii(right.name);
+						});
+					for (auto& node : nodes)
+					{
+						self(self, node.children);
+					}
+				};
+				sort_nodes(sort_nodes, roots);
+
 				if (m_session_entries.empty())
 				{
 					ImGui::TextDisabled("В архиве пока нет файлов.");
 				}
+				else if (roots.empty())
+				{
+					ImGui::TextDisabled("Совпадений нет.");
+				}
 				else
 				{
-					for (std::size_t i = 0; i < m_session_entries.size(); ++i)
+					auto render_archive_nodes = [&](auto&& self,
+						std::vector<archive_explorer_node>& nodes) -> void
 					{
-						const auto& entry = m_session_entries[i];
-						if (!contains_text(entry.path, query))
+						for (auto& node : nodes)
 						{
-							continue;
-						}
+							if (!node.entry_index)
+							{
+								ImGui::PushID(node.path.c_str());
+								const bool opened = ImGui::TreeNodeEx(
+									"##ExplorerArchiveFolder",
+									ImGuiTreeNodeFlags_OpenOnArrow |
+										ImGuiTreeNodeFlags_OpenOnDoubleClick |
+										ImGuiTreeNodeFlags_SpanAvailWidth |
+										ImGuiTreeNodeFlags_FramePadding,
+									"%s",
+									node.name.c_str());
+								if (opened)
+								{
+									self(self, node.children);
+									ImGui::TreePop();
+								}
+								ImGui::PopID();
+								continue;
+							}
 
-						const auto extension = archive_extension(entry.path);
-						const char* marker = extension == ".tree"
-							? "[TREE] "
-							: extension == ".htree"
-								? "[HIST] "
-								: extension == ".session"
-									? "[SESSION] "
-									: "[FILE] ";
-						std::string label = marker;
-						label += entry.path;
-						ImGui::PushID(static_cast<int>(i));
-						const bool clicked = ImGui::Selectable(
-							label.c_str(),
-							m_selected_archive_entry == static_cast<int>(i));
-						if (clicked)
-						{
-							m_selected_archive_entry = static_cast<int>(i);
-							m_selected_local_path.reset();
-						}
-						if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-						{
-							m_selected_archive_entry = static_cast<int>(i);
-							m_selected_local_path.reset();
-						}
-						if (ImGui::BeginPopupContextItem(
-							"ExplorerArchiveFileContext"))
-						{
-							if (ImGui::MenuItem("Открыть"))
+							const auto index = *node.entry_index;
+							const auto& entry = m_session_entries[index];
+							const auto extension = archive_extension(entry.path);
+							const ImVec4 marker_color = extension == ".tree"
+								? ImVec4{ 0.43f, 0.72f, 0.98f, 1.0f }
+								: extension == ".htree"
+									? ImVec4{ 0.75f, 0.60f, 0.96f, 1.0f }
+									: extension == ".session"
+										? ImVec4{ 0.86f, 0.67f, 0.38f, 1.0f }
+										: ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
+							ImGui::PushID(node.path.c_str());
+							ImGui::TextColored(marker_color, "●");
+							ImGui::SameLine(0.0f, 5.0f);
+							const bool clicked = ImGui::Selectable(
+								node.name.c_str(),
+								m_selected_archive_entry == static_cast<int>(index));
+							if (clicked ||
+								ImGui::IsItemClicked(ImGuiMouseButton_Right))
 							{
-								archive_context_action_request = {
-									archive_context_action::open,
-									entry.path
-								};
+								m_selected_archive_entry = static_cast<int>(index);
+								m_selected_local_path.reset();
 							}
-							ImGui::Separator();
-							const bool protected_entry =
-								extension == ".session" ||
-								extension == ".htree";
-							ImGui::BeginDisabled(protected_entry);
-							if (ImGui::MenuItem("Переименовать..."))
+							if (ImGui::BeginPopupContextItem(
+								"ExplorerArchiveFileContext"))
 							{
-								archive_context_action_request = {
-									archive_context_action::rename,
-									entry.path
-								};
+								if (ImGui::MenuItem("Открыть"))
+								{
+									archive_context_action_request = {
+										archive_context_action::open,
+										entry.path
+									};
+								}
+								ImGui::Separator();
+								const bool protected_entry =
+									extension == ".session" ||
+									extension == ".htree";
+								ImGui::BeginDisabled(protected_entry);
+								if (ImGui::MenuItem("Переименовать..."))
+								{
+									archive_context_action_request = {
+										archive_context_action::rename,
+										entry.path
+									};
+								}
+								if (ImGui::MenuItem("Удалить..."))
+								{
+									archive_context_action_request = {
+										archive_context_action::remove,
+										entry.path
+									};
+								}
+								ImGui::EndDisabled();
+								if (ImGui::MenuItem("Сохранить как..."))
+								{
+									archive_context_action_request = {
+										archive_context_action::save_as,
+										entry.path
+									};
+								}
+								ImGui::EndPopup();
 							}
-							if (ImGui::MenuItem("Удалить..."))
+							if (clicked &&
+								ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
 							{
-								archive_context_action_request = {
-									archive_context_action::remove,
-									entry.path
-								};
+								activated_archive_entry = index;
 							}
-							ImGui::EndDisabled();
-							if (ImGui::MenuItem("Сохранить как..."))
-							{
-								archive_context_action_request = {
-									archive_context_action::save_as,
-									entry.path
-								};
-							}
-							ImGui::EndPopup();
-						}
-						const bool double_clicked = clicked &&
-							ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
-						ImGui::PopID();
-
-						if (double_clicked)
-						{
-							(void)perform_io([&]
-							{
-								open_archive_entry(i);
-							});
-						}
+							ImGui::PopID();
 					}
-				}
+					};
+					render_archive_nodes(render_archive_nodes, roots);
 			}
-			ImGui::EndChild();
+			}
+			if (show_archive_files)
+			{
+				ImGui::EndChild();
+			}
+			if (activated_archive_entry)
+			{
+				(void)perform_io([&]
+				{
+					open_archive_entry(*activated_archive_entry);
+				});
+			}
 			if (archive_context_action_request)
 			{
 				const auto [action, archive_path] =
@@ -7255,12 +8412,23 @@ namespace tree_practicum
 			ImVec2 viewport_position,
 			ImVec2 viewport_size)
 		{
+			const float max_panel_width =
+				std::max(1.0f, viewport_size.x - 32.0f);
+			const float min_panel_width =
+				std::min(240.0f, max_panel_width);
 			const float panel_width = std::min(
-				std::clamp(viewport_size.x * 0.34f, 360.0f, 520.0f),
-				std::max(240.0f, viewport_size.x - 32.0f));
+				std::clamp(
+					viewport_size.x * 0.34f,
+					min_panel_width,
+					std::min(520.0f, max_panel_width)),
+				max_panel_width);
+			const float max_panel_height =
+				std::max(1.0f, viewport_size.y - 32.0f);
 			const float panel_height = std::min(
-				440.0f,
-				std::max(180.0f, viewport_size.y - 32.0f));
+				max_panel_height,
+				std::min(
+					440.0f,
+					std::max(180.0f, viewport_size.y - 32.0f)));
 			const float min_panel_x = viewport_position.x + 16.0f;
 			const float min_panel_y = viewport_position.y + 16.0f;
 			const float max_panel_x = std::max(
@@ -7269,12 +8437,13 @@ namespace tree_practicum
 			const float max_panel_y = std::max(
 				min_panel_y,
 				viewport_position.y + viewport_size.y - panel_height - 16.0f);
-			const float preferred_panel_x = viewport_position.x + std::max(
-				16.0f,
-				viewport_size.x * 0.27f);
-			const float preferred_panel_y = viewport_position.y + std::max(
-				16.0f,
-				viewport_size.y * 0.075f);
+			const float functions_width =
+				m_show_functions ? viewport_size.x * 0.25f : 0.0f;
+			const float workspace_right =
+				viewport_position.x + viewport_size.x - functions_width;
+			const float preferred_panel_x =
+				workspace_right - panel_width - 16.0f;
+			const float preferred_panel_y = viewport_position.y + 16.0f;
 			const ImVec2 panel_position{
 				std::clamp(preferred_panel_x, min_panel_x, max_panel_x),
 				std::clamp(preferred_panel_y, min_panel_y, max_panel_y)
@@ -7283,43 +8452,13 @@ namespace tree_practicum
 				panel_position,
 				{ panel_width, panel_height });
 
-			ImGui::PushStyleColor(
-				ImGuiCol_WindowBg,
-				{ 0.055f, 0.075f, 0.10f, 0.98f });
-			ImGui::PushStyleColor(
-				ImGuiCol_Border,
-				{ 0.20f, 0.52f, 0.70f, 0.95f });
-			ImGui::PushStyleColor(
-				ImGuiCol_TitleBg,
-				{ 0.07f, 0.15f, 0.21f, 1.0f });
-			ImGui::PushStyleColor(
-				ImGuiCol_TitleBgActive,
-				{ 0.08f, 0.24f, 0.33f, 1.0f });
-			ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.5f);
-			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 14.0f, 12.0f });
-			struct style_guard
-			{
-				~style_guard()
-				{
-					ImGui::PopStyleVar(2);
-					ImGui::PopStyleColor(4);
-				}
-			} styles;
-
 			auto panel = frame.window(
-				"Операции с деревом###TreePracticum.Operations",
-				ImGuiWindowFlags_NoDocking);
+				"Операции с деревом###TreePracticum.Operations.v2");
 			if (!panel)
 			{
 				commit_pending_input_edits();
 				return;
 			}
-
-			ImGui::PushStyleColor(
-				ImGuiCol_Text,
-				{ 0.40f, 0.82f, 0.98f, 1.0f });
-			ImGui::TextUnformatted("ОПЕРАЦИИ С ДЕРЕВОМ");
-			ImGui::PopStyleColor();
 			ImGui::Text("Рабочая область: %s", m_session_name.c_str());
 			ImGui::TextDisabled(
 				(m_tree_dirty || any_tree_document_is_dirty())
@@ -7327,8 +8466,8 @@ namespace tree_practicum
 					: m_loaded_visual_tree.has_value() &&
 						m_loaded_tree_id == m_active_tree_id
 					? can_insert_into_selected_search_tree()
-						? "Загруженное дерево · операции int64_t/double доступны"
-					: "Операции доступны только для int64_t и double"
+						? "Для загруженного дерева доступны операции алгоритма"
+					: "У алгоритма нет доступных операций для этого дерева"
 						: m_current_tree_name.empty() &&
 							!m_show_demo_trees
 						? "Пустая рабочая область · создайте дерево или откройте .tree"
@@ -7355,10 +8494,7 @@ namespace tree_practicum
 			ImGui::SameLine();
 			if (ImGui::Button("Новое дерево"))
 			{
-				(void)perform_io([&]
-				{
-					create_new_tree();
-				});
+				request_new_tree_dialog();
 			}
 			ImGui::SameLine();
 			if (ImGui::Button("Открыть .tree..."))
@@ -7369,52 +8505,13 @@ namespace tree_practicum
 			ImGui::TextDisabled("или перетащите файл в это окно");
 
 			ImGui::NewLine();
-			if (m_tree_comparison_mode)
-			{
-				ImGui::TextDisabled(
-					"Два дерева рядом · операции применяются к активной панели");
-			}
-			else
-			{
-				const std::string current_file_label =
-					m_current_tree_path.empty()
-					? m_current_tree_name
-					: path_to_utf8(m_current_tree_path);
-				ImGui::TextDisabled(
-					"Файл: %s",
-					current_file_label.c_str());
-			}
-			ImGui::SameLine();
-			ImGui::BeginDisabled(
-				!m_tree_comparison_mode &&
-				workspace_tree_count() < 2);
-			const bool comparison_mode_clicked = ImGui::Button(
-				m_tree_comparison_mode
-					? "Одинарный вид"
-					: "Два дерева рядом");
-			ImGui::EndDisabled();
-			if (comparison_mode_clicked)
-			{
-				if (m_tree_comparison_mode)
-				{
-					m_tree_comparison_mode = false;
-					m_tree_canvas_fit_requested = true;
-				}
-				else
-				{
-					(void)perform_io([&]
-					{
-						begin_tree_comparison();
-					});
-				}
-			}
-			if (!m_tree_comparison_mode &&
-				workspace_tree_count() < 2)
-			{
-				ImGui::SameLine();
-				ImGui::TextDisabled(
-					"Добавьте ещё один .tree для сравнения.");
-			}
+			const std::string current_file_label =
+				m_current_tree_path.empty()
+				? m_current_tree_name
+				: path_to_utf8(m_current_tree_path);
+			ImGui::TextDisabled(
+				"Файл: %s",
+				current_file_label.c_str());
 			ImGui::NewLine();
 
 			ImGui::PushStyleColor(
@@ -7506,20 +8603,7 @@ namespace tree_practicum
 			ImGui::Separator();
 			if (ImGui::Button("Вписать дерево"))
 			{
-				if (m_tree_comparison_mode)
-				{
-					m_tree_comparison_panes[
-						static_cast<std::size_t>(std::clamp(
-							m_active_comparison_pane,
-							0,
-							static_cast<int>(
-								m_tree_comparison_panes.size() - 1))) ]
-						.canvas.fit_requested = true;
-				}
-				else
-				{
-					m_tree_canvas_fit_requested = true;
-				}
+				request_fit_active_tree_document();
 			}
 			ImGui::SameLine();
 			ImGui::TextDisabled("Колесо: масштаб · средняя кнопка: сдвиг");
@@ -7604,7 +8688,7 @@ namespace tree_practicum
 					current_interface_state();
 				const bool submitted = ImGui::InputTextWithHint(
 					label,
-					"ключ int64_t или double",
+					"ключ подходящего типа (строку можно заключить в кавычки)",
 					m_key_input.data(),
 					m_key_input.size(),
 					ImGuiInputTextFlags_EnterReturnsTrue);
@@ -7700,13 +8784,173 @@ namespace tree_practicum
 			ImVec2 position,
 			ImVec2 size)
 		{
+			if (m_open_tree_tabs.empty())
+			{
+				draw_empty_tree_workspace(frame, position, size);
+				return;
+			}
+
+			std::vector<std::string> closed_documents;
+			const auto open_paths = m_open_tree_tabs;
+			for (std::size_t index = 0; index < open_paths.size(); ++index)
+			{
+				const auto& archive_path = open_paths[index];
+				const auto* entry = find_archive_entry(
+					m_session_entries,
+					archive_path);
+				if (!entry || archive_extension(entry->path) != ".tree")
+				{
+					closed_documents.push_back(archive_path);
+					continue;
+				}
+
+				auto& document_state = tree_document_window_state_for(*entry);
+				const auto document = m_tree_documents.find(archive_path);
+				const auto separator = archive_path.find_last_of('/');
+				std::string display_name = document != m_tree_documents.end() &&
+					!document->second.display_name.empty()
+					? document->second.display_name
+					: document != m_tree_documents.end() &&
+						!document->second.local_path.empty()
+						? path_to_utf8(document->second.local_path.filename())
+						: archive_path.substr(
+							separator == std::string::npos ? 0 : separator + 1);
+				const bool dirty = tree_document_is_dirty(archive_path);
+				const std::string title = std::format(
+					"{}{}###TreeDocument.{}",
+					display_name,
+					dirty ? " *" : "",
+					archive_path);
+				const float cascade = static_cast<float>(index % 8) * 24.0f;
+				set_initial_window_rect(
+					{ position.x + cascade, position.y + cascade },
+					{
+						std::max(size.x * 0.72f, 420.0f),
+						std::max(size.y * 0.72f, 320.0f)
+					});
+				const bool focus_requested =
+					archive_path == m_tree_tab_requested_path;
+				if (focus_requested)
+				{
+					ImGui::SetNextWindowFocus();
+				}
+				bool window_open = true;
+				auto window = frame.window(title, window_open);
+				if (focus_requested)
+				{
+					m_tree_tab_requested_path.clear();
+				}
+				if (window_open &&
+					ImGui::IsWindowFocused(
+						ImGuiFocusedFlags_RootAndChildWindows) &&
+					document_state.parse_error.empty() &&
+					m_current_archive_member_path != archive_path)
+				{
+					const tree_practicum::archive_entry entry_copy = *entry;
+					if (perform_io([&]
+					{
+						open_archive_tree(entry_copy);
+					}))
+					{
+						m_selected_archive_entry = -1;
+					}
+				}
+				if (window)
+				{
+					if (!document_state.parse_error.empty())
+					{
+						ImGui::TextWrapped(
+							"Не удалось открыть дерево: %s",
+							document_state.parse_error.c_str());
+					}
+					else
+					{
+						const visual_tree* const tree_to_draw =
+							archive_path == m_current_archive_member_path &&
+							m_loaded_visual_tree
+							? std::addressof(*m_loaded_visual_tree)
+							: std::addressof(document_state.tree);
+						draw_tree_preview(
+							document_state.algorithm_id,
+							&document_state.canvas,
+							tree_to_draw,
+							archive_path,
+							0,
+							"TreeDocumentCanvas",
+							nullptr,
+							&document_state.preview);
+					}
+				}
+				if (!window_open)
+				{
+					closed_documents.push_back(archive_path);
+				}
+				sync_tree_document_view(archive_path, document_state);
+			}
+
+			if (!closed_documents.empty())
+			{
+				const bool active_document_closed = std::find(
+					closed_documents.begin(),
+					closed_documents.end(),
+					m_current_archive_member_path) != closed_documents.end();
+				std::erase_if(
+					m_open_tree_tabs,
+					[&](const auto& path)
+					{
+						return std::find(
+							closed_documents.begin(),
+							closed_documents.end(),
+							path) != closed_documents.end();
+					});
+				if (std::find(
+					closed_documents.begin(),
+					closed_documents.end(),
+					m_tree_tab_requested_path) != closed_documents.end())
+				{
+					m_tree_tab_requested_path.clear();
+				}
+				m_last_action =
+					"Окно дерева закрыто. Файл остаётся в рабочей области.";
+				if (active_document_closed)
+				{
+					if (!m_open_tree_tabs.empty())
+					{
+						if (const auto* next = find_archive_entry(
+							m_session_entries,
+							m_open_tree_tabs.back()))
+						{
+							const tree_practicum::archive_entry entry_copy = *next;
+							(void)perform_io([&]
+							{
+								open_archive_tree(entry_copy);
+							});
+						}
+					}
+					else
+					{
+						remember_active_tree_document();
+						clear_current_tree_state();
+						m_current_document_state_id = 0;
+						m_saved_document_state_id = 0;
+						m_tree_dirty = false;
+						m_tree_tab_requested_path.clear();
+					}
+				}
+			}
+		}
+
+		void draw_empty_tree_workspace(
+			mngl::imgui_context::frame_scope& frame,
+			ImVec2 position,
+			ImVec2 size)
+		{
 			set_initial_window_rect(position, size);
 			auto panel = frame.window("Дерево###TreePracticum.Workspace");
 			if (!panel)
 			{
 				return;
 			}
-			draw_tree_file_tabs();
 			if (m_tree_comparison_mode)
 			{
 				draw_comparison_tree_panels();
@@ -7718,132 +8962,89 @@ namespace tree_practicum
 			}
 			else
 			{
-				draw_tree_preview(
-					m_active_tree_id);
+				draw_tree_preview(m_active_tree_id);
 			}
+			remember_active_tree_document_view();
 		}
 
-		void draw_tree_file_tabs()
+		tree_document_window_state& tree_document_window_state_for(
+			const tree_practicum::archive_entry& entry)
 		{
-			if (m_open_tree_tabs.empty())
+			auto& state = m_tree_document_window_states[entry.path];
+			if (!state)
 			{
-				return;
-			}
-
-			std::vector<std::string> closed_tabs;
-			if (ImGui::BeginTabBar(
-				"TreeFileTabs",
-				ImGuiTabBarFlags_Reorderable |
-					ImGuiTabBarFlags_AutoSelectNewTabs))
-			{
-				for (const auto& archive_path : m_open_tree_tabs)
+				state = std::make_unique<tree_document_window_state>();
+				if (const auto document = m_tree_documents.find(entry.path);
+					document != m_tree_documents.end())
 				{
-					const auto* entry = find_archive_entry(
-						m_session_entries,
-						archive_path);
-					if (!entry || archive_extension(entry->path) != ".tree")
-					{
-						continue;
-					}
-
-					const auto separator = entry->path.find_last_of('/');
-					const auto archive_file_name = std::string_view(entry->path).substr(
-						separator == std::string::npos ? 0 : separator + 1);
-					std::string file_name(archive_file_name);
-					const auto document = m_tree_documents.find(entry->path);
-					if (document != m_tree_documents.end() &&
-						!document->second.display_name.empty())
-					{
-						file_name = document->second.display_name;
-					}
-				else if (document != m_tree_documents.end() &&
-					!document->second.local_path.empty())
-					{
-						file_name = path_to_utf8(
-							document->second.local_path.filename());
-					}
-					const bool dirty = tree_document_is_dirty(entry->path);
-					const std::string label = std::format(
-						"{}{}###TreeFile.{}",
-						file_name,
-						dirty ? " *" : "",
-						entry->path);
-					bool tab_open = true;
-					const auto flags = entry->path ==
-						m_tree_tab_requested_path
-						? ImGuiTabItemFlags_SetSelected
-						: ImGuiTabItemFlags_None;
-					if (ImGui::BeginTabItem(
-						label.c_str(),
-						&tab_open,
-						flags))
-					{
-						if (m_current_archive_member_path != entry->path)
-						{
-							open_archive_tree(*entry);
-							m_tree_comparison_mode = false;
-							m_selected_archive_entry = -1;
-						}
-						if (m_tree_tab_requested_path == entry->path)
-						{
-							m_tree_tab_requested_path.clear();
-						}
-						ImGui::EndTabItem();
-					}
-					if (!tab_open)
-					{
-						closed_tabs.push_back(entry->path);
-					}
-				}
-				ImGui::EndTabBar();
-			}
-
-			if (closed_tabs.empty())
-			{
-				return;
-			}
-
-			const bool current_tab_closed = std::find(
-				closed_tabs.begin(),
-				closed_tabs.end(),
-				m_current_archive_member_path) != closed_tabs.end();
-			m_open_tree_tabs.erase(
-				std::remove_if(
-					m_open_tree_tabs.begin(),
-					m_open_tree_tabs.end(),
-					[&](const auto& path)
-					{
-						return std::find(
-							closed_tabs.begin(),
-							closed_tabs.end(),
-							path) != closed_tabs.end();
-					}),
-				m_open_tree_tabs.end());
-			m_last_action =
-				"Вкладка закрыта. Файл остаётся в рабочей области; несохранённые изменения доступны при повторном открытии.";
-
-			if (!current_tab_closed)
-			{
-				return;
-			}
-			if (!m_open_tree_tabs.empty())
-			{
-				if (const auto* next = find_archive_entry(
-					m_session_entries,
-					m_open_tree_tabs.back()))
-				{
-					open_archive_tree(*next);
+					state->canvas.zoom = document->second.view.zoom;
+					state->canvas.pan = {
+						document->second.view.pan_x,
+						document->second.view.pan_y
+					};
+					state->canvas.view_initialized =
+						document->second.view.initialized;
+					state->canvas.fit_requested =
+						document->second.view.fit_requested;
 				}
 			}
-			else
+			if (state->source_contents != entry.contents)
 			{
-				remember_active_tree_document();
-				clear_current_tree_state();
-				m_current_document_state_id = 0;
-				m_saved_document_state_id = 0;
-				m_tree_dirty = false;
-				m_tree_tab_requested_path.clear();
+				const std::string previous_algorithm_id = state->algorithm_id;
+				state->source_contents = entry.contents;
+				state->parse_error.clear();
+				try
+				{
+					auto document = deserialize_tree_document(entry.contents);
+					state->tree = std::move(document.value);
+					state->algorithm_id = std::move(document.algorithm_id);
+					state->parsed = true;
+				}
+				catch (const std::exception& error)
+				{
+					state->tree = {};
+					state->algorithm_id.clear();
+					state->parse_error = error.what();
+					state->parsed = false;
+				}
+				if (previous_algorithm_id != state->algorithm_id)
+				{
+					state->canvas.view_initialized = false;
+					state->canvas.fit_requested = true;
+				}
+				state->canvas.algorithm_id = state->algorithm_id;
+				clear_tree_preview_cache_state(state->preview);
 			}
+			return *state;
+		}
+
+		static void clear_tree_preview_cache_state(
+			tree_preview_cache_state& cache) noexcept
+		{
+			cache.geometry.reset();
+			cache.visibility.reset();
+			cache.visibility_geometry.reset();
+			cache.visibility_bounds = {};
+			cache.visibility_request_geometry.reset();
+			cache.visibility_request_id = 0;
+			cache.visibility_request_bounds = {};
+		}
+
+		void sync_tree_document_view(
+			std::string_view archive_path,
+			const tree_document_window_state& state) noexcept
+		{
+			const auto document = m_tree_documents.find(std::string(archive_path));
+			if (document == m_tree_documents.end())
+			{
+				return;
+			}
+			auto& view = document->second.view;
+			view.zoom = state.canvas.zoom;
+			view.pan_x = state.canvas.pan.x;
+			view.pan_y = state.canvas.pan.y;
+			view.initialized = state.canvas.view_initialized;
+			view.fit_requested = state.canvas.fit_requested;
 		}
 
 		[[nodiscard]] static visual_key make_text_key(
@@ -8749,7 +9950,7 @@ namespace tree_practicum
 			std::optional<search_tree_key_kind> inferred_kind;
 			for (const auto& node : tree.nodes)
 			{
-				if (!tree.b_plus && node.keys.size() != 1)
+				if (!tree.multiway && node.keys.size() != 1)
 				{
 					throw std::invalid_argument(
 						"Узел дерева поиска должен содержать ровно один ключ.");
@@ -8889,21 +10090,6 @@ namespace tree_practicum
 					normalize_integer_literal(value));
 			}
 			throw std::logic_error("Unknown search-tree key type.");
-		}
-
-		[[nodiscard]] static visual_key parse_numeric_search_tree_key_input(
-			std::string_view input,
-			std::optional<search_tree_key_kind> target_kind)
-		{
-			auto key = parse_search_tree_key_input(input, target_kind);
-			const auto kind = search_tree_key_kind_for_value(key.value);
-			if (kind != search_tree_key_kind::signed_integer &&
-				kind != search_tree_key_kind::floating_point)
-			{
-				throw std::invalid_argument(
-					"Операции практикума поддерживают только int64_t и конечный double.");
-			}
-			return key;
 		}
 
 		[[nodiscard]] static int compare_big_integer_values(
@@ -9160,7 +10346,7 @@ namespace tree_practicum
 			return parents;
 		}
 
-		static void rotate_splay_node_up(
+		static void rotate_binary_node_up(
 			visual_tree& tree,
 			std::size_t parent,
 			std::size_t child,
@@ -9178,7 +10364,7 @@ namespace tree_practicum
 			else
 			{
 				throw std::logic_error(
-					"Splay-поворот получил узел, не являющийся потомком родителя.");
+					"Поворот получил узел, не являющийся потомком родителя.");
 			}
 
 			std::size_t grandparent_side = 2;
@@ -9187,7 +10373,7 @@ namespace tree_practicum
 				if (tree.root != parent)
 				{
 					throw std::logic_error(
-						"Родитель корневого Splay-поворота не является корнем дерева.");
+						"Родитель корневого поворота не является корнем дерева.");
 				}
 			}
 			else if (tree.nodes[grandparent].binary_children[0] == parent)
@@ -9201,7 +10387,7 @@ namespace tree_practicum
 			else
 			{
 				throw std::logic_error(
-					"Дед узла Splay-поворота не ссылается на родителя.");
+					"Дед узла поворота не ссылается на родителя.");
 			}
 
 			const auto moved_subtree =
@@ -9235,10 +10421,10 @@ namespace tree_practicum
 			visual_key key,
 			search_tree_key_kind kind)
 		{
-			if (tree.b_plus)
+			if (tree.multiway)
 			{
 				throw std::invalid_argument(
-					"BST insertion received a B+ tree.");
+					"BST insertion received a multiway tree.");
 			}
 			if (tree.nodes.empty())
 			{
@@ -9438,10 +10624,10 @@ namespace tree_practicum
 		[[nodiscard]] static std::string serialize_bst_tree(
 			const visual_tree& tree)
 		{
-			if (tree.b_plus)
+			if (tree.multiway)
 			{
 				throw std::invalid_argument(
-					"Невозможно сериализовать B+ дерево как BST.");
+					"Невозможно сериализовать многопутевое дерево как BST.");
 			}
 			std::string serialization = "bst{";
 			append_serialized_search_tree_subtree(
@@ -9535,12 +10721,235 @@ namespace tree_practicum
 			std::size_t count = 0;
 			for (const auto& node : tree.nodes)
 			{
-				if (!tree.b_plus || node.leaf)
+				if (!tree.multiway || node.leaf)
 				{
 					count += node.keys.size();
 				}
 			}
 			return count;
+		}
+
+		[[nodiscard]] static tree_preview_geometry::statistics
+			summarize_visual_tree(const visual_tree& tree)
+		{
+			tree_preview_geometry::statistics properties;
+			properties.node_count = tree.nodes.size();
+			properties.key_count = count_visual_keys(tree);
+
+			std::string_view observed_key_type;
+			bool mixed_key_types = false;
+			for (std::size_t node_index = 0;
+				node_index < tree.nodes.size();
+				++node_index)
+			{
+				const auto& node = tree.nodes[node_index];
+				std::size_t child_count = 0;
+				const auto count_child = [&](std::size_t child)
+				{
+					if (child != no_visual_node &&
+						child < tree.nodes.size())
+					{
+						++child_count;
+					}
+				};
+				if (tree.multiway)
+				{
+					for (const auto child : node.children)
+					{
+						count_child(child);
+					}
+				}
+				else
+				{
+					for (const auto child : node.binary_children)
+					{
+						count_child(child);
+					}
+				}
+				properties.maximum_branching = std::max(
+					properties.maximum_branching,
+					child_count);
+				if ((tree.multiway && node.leaf) ||
+					(!tree.multiway && child_count == 0))
+				{
+					++properties.leaf_count;
+				}
+
+				for (const auto& key : node.keys)
+				{
+					const auto candidate = visual_value_type(key.value);
+					if (observed_key_type.empty())
+					{
+						observed_key_type = candidate;
+					}
+					else if (observed_key_type != candidate)
+					{
+						mixed_key_types = true;
+					}
+				}
+			}
+
+			if (mixed_key_types)
+			{
+				properties.key_type = "смешанные";
+			}
+			else if (observed_key_type == "string")
+			{
+				properties.key_type = "строка";
+			}
+			else if (observed_key_type == "boost::cpp_int")
+			{
+			properties.key_type = "целое произвольной точности";
+			}
+			else if (!observed_key_type.empty())
+			{
+				properties.key_type = observed_key_type;
+			}
+
+			if (tree.root < tree.nodes.size())
+			{
+				const auto& root = tree.nodes[tree.root];
+				if (!root.keys.empty())
+				{
+					properties.root_value = full_visual_value(
+						root.keys.front().value);
+				}
+
+				std::vector<bool> visited(tree.nodes.size(), false);
+				std::vector<std::pair<std::size_t, std::size_t>> pending{
+					{ tree.root, 1 }
+				};
+				visited[tree.root] = true;
+				while (!pending.empty())
+				{
+					const auto [node_index, depth] = pending.back();
+					pending.pop_back();
+					properties.height = std::max(
+						properties.height,
+						depth);
+
+					const auto visit_child = [&](std::size_t child)
+					{
+						if (child == no_visual_node ||
+							child >= tree.nodes.size() ||
+							visited[child])
+						{
+							return;
+						}
+						visited[child] = true;
+						pending.emplace_back(child, depth + 1);
+					};
+					const auto& node = tree.nodes[node_index];
+					if (tree.multiway)
+					{
+						for (const auto child : node.children)
+						{
+							visit_child(child);
+						}
+					}
+					else
+					{
+						for (const auto child : node.binary_children)
+						{
+							visit_child(child);
+						}
+					}
+				}
+			}
+
+			return properties;
+		}
+
+		void draw_tree_properties(
+			const tree_preview_geometry::statistics& properties,
+			tree_practicum::mods::tree_id algorithm_id,
+			bool multiway,
+			bool current_tree_loaded,
+			std::string_view archive_path)
+		{
+			if (!ImGui::CollapsingHeader(
+				"Общие свойства",
+				ImGuiTreeNodeFlags_DefaultOpen))
+			{
+				return;
+			}
+
+			const std::string algorithm_name(tree_name_for(algorithm_id));
+			const std::string structure_name = multiway
+				? "Многопутевое"
+				: "Бинарное";
+			const std::string node_count = std::to_string(
+				properties.node_count);
+			const std::string key_count = std::to_string(
+				properties.key_count);
+			const std::string height = std::to_string(properties.height);
+			const std::string leaf_count = std::to_string(
+				properties.leaf_count);
+			const std::string maximum_branching = std::to_string(
+				properties.maximum_branching);
+			const float property_width = std::max(
+				1.0f,
+				(ImGui::GetContentRegionAvail().x - 16.0f) / 3.0f);
+			const std::string root_value = clip_text_to_width(
+				properties.root_value,
+				property_width - 12.0f);
+
+			if (ImGui::BeginTable(
+				"TreeGeneralProperties",
+				3,
+				ImGuiTableFlags_BordersInnerH |
+					ImGuiTableFlags_BordersInnerV |
+					ImGuiTableFlags_RowBg |
+					ImGuiTableFlags_SizingStretchSame |
+					ImGuiTableFlags_NoSavedSettings))
+			{
+				const auto property = [](
+					std::string_view label,
+					std::string_view value)
+				{
+					ImGui::TableNextColumn();
+					ImGui::TextDisabled(
+						"%.*s",
+						static_cast<int>(label.size()),
+						label.data());
+					ImGui::TextWrapped(
+						"%.*s",
+						static_cast<int>(value.size()),
+						value.data());
+				};
+
+				ImGui::TableNextRow();
+				property("Алгоритм", algorithm_name);
+				property("Структура", structure_name);
+				property("Тип ключа", properties.key_type);
+				ImGui::TableNextRow();
+				property("Узлы", node_count);
+				property("Ключи", key_count);
+				property("Высота", height);
+				ImGui::TableNextRow();
+				property("Листья", leaf_count);
+				property("Макс. потомков", maximum_branching);
+				property("Ключ корня", root_value);
+				ImGui::EndTable();
+			}
+
+			if (current_tree_loaded)
+			{
+				const bool dirty = archive_path.empty()
+					? m_tree_dirty
+					: tree_document_is_dirty(archive_path);
+				ImGui::TextColored(
+					dirty
+						? ImVec4{ 1.0f, 0.72f, 0.32f, 1.0f }
+						: ImVec4{ 0.43f, 0.86f, 0.58f, 1.0f },
+					dirty
+						? "● Есть несохранённые изменения"
+						: "● Сохранено");
+			}
+			else
+			{
+				ImGui::TextDisabled("Демонстрационные данные");
+			}
 		}
 
 		float measure_visual_subtree(
@@ -9601,7 +11010,7 @@ namespace tree_practicum
 						layout);
 				}
 			}
-			if (tree.b_plus)
+			if (tree.multiway)
 			{
 				for (std::size_t i = 0; i < node.children.size(); ++i)
 				{
@@ -9644,7 +11053,7 @@ namespace tree_practicum
 			node_layout.center_x = left + node_layout.subtree_width * 0.5f;
 			node_layout.depth = depth;
 
-			if (!tree.b_plus)
+			if (!tree.multiway)
 			{
 				const std::size_t left_child = node.binary_children[0];
 				const std::size_t right_child = node.binary_children[1];
@@ -9737,13 +11146,15 @@ namespace tree_practicum
 			}
 			for (auto& cache : m_tree_preview_caches)
 			{
-				cache.geometry.reset();
-				cache.visibility.reset();
-				cache.visibility_geometry.reset();
-				cache.visibility_bounds = {};
-				cache.visibility_request_geometry.reset();
-				cache.visibility_request_id = 0;
-				cache.visibility_request_bounds = {};
+				clear_tree_preview_cache_state(cache);
+			}
+			for (auto& [path, state] : m_tree_document_window_states)
+			{
+				(void)path;
+				if (state)
+				{
+					clear_tree_preview_cache_state(state->preview);
+				}
 			}
 		}
 
@@ -9775,7 +11186,7 @@ namespace tree_practicum
 			};
 			mix_integer(tree.root);
 			mix_integer(tree.fanout);
-			mix_integer(tree.b_plus ? 1u : 0u);
+			mix_integer(tree.multiway ? 1u : 0u);
 			mix_integer(tree.nodes.size());
 			for (const auto& node : tree.nodes)
 			{
@@ -9800,7 +11211,7 @@ namespace tree_practicum
 				}
 				mix_integer(node.next_leaf);
 				mix_integer(node.leaf ? 1u : 0u);
-				mix_integer(node.red ? 1u : 0u);
+				mix_integer(node.emphasized ? 1u : 0u);
 			}
 			return hash;
 		}
@@ -9845,7 +11256,7 @@ namespace tree_practicum
 						parents[child] = parent;
 					}
 				};
-				if (after.b_plus)
+				if (after.multiway)
 				{
 					for (const auto child : after.nodes[parent].children)
 					{
@@ -9927,13 +11338,13 @@ namespace tree_practicum
 				const visual_key& key)
 		{
 			const auto identity = tree_animation_key_identity(key);
-			for (std::size_t pass = 0; pass < (tree.b_plus ? 2u : 1u); ++pass)
+			for (std::size_t pass = 0; pass < (tree.multiway ? 2u : 1u); ++pass)
 			{
 				for (std::size_t node_index = 0;
 					node_index < tree.nodes.size();
 					++node_index)
 				{
-					if (tree.b_plus &&
+					if (tree.multiway &&
 						((pass == 0 && !tree.nodes[node_index].leaf) ||
 							(pass == 1 && tree.nodes[node_index].leaf)))
 					{
@@ -9960,9 +11371,12 @@ namespace tree_practicum
 				tree_practicum::mods::tree_id algorithm_id,
 				bool current_tree_loaded,
 				bool showing_animation,
-				std::size_t cache_index)
+				std::size_t cache_index,
+				tree_preview_cache_state* cache_state = nullptr)
 		{
-			auto& cache = m_tree_preview_caches.at(cache_index);
+			auto& cache = cache_state
+				? *cache_state
+				: m_tree_preview_caches.at(cache_index);
 			const std::size_t animation_step =
 				showing_animation && m_tree_animation.has_value()
 				? m_tree_animation->next_event
@@ -9990,32 +11404,44 @@ namespace tree_practicum
 			geometry->current_tree_loaded = current_tree_loaded;
 			geometry->showing_animation = showing_animation;
 			geometry->animation_step = animation_step;
-			geometry->leaf_link_space = tree.b_plus ? 24.0f : 0.0f;
+			geometry->leaf_link_space = tree.multiway ? 24.0f : 0.0f;
 			geometry->model.root = tree.root;
 			geometry->model.nodes.resize(tree.nodes.size());
+			const auto* type = available_tree_type_for(algorithm_id);
+			const auto* visualization = type
+				? std::addressof(type->algorithm.visualization)
+				: nullptr;
+			geometry->properties = summarize_visual_tree(tree);
 
 			for (std::size_t i = 0; i < tree.nodes.size(); ++i)
 			{
 				const auto& source = tree.nodes[i];
 				auto& target = geometry->model.nodes[i];
 				target.width = visual_node_width;
-				if (tree.b_plus)
+				if (tree.multiway)
 				{
 					target.style = source.leaf
-						? mngl::two_d::tree_node_style::b_plus_leaf
-						: mngl::two_d::tree_node_style::b_plus_internal;
+						? mngl::two_d::tree_node_style::multiway_leaf
+						: mngl::two_d::tree_node_style::multiway_internal;
 					target.annotation = source.leaf ? "leaf" : "index";
 					target.children = source.children;
 				}
-				else if (algorithm_id == tree_practicum::mods::ids::red_black)
+				else if (visualization &&
+					visualization->node_variants ==
+						tree_practicum::mods::node_variant_mode::emphasis)
 				{
-					target.style = source.red
-						? mngl::two_d::tree_node_style::red
-						: mngl::two_d::tree_node_style::black;
-					target.annotation = source.red ? "red" : "black";
+					target.style = source.emphasized
+						? mngl::two_d::tree_node_style::emphasized
+						: mngl::two_d::tree_node_style::neutral;
+					const auto label = visualization->node_variant_labels[
+						source.emphasized ? 1u : 0u];
+					if (!label.empty())
+					{
+						target.annotation = label;
+					}
 				}
 
-				if (!tree.b_plus)
+				if (!tree.multiway)
 				{
 					const std::size_t left = source.binary_children[0];
 					const std::size_t right = source.binary_children[1];
@@ -10054,23 +11480,19 @@ namespace tree_practicum
 					target.keys.push_back(
 						format_visual_value(key.value, inner_width));
 					if (key.detail.empty() ||
-						(algorithm_id == tree_practicum::mods::ids::red_black &&
-							!tree.b_plus))
+						(visualization &&
+							!visualization->show_key_details))
 					{
 						continue;
 					}
 
-					std::string metadata = key.detail;
-					if (algorithm_id == tree_practicum::mods::ids::avl &&
-						!metadata.starts_with("h="))
+					std::string metadata;
+					if (visualization)
 					{
-						metadata.insert(0, "h=");
+						metadata.append(
+							visualization->key_detail_prefix);
 					}
-					else if (algorithm_id == tree_practicum::mods::ids::treap &&
-						!metadata.starts_with("p="))
-					{
-						metadata.insert(0, "p=");
-					}
+					metadata.append(key.detail);
 					target.key_metadata[key_index] =
 						clip_text_to_width(metadata, inner_width);
 				}
@@ -10088,7 +11510,7 @@ namespace tree_practicum
 			options.border_width = 1.5f;
 			options.value_text_height = 16.0f;
 			options.metadata_text_height = 10.5f;
-			options.show_leaf_links = tree.b_plus;
+			options.show_leaf_links = tree.multiway;
 			const auto rgb = [](float red, float green, float blue)
 			{
 				return mngl::color{
@@ -10100,16 +11522,11 @@ namespace tree_practicum
 			};
 			options.edge_color = rgb(114.0f, 128.0f, 148.0f);
 			options.node_border = rgb(111.0f, 174.0f, 215.0f);
-			options.node_fill = algorithm_id ==
-				tree_practicum::mods::ids::splay
-				? rgb(53.0f, 49.0f, 94.0f)
-				: algorithm_id == tree_practicum::mods::ids::treap
-					? rgb(62.0f, 48.0f, 87.0f)
-					: rgb(35.0f, 57.0f, 77.0f);
-			options.red_node_fill = rgb(147.0f, 47.0f, 57.0f);
-			options.black_node_fill = rgb(31.0f, 36.0f, 46.0f);
-			options.b_plus_leaf_fill = rgb(34.0f, 83.0f, 76.0f);
-			options.b_plus_internal_fill = rgb(39.0f, 57.0f, 91.0f);
+			options.node_fill = rgb(35.0f, 57.0f, 77.0f);
+			options.emphasized_node_fill = rgb(147.0f, 47.0f, 57.0f);
+			options.neutral_node_fill = rgb(31.0f, 36.0f, 46.0f);
+			options.multiway_leaf_fill = rgb(34.0f, 83.0f, 76.0f);
+			options.multiway_internal_fill = rgb(39.0f, 57.0f, 91.0f);
 			options.value_color = rgb(240.0f, 245.0f, 250.0f);
 			options.metadata_color = rgb(220.0f, 202.0f, 255.0f);
 			options.highlight_border = rgb(255.0f, 223.0f, 128.0f);
@@ -10155,9 +11572,12 @@ namespace tree_practicum
 				const std::shared_ptr<const tree_preview_geometry>& geometry,
 				const mngl::two_d::tree_draw_area& area,
 				const mngl::two_d::tree_draw_area& viewport,
-				const mngl::two_d::tree_draw_options& draw_options)
+				const mngl::two_d::tree_draw_options& draw_options,
+				tree_preview_cache_state* cache_state = nullptr)
 		{
-			auto& cache = m_tree_preview_caches.at(cache_index);
+			auto& cache = cache_state
+				? *cache_state
+				: m_tree_preview_caches.at(cache_index);
 			const float arrow_size = std::max(
 				draw_options.node_size.y * 0.08f,
 				draw_options.edge_width * 2.5f);
@@ -10296,7 +11716,8 @@ namespace tree_practicum
 			std::string_view archive_path = {},
 			std::size_t cache_index = 0,
 			const char* child_id = "TreePreview",
-			bool* canvas_clicked = nullptr)
+			bool* canvas_clicked = nullptr,
+			tree_preview_cache_state* preview_cache = nullptr)
 		{
 			if (canvas_clicked)
 			{
@@ -10370,61 +11791,11 @@ namespace tree_practicum
 				: current_tree_loaded
 					? *m_loaded_visual_tree
 					: demo_tree_for(algorithm_id);
-			if (tree.nodes.empty())
+			const bool tree_is_empty = tree.nodes.empty();
+			if (tree.multiway && !tree_is_empty)
 			{
 				ImGui::TextDisabled(
-					current_tree_loaded
-						? "Загруженное дерево пустое."
-						: "В демо-дереве пока нет узлов.");
-				const ImVec2 empty_canvas_size =
-					ImGui::GetContentRegionAvail();
-				if (empty_canvas_size.x > 0.0f &&
-					empty_canvas_size.y > 0.0f)
-				{
-					ImGui::InvisibleButton(
-						"EmptyTreeCanvas",
-						empty_canvas_size,
-						ImGuiButtonFlags_MouseButtonLeft);
-					if (canvas_clicked)
-					{
-						*canvas_clicked = ImGui::IsItemClicked(
-							ImGuiMouseButton_Left);
-					}
-				}
-				ImGui::EndChild();
-				return;
-			}
-
-			if (tree.b_plus)
-			{
-				ImGui::TextDisabled(
-					"B+: синие узлы — индексы, зелёные — листья, стрелки — next.");
-			}
-			if (showing_animation)
-			{
-				if (m_tree_animation->mode ==
-					tree_animation_mode::layout_transition)
-				{
-					const float progress = std::clamp(
-						m_tree_animation->elapsed_seconds /
-							tree_layout_animation_seconds,
-						0.0f,
-						1.0f);
-					ImGui::TextDisabled(
-						"Перестройка раскладки: %.0f%%.",
-						static_cast<double>(progress) * 100.0);
-				}
-				else
-				{
-					const auto animation_name = tree_name_for(
-						m_tree_animation->algorithm_id);
-					ImGui::TextDisabled(
-						"Анимация %.*s: шаг %zu из %zu.",
-						static_cast<int>(animation_name.size()),
-						animation_name.data(),
-						m_tree_animation->next_event,
-						m_tree_animation->events.size());
-				}
+					"Внутренние узлы хранят разделители, листья связаны цепочкой.");
 			}
 
 			const auto geometry = get_tree_preview_geometry(
@@ -10432,7 +11803,14 @@ namespace tree_practicum
 				algorithm_id,
 				current_tree_loaded,
 				showing_animation,
-				cache_index);
+				cache_index,
+				preview_cache);
+			draw_tree_properties(
+				geometry->properties,
+				algorithm_id,
+				tree.multiway,
+				current_tree_loaded,
+				archive_path);
 			const auto& render_model = geometry->model;
 			mngl::two_d::tree_layout animated_layout;
 			const mngl::two_d::tree_layout* layout_to_draw =
@@ -10450,7 +11828,8 @@ namespace tree_practicum
 					static_cast<double>(
 						m_tree_animation->elapsed_seconds) /
 						static_cast<double>(
-							tree_layout_animation_seconds),
+							tree_animation_duration(
+								tree_layout_animation_seconds)),
 					0.0,
 					1.0);
 				const double eased_progress =
@@ -10709,15 +12088,16 @@ namespace tree_practicum
 				const mngl::two_d::tree_draw_area tree_area{
 					horizontal_margin,
 					vertical_margin + leaf_link_space,
-					layout.size.x,
-					layout.size.y
+					std::max(1.0, layout.size.x),
+					std::max(1.0, layout.size.y)
 				};
 				const auto visibility = get_tree_preview_visibility(
 					cache_index,
 					geometry,
 					tree_area,
 					visible_area,
-					render_options);
+					render_options,
+					preview_cache);
 				render_options.coordinate_origin = view_center;
 				render_options.clip_bounds = visible_area;
 
@@ -10813,6 +12193,7 @@ namespace tree_practicum
 				if (hovered_key_contextable)
 				{
 					m_hovered_tree_key = *hovered_key;
+					m_hovered_tree_archive_path = std::string(archive_path);
 					if (m_tree_comparison_mode && canvas_state)
 					{
 						m_hovered_tree_comparison_pane = cache_index;
@@ -10826,12 +12207,15 @@ namespace tree_practicum
 					m_hovered_tree_node_algorithm_id =
 						std::string(algorithm_id);
 				}
-				if (hovered_node >= 0 &&
+				if (canvas_hovered &&
 					ImGui::IsMouseClicked(ImGuiMouseButton_Right))
 				{
-					context_menu_node =
-						static_cast<std::size_t>(hovered_node);
-					context_menu_key = hovered_key_contextable
+					context_menu_node = hovered_node >= 0
+						? std::optional<std::size_t>{
+							static_cast<std::size_t>(hovered_node) }
+						: std::nullopt;
+					context_menu_key = hovered_node >= 0 &&
+						hovered_key_contextable
 						? std::optional<visual_key>{ *hovered_key }
 						: std::nullopt;
 					ImGui::OpenPopup("TreeNodeTools");
@@ -10989,9 +12373,95 @@ namespace tree_practicum
 					IM_COL32(160, 173, 190, 255),
 					banner.data(),
 					banner.data() + banner.size());
+				if (showing_animation)
+				{
+					std::string animation_status;
+					if (m_tree_animation->mode ==
+						tree_animation_mode::layout_transition)
+					{
+						const float progress = std::clamp(
+							m_tree_animation->elapsed_seconds /
+								tree_animation_duration(
+									tree_layout_animation_seconds),
+							0.0f,
+							1.0f);
+						animation_status = std::format(
+							"Раскладка · {:.0f}%",
+							static_cast<double>(progress) * 100.0);
+					}
+					else
+					{
+						animation_status = std::format(
+							"Анимация · шаг {}/{}",
+							m_tree_animation->next_event,
+							m_tree_animation->events.size());
+					}
+
+					constexpr float horizontal_padding = 8.0f;
+					constexpr float vertical_padding = 5.0f;
+					const ImVec2 status_text_size =
+						ImGui::CalcTextSize(animation_status.c_str());
+					const ImVec2 status_size{
+						status_text_size.x + horizontal_padding * 2.0f,
+						status_text_size.y + vertical_padding * 2.0f
+					};
+					const ImVec2 status_min{
+						std::max(
+							canvas_min.x + 8.0f,
+							canvas_max.x - status_size.x - 8.0f),
+						canvas_min.y + 8.0f
+					};
+					const ImVec2 status_max{
+						status_min.x + status_size.x,
+						status_min.y + status_size.y
+					};
+					ImVec4 status_background = ImGui::GetStyleColorVec4(
+						ImGuiCol_WindowBg);
+					status_background.w = 0.78f;
+					ImVec4 status_border = ImGui::GetStyleColorVec4(
+						ImGuiCol_Border);
+					status_border.w = 0.35f;
+					draw_list->AddRectFilled(
+						status_min,
+						status_max,
+						ImGui::ColorConvertFloat4ToU32(status_background),
+						6.0f);
+					draw_list->AddRect(
+						status_min,
+						status_max,
+						ImGui::ColorConvertFloat4ToU32(status_border),
+						6.0f);
+					draw_list->AddText(
+						{
+							status_min.x + horizontal_padding,
+							status_min.y + vertical_padding
+						},
+						ImGui::ColorConvertFloat4ToU32(
+							ImGui::GetStyleColorVec4(ImGuiCol_Text)),
+						animation_status.c_str());
+				}
+				if (tree_is_empty)
+				{
+					const char* const empty_tree_message = current_tree_loaded
+						? "Пустое дерево\nПКМ — действия с деревом"
+						: "В демо пока нет узлов";
+					const ImVec2 message_size =
+						ImGui::CalcTextSize(empty_tree_message);
+					draw_list->AddText(
+						{
+							canvas_min.x +
+								(canvas_size.x - message_size.x) * 0.5f,
+							canvas_min.y +
+								(canvas_size.y - message_size.y) * 0.5f
+						},
+						IM_COL32(160, 173, 190, 220),
+						empty_tree_message);
+				}
 				if (!interpolating_layout &&
 					visibility->nodes.empty() &&
-					m_tree_preview_caches.at(cache_index)
+					(preview_cache
+						? *preview_cache
+						: m_tree_preview_caches.at(cache_index))
 						.visibility_request_id != 0)
 				{
 					const char* const culling_status =
@@ -11016,10 +12486,10 @@ namespace tree_practicum
 						tree.nodes[static_cast<std::size_t>(hovered_node)];
 					ImGui::BeginTooltip();
 					ImGui::TextDisabled(
-						tree.b_plus && !node.leaf
-							? "Внутренний узел B+ — ключи-разделители"
-							: tree.b_plus
-								? "Лист B+"
+						tree.multiway && !node.leaf
+							? "Внутренний узел хранит ключи-разделители"
+							: tree.multiway
+								? "Лист многопутевого дерева"
 								: current_tree_loaded
 									? "Узел загруженного дерева"
 									: "Узел демонстрационного дерева");
@@ -11061,8 +12531,9 @@ namespace tree_practicum
 				bool fit_context_tree = false;
 				if (ImGui::BeginPopup("TreeNodeTools"))
 				{
-					if (context_menu_node &&
-						*context_menu_node < tree.nodes.size())
+					const bool context_node_is_valid = context_menu_node &&
+						*context_menu_node < tree.nodes.size();
+					if (context_node_is_valid)
 					{
 						ImGui::TextDisabled(
 							"Узел %zu",
@@ -11078,40 +12549,49 @@ namespace tree_practicum
 						ImGui::Separator();
 						center_context_node = ImGui::MenuItem(
 							"Центрировать узел");
-						fit_context_tree = ImGui::MenuItem(
-							"Вписать всё дерево");
-						if (context_menu_key)
-						{
-							ImGui::Separator();
-							if (supports_tool_operation(
-								tree_tool_operation::find) &&
-								ImGui::MenuItem("Найти ключ"))
-							{
-								context_menu_action =
-									tree_tool_operation::find;
-							}
-							if (supports_tool_operation(
-								tree_tool_operation::erase) &&
-								ImGui::MenuItem("Удалить ключ [D / Del]"))
-							{
-								context_menu_action =
-									tree_tool_operation::erase;
-							}
-							if (supports_tool_operation(
-								tree_tool_operation::split) &&
-								ImGui::MenuItem("Split по ключу [C]"))
-							{
-								context_menu_action =
-									tree_tool_operation::split;
-							}
-						}
+					}
+					else
+					{
+						ImGui::TextDisabled(
+							current_tree_loaded
+								? "Действия с деревом"
+								: "Демо-дерево");
+					}
+					fit_context_tree = ImGui::MenuItem(
+						"Вписать всё дерево");
+					if (context_menu_key)
+					{
+						ImGui::Separator();
 						if (supports_tool_operation(
-							tree_tool_operation::insert) &&
-							ImGui::MenuItem("Вставить ключ..."))
+							tree_tool_operation::find) &&
+							ImGui::MenuItem("Найти ключ"))
 						{
 							context_menu_action =
-								tree_tool_operation::insert;
+								tree_tool_operation::find;
 						}
+						if (supports_tool_operation(
+							tree_tool_operation::erase) &&
+							ImGui::MenuItem("Удалить ключ [D / Del]"))
+						{
+							context_menu_action =
+								tree_tool_operation::erase;
+						}
+						if (supports_tool_operation(
+							tree_tool_operation::split) &&
+							ImGui::MenuItem("Split по ключу [C]"))
+						{
+							context_menu_action =
+								tree_tool_operation::split;
+						}
+					}
+					if (current_tree_loaded &&
+						!showing_animation &&
+						supports_tool_operation(
+							tree_tool_operation::insert) &&
+						ImGui::MenuItem("Вставить ключ..."))
+					{
+						context_menu_action =
+							tree_tool_operation::insert;
 					}
 					ImGui::EndPopup();
 				}
@@ -11153,7 +12633,8 @@ namespace tree_practicum
 					invoke_tree_tool(
 						*context_menu_action,
 						std::move(key),
-						comparison_pane);
+						comparison_pane,
+						archive_path);
 				}
 			}
 			ImGui::EndChild();
@@ -11508,7 +12989,7 @@ namespace tree_practicum
 				{
 					ImGui::SameLine();
 					ImGui::TextDisabled(
-						"Операция доступна для корректного дерева с ключами int64_t или double.");
+					"Операция недоступна для выбранного типа ключей или алгоритма.");
 				}
 				return;
 			}
@@ -11711,10 +13192,10 @@ namespace tree_practicum
 							current_tree_loaded ? "Загружено" : "Демо",
 							displayed_tree.nodes.size(),
 							count_visual_keys(displayed_tree));
-						if (displayed_tree.b_plus)
+						if (displayed_tree.multiway)
 						{
 							ImGui::TextDisabled(
-								"B+: внутренние узлы содержат разделители, листья связаны next-ссылками.");
+							"Внутренние узлы содержат разделители, листья связаны цепочкой.");
 						}
 					}
 					ImGui::Separator();
@@ -12043,7 +13524,8 @@ namespace tree_practicum
 				{
 					const float progress = std::clamp(
 						m_tree_animation->elapsed_seconds /
-							tree_layout_animation_seconds,
+							tree_animation_duration(
+								tree_layout_animation_seconds),
 						0.0f,
 						1.0f);
 					ImGui::ProgressBar(progress, { -1.0f, 0.0f }, "Переход раскладки");
@@ -12180,7 +13662,7 @@ namespace tree_practicum
 				result.visited_nodes = result.path.size();
 
 				const auto& node = tree.nodes[current];
-				if (tree.b_plus)
+				if (tree.multiway)
 				{
 					if (node.leaf)
 					{
@@ -12211,7 +13693,7 @@ namespace tree_practicum
 						node.children[child_index] == no_visual_node)
 					{
 						throw std::invalid_argument(
-							"B+ внутренний узел содержит неверную ссылку на потомка.");
+					"Внутренний узел содержит неверную ссылку на потомка.");
 					}
 					current = node.children[child_index];
 					continue;
@@ -12422,7 +13904,7 @@ namespace tree_practicum
 		public:
 			[[nodiscard]] const tree_practicum::mods::algorithm_info& info() const noexcept override
 			{
-				return tree_type_for(tree_practicum::mods::ids::bst)->algorithm;
+				return tree_practicum::mods::builtin_bst_info;
 			}
 
 			[[nodiscard]] std::string_view name() const noexcept override
@@ -12536,10 +14018,10 @@ namespace tree_practicum
 			const visual_tree& tree)
 		{
 			using node_type = typename NativeTree::node_type;
-			if (tree.b_plus)
+			if (tree.multiway)
 			{
 				throw std::invalid_argument(
-					"Ожидалось бинарное дерево поиска, получено B+ дерево.");
+					"Ожидалось бинарное дерево поиска, получено многопутевое дерево.");
 			}
 			if (tree.nodes.empty())
 			{
@@ -13190,12 +14672,32 @@ namespace tree_practicum
 					info.display_name.empty() ||
 					info.serialization_prefix.empty() ||
 					info.supported_key_kinds == 0 ||
+					info.legacy_tree_catalog_index < -1 ||
 					!safe_tree_file_stem(info.file_stem))
 				{
 					logger.error(
 						"Tree algorithm '",
 						implementation.id,
 						"' has invalid metadata or an ID that differs from its factory ID.");
+					continue;
+				}
+
+				const auto duplicate_legacy_index = std::find_if(
+					m_available_tree_types.begin(),
+					m_available_tree_types.end(),
+					[&](const auto& type)
+					{
+						return info.legacy_tree_catalog_index >= 0 &&
+							type.algorithm.legacy_tree_catalog_index ==
+								info.legacy_tree_catalog_index;
+					});
+				if (duplicate_legacy_index != m_available_tree_types.end())
+				{
+					logger.error(
+						"Tree algorithm '", implementation.id,
+						"' duplicates a legacy catalog index owned by '",
+						duplicate_legacy_index->algorithm.id,
+						"'.");
 					continue;
 				}
 
@@ -13318,6 +14820,10 @@ namespace tree_practicum
 			m_tree_animation_event_queue =
 				std::make_shared<tree_animation_event_queue>();
 		std::optional<tree_animation_state> m_tree_animation;
+		std::filesystem::path m_live_python_directory;
+		std::string m_live_python_session_id;
+		std::string m_live_python_token;
+		std::optional<python_bridge::response> m_live_python_response;
 		SDL_Window* m_native_window = nullptr;
 		std::string m_tree_dialog_default_location;
 		std::array<char, 128> m_explorer_filter{};
@@ -13336,8 +14842,11 @@ namespace tree_practicum
 		std::optional<std::filesystem::path> m_selected_local_path;
 		std::vector<explorer_entry> m_explorer_entries;
 		std::vector<tree_practicum::archive_entry> m_session_entries;
-		std::unordered_map<std::string, tree_document_state>
+		std::unordered_map<std::string, tree_document>
 			m_tree_documents;
+		std::unordered_map<std::string,
+			std::unique_ptr<tree_document_window_state>>
+			m_tree_document_window_states;
 		std::vector<std::string> m_open_tree_tabs;
 		std::string m_tree_tab_requested_path;
 		std::string m_session_name;
@@ -13351,6 +14860,7 @@ namespace tree_practicum
 		std::optional<visual_tree> m_loaded_visual_tree;
 		std::optional<visual_key> m_hovered_tree_key;
 		std::optional<std::size_t> m_hovered_tree_comparison_pane;
+		std::string m_hovered_tree_archive_path;
 		std::optional<visual_key> m_tree_canvas_context_menu_key;
 		std::optional<std::size_t> m_tree_canvas_context_menu_node;
 		std::optional<tree_tool_operation> m_active_tree_tool;
@@ -13388,9 +14898,14 @@ namespace tree_practicum
 		bool m_show_explorer = true;
 		bool m_show_workspace = true;
 		bool m_show_tools = true;
+		bool m_new_tree_dialog_open = false;
+		bool m_new_tree_dialog_recenter = false;
+		std::string m_pending_new_tree_id;
 		bool m_show_functions = true;
 		bool m_show_information = true;
 		bool m_execute_hovered_key_tools_immediately = true;
+		bool m_tree_animations_enabled = true;
+		float m_tree_animation_speed = 1.0f;
 		bool m_tree_canvas_view_initialized = false;
 		bool m_tree_canvas_fit_requested = false;
 		bool m_focus_function_search = false;

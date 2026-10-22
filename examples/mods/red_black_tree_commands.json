@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "commands": [
+    {
+      "algorithm_id": "mngl.tree.red-black",
+      "name": "find",
+      "signature": "find(key: int64_t | double) [F]",
+      "description": "Находит точный ключ и подсвечивает путь до узла. Красно-чёрное дерево не меняется."
+    },
+    {
+      "algorithm_id": "mngl.tree.red-black",
+      "name": "insert",
+      "signature": "insert(key: int64_t | double) [A / Ins]",
+      "description": "Добавляет уникальный ключ в красно-чёрное дерево, перекрашивает узлы и выполняет повороты для сохранения чёрной высоты и ограничения на красные узлы."
+    },
+    {
+      "algorithm_id": "mngl.tree.red-black",
+      "name": "erase",
+      "signature": "erase(key: int64_t | double) [D / Del]",
+      "description": "Удаляет ключ и выполняет fix-up: восстанавливает чёрную высоту, цвета и баланс красно-чёрного дерева."
+    },
+    {
+      "algorithm_id": "mngl.tree.red-black",
+      "name": "merge",
+      "signature": "merge(source: .tree) [M]",
+      "description": "Объединяет два красно-чёрных дерева с непересекающимися упорядоченными диапазонами: max(current) < min(source). Источник не изменяется."
+    },
+    {
+      "algorithm_id": "mngl.tree.red-black",
+      "name": "split",
+      "signature": "split(pivot: int64_t | double) [C]",
+      "description": "Разделяет красно-чёрное дерево с восстановлением цветов и чёрной высоты: слева < pivot, справа >= pivot. Части доступны в отдельных вкладках."
+    },
+    {
+      "algorithm_id": "mngl.tree.red-black",
+      "name": "insert_random",
+      "signature": "insert_random(count: uint64_t) [R]",
+      "description": "Добавляет указанное число уникальных случайных ключей без анимации. Алиасы: mass insert, random test, mass random insert."
+    }
+  ]
+}

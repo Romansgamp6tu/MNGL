@@ -1,7 +1,6 @@
 #pragma once
 #pragma comment(lib, "SDL3.lib")
 #pragma comment(lib, "SDL3_image.lib")
-#pragma comment(lib, "SDL3_test.lib")
 #pragma comment(lib, "freetype.lib")
 
 // определим информацию о приложении, если не была задана пользователем
@@ -171,7 +170,7 @@ public:
 // макросы для чеканья ошибок SDL3
 
 #define TRY(expr, msg) do{ if(!(expr)) throw sdl_error(msg); } while(0)
-#define TRY_SDL(expr) TRY(expr, "SDL error: ")
+#define TRY_SDL(expr) TRY(expr, "SDL error in " #expr ": ")
 
 #include<glm/gtc/type_ptr.hpp>
 #include<glm/gtx/string_cast.hpp>

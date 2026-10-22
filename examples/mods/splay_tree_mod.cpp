@@ -26,6 +26,8 @@ namespace
 {
 	using namespace mngl::mods::tree;
 
+	inline constexpr tree_id tree_algorithm_id = "mngl.tree.splay";
+
 	inline constexpr std::size_t maximum_node_count = 1'000'000;
 	inline constexpr std::size_t maximum_tree_depth = 1'024;
 	inline constexpr std::size_t maximum_animation_steps = 48;
@@ -46,14 +48,16 @@ namespace
 		operation::split;
 
 	const algorithm_info splay_info{
-		ids::splay,
+		tree_algorithm_id,
 		"Splay",
 		"splay",
 		"splay{",
 		supported_keys,
 		supported_operations,
 		{ layout_transitions,
-			static_cast<operation_mask>(operation::insert) }
+			static_cast<operation_mask>(operation::insert) },
+		{},
+		3
 	};
 
 	[[nodiscard]] bool is_integer_token(std::string_view text) noexcept
@@ -199,7 +203,7 @@ namespace
 			}
 
 			return {
-				std::string(ids::splay),
+				std::string(tree_algorithm_id),
 				std::move(result),
 				keys
 			};
@@ -389,7 +393,7 @@ namespace
 	template<class Value>
 	void validate_typed_tree(const tree& value)
 	{
-		if (value.b_plus || value.fanout != 0 ||
+		if (value.multiway || value.fanout != 0 ||
 			value.nodes.size() > maximum_node_count)
 		{
 			throw std::invalid_argument(
@@ -436,7 +440,7 @@ namespace
 			++visited_count;
 
 			const auto& current_node = value.nodes[current.index];
-			if (current_node.keys.size() != 1 || current_node.red ||
+			if (current_node.keys.size() != 1 || current_node.emphasized ||
 				current_node.next_leaf != no_tree_node)
 			{
 				throw std::invalid_argument(
@@ -1244,7 +1248,7 @@ namespace
 	public:
 		[[nodiscard]] std::string_view algorithm_id() const noexcept override
 		{
-			return ids::splay;
+			return tree_algorithm_id;
 		}
 
 		[[nodiscard]] invariant_report inspect(
@@ -1326,7 +1330,7 @@ namespace
 extern "C" MNGL_MOD_EXPORT bool MNGL_MOD_CALL
 mngl_mod_load_v1(mngl::mods::mod_context& context)
 {
-	const auto id = std::string(mngl::mods::tree::ids::splay);
+	const auto id = std::string(tree_algorithm_id);
 	const bool algorithm_registered =
 		context.add_implementation<mngl::mods::tree::algorithm>(
 		mngl::mods::tree::algorithm_class_id,

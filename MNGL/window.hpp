@@ -204,7 +204,7 @@ namespace mngl
 		SDL_DisplayID disp = 0;
 		static inline std::mutex mut;
 
-		friend class display_mode;
+		friend struct display_mode;
 	};
 
 	struct display_mode

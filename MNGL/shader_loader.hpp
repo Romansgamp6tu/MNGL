@@ -2,6 +2,7 @@
 
 #include "graphics_shader.hpp"
 #include "utilities.hpp"
+#include "logger.h"
 
 #include <algorithm>
 #include <array>
@@ -358,11 +359,17 @@ namespace mngl::gpu
 					std::filesystem::remove_all(m_path, ec);
 					if (ec)
 					{
-						SDL_LogWarn(
-							SDL_LOG_CATEGORY_APPLICATION,
-							"Failed to remove shader temp directory '%s': %s",
-							m_path.string().c_str(),
-							ec.message().c_str());
+						try
+						{
+							logger.warning(
+								"Failed to remove shader temp directory '",
+								m_path.string(),
+								"': ",
+								ec.message());
+						}
+						catch (...)
+						{
+						}
 					}
 				}
 			}

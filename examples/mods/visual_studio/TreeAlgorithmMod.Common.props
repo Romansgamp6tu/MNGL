@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <TargetName>$(ModBinaryName)</TargetName>
+    <TargetExt>.dll</TargetExt>
+    <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\mods\$(ModId)\bin\</OutDir>
+    <IntDir>$(SolutionDir)$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
+    <ModPackageDirectory>$(SolutionDir)$(Platform)\$(Configuration)\mods\$(ModId)</ModPackageDirectory>
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp23</LanguageStandard>
+      <AdditionalIncludeDirectories>$(SolutionDir);$(SolutionDir)MNGL;$(SolutionDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <MultiProcessorCompilation>false</MultiProcessorCompilation>
+      <AdditionalOptions>/bigobj /utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ImportLibrary>$(IntDir)$(TargetName).lib</ImportLibrary>
+      <ProgramDatabaseFile>$(IntDir)$(TargetName).pdb</ProgramDatabaseFile>
+      <IncrementalLinkDatabaseFile>$(IntDir)$(TargetName).ilk</IncrementalLinkDatabaseFile>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile><RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary></ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ProjectReference Include="MNGL.TreeModManifestWriter.vcxproj">
+      <Project>{674275D1-5AA2-4D7B-9C92-E015E8391833}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemGroup>
+  <Target Name="WriteTreeModManifest" AfterTargets="Build">
+    <Exec Command="&quot;$(SolutionDir)$(Platform)\$(Configuration)\MNGL.TreeModManifestWriter.exe&quot; &quot;$(ModPackageDirectory)&quot; &quot;$(TargetFileName)&quot; &quot;$(ModId)&quot; &quot;$(ModDisplayName)&quot;" />
+  </Target>
+  <Target Name="CopyTreeModCommandCatalog" AfterTargets="WriteTreeModManifest" Condition="'$(CommandCatalogFile)'!='' and Exists('$(CommandCatalogFile)')">
+    <Copy SourceFiles="$(CommandCatalogFile)" DestinationFiles="$(ModPackageDirectory)\commands.json" />
+  </Target>
+</Project>

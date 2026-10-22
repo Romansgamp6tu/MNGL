@@ -467,20 +467,32 @@ namespace std
 		//намного меньше коллизий, но они всё равно есть
 		constexpr size_t operator()(const mngl::color& c) const noexcept
 		{
-			uint64_t r = c.r * (1 << 10);
-			uint64_t g = c.g * (1 << 10);
-			uint64_t b = c.b * (1 << 10);
-			uint64_t a = c.a * (1 << 10);
+			const auto quantize = [](float channel) constexpr -> uint64_t
+			{
+				if (!(channel > 0.0f)) return 0;
+				if (channel >= 1.0f) return 1023;
+				return static_cast<uint64_t>(channel * 1023.0f);
+			};
+			const uint64_t r = quantize(c.r);
+			const uint64_t g = quantize(c.g);
+			const uint64_t b = quantize(c.b);
+			const uint64_t a = quantize(c.a);
 			return r << 30 | g << 20 | b << 10 | a;
 		}
 #elifdef COLOR_HASH_UINT64_T
 		//ещё меньше колизий, но всё равно для идеала нужно 128 бит, которые мало где поддерживаются
 		constexpr size_t operator()(const mngl::color& c) const noexcept
 		{
-			uint64_t r = c.r * (1 << 16);
-			uint64_t g = c.g * (1 << 16);
-			uint64_t b = c.b * (1 << 16);
-			uint64_t a = c.a * (1 << 16);
+			const auto quantize = [](float channel) constexpr -> uint64_t
+			{
+				if (!(channel > 0.0f)) return 0;
+				if (channel >= 1.0f) return 65535;
+				return static_cast<uint64_t>(channel * 65535.0f);
+			};
+			const uint64_t r = quantize(c.r);
+			const uint64_t g = quantize(c.g);
+			const uint64_t b = quantize(c.b);
+			const uint64_t a = quantize(c.a);
 			return r << 48 | g << 32 | b << 16 | a;
 		}
 #elifdef COLOR_HASH_GLM
