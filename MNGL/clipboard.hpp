@@ -1,0 +1,265 @@
+#pragma once
+
+#include "utilities.hpp"
+
+#include <SDL3/SDL_clipboard.h>
+
+#include <algorithm>
+#include <cstddef>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+namespace mngl::clipboard
+{
+	using data_provider = std::function<std::optional<std::vector<std::byte>>(std::string_view mime_type)>;
+
+	namespace detail
+	{
+		inline void validate_mime_type(std::string_view mime_type)
+		{
+			if (mime_type.empty())
+			{
+				throw std::invalid_argument("clipboard MIME type cannot be empty");
+			}
+			if (mime_type.find('\0') != std::string_view::npos)
+			{
+				throw std::invalid_argument("clipboard MIME type cannot contain a null character");
+			}
+		}
+
+		inline void validate_text(std::string_view text)
+		{
+			if (text.find('\0') != std::string_view::npos)
+			{
+				throw std::invalid_argument("clipboard text cannot contain a null character");
+			}
+		}
+
+		struct sdl_free_deleter
+		{
+			void operator()(void* value) const noexcept
+			{
+				SDL_free(value);
+			}
+		};
+
+		struct offer_state
+		{
+			std::vector<std::string> mime_types;
+			data_provider provide;
+			std::mutex provider_mutex;
+			std::mutex buffers_mutex;
+			std::vector<std::unique_ptr<std::vector<std::byte>>> buffers;
+		};
+
+		inline const void* SDLCALL provide_data(
+			void* userdata,
+			const char* mime_type,
+			size_t* size) noexcept
+		{
+			if (size)
+			{
+				*size = 0;
+			}
+			if (!userdata || !mime_type || !size)
+			{
+				return nullptr;
+			}
+
+			auto& state = *static_cast<offer_state*>(userdata);
+			if (std::find(state.mime_types.begin(), state.mime_types.end(), mime_type) == state.mime_types.end())
+			{
+				return nullptr;
+			}
+
+			try
+			{
+				std::optional<std::vector<std::byte>> data;
+				{
+					std::lock_guard lock(state.provider_mutex);
+					data = state.provide(mime_type);
+				}
+				if (!data || data->empty())
+				{
+					return nullptr;
+				}
+
+				auto retained = std::make_unique<std::vector<std::byte>>(std::move(*data));
+				const auto* result = retained->data();
+				*size = retained->size();
+				{
+					std::lock_guard lock(state.buffers_mutex);
+					state.buffers.push_back(std::move(retained));
+				}
+				return result;
+			}
+			catch (...)
+			{
+				// C++ exceptions must not escape into SDL.
+				return nullptr;
+			}
+		}
+
+		inline void SDLCALL cleanup_offer(void* userdata) noexcept
+		{
+			delete static_cast<offer_state*>(userdata);
+		}
+	}
+
+	// Clipboard text is UTF-8. SDL owns and frees its returned buffer via SDL_free.
+	inline void set_text(std::string_view text)
+	{
+		detail::validate_text(text);
+		const std::string terminated(text);
+		if (!SDL_SetClipboardText(terminated.c_str()))
+		{
+			throw sdl_error("failed to set clipboard text: ");
+		}
+	}
+
+	[[nodiscard]] inline std::string get_text()
+	{
+		std::unique_ptr<char, detail::sdl_free_deleter> text(SDL_GetClipboardText());
+		if (!text)
+		{
+			throw sdl_error("failed to get clipboard text: ");
+		}
+		return std::string(text.get());
+	}
+
+	[[nodiscard]] inline bool has_text()
+	{
+		return SDL_HasClipboardText();
+	}
+
+	// The primary selection is separate from the clipboard and is primarily
+	// available on X11 and Wayland systems.
+	namespace primary_selection
+	{
+		inline void set_text(std::string_view text)
+		{
+			detail::validate_text(text);
+			const std::string terminated(text);
+			if (!SDL_SetPrimarySelectionText(terminated.c_str()))
+			{
+				throw sdl_error("failed to set primary selection text: ");
+			}
+		}
+
+		[[nodiscard]] inline std::string get_text()
+		{
+			std::unique_ptr<char, detail::sdl_free_deleter> text(SDL_GetPrimarySelectionText());
+			if (!text)
+			{
+				throw sdl_error("failed to get primary selection text: ");
+			}
+			return std::string(text.get());
+		}
+
+		[[nodiscard]] inline bool has_text()
+		{
+			return SDL_HasPrimarySelectionText();
+		}
+	}
+
+	// Returns all formats currently offered by the system clipboard.
+	[[nodiscard]] inline std::vector<std::string> mime_types()
+	{
+		size_t count = 0;
+		std::unique_ptr<char*, detail::sdl_free_deleter> types(SDL_GetClipboardMimeTypes(&count));
+		if (!types)
+		{
+			throw sdl_error("failed to get clipboard MIME types: ");
+		}
+
+		std::vector<std::string> result;
+		result.reserve(count);
+		for (size_t index = 0; index < count; ++index)
+		{
+			result.emplace_back(types.get()[index]);
+		}
+		return result;
+	}
+
+	[[nodiscard]] inline bool has_data(std::string_view mime_type)
+	{
+		detail::validate_mime_type(mime_type);
+		const std::string terminated(mime_type);
+		return SDL_HasClipboardData(terminated.c_str());
+	}
+
+	[[nodiscard]] inline std::vector<std::byte> get_data(std::string_view mime_type)
+	{
+		detail::validate_mime_type(mime_type);
+		const std::string terminated(mime_type);
+		size_t size = 0;
+		std::unique_ptr<void, detail::sdl_free_deleter> data(
+			SDL_GetClipboardData(terminated.c_str(), &size));
+		if (!data)
+		{
+			throw sdl_error("failed to get clipboard data: ");
+		}
+
+		const auto* first = static_cast<const std::byte*>(data.get());
+		return { first, first + size };
+	}
+
+	// Offers formats to other applications. Data is generated only when a format
+	// is requested and remains alive until SDL invokes its cleanup callback.
+	inline void set_data(std::vector<std::string> mime_types, data_provider provide)
+	{
+		if (mime_types.empty())
+		{
+			throw std::invalid_argument("clipboard offer must provide at least one MIME type");
+		}
+		if (!provide)
+		{
+			throw std::invalid_argument("clipboard data provider cannot be empty");
+		}
+		for (size_t index = 0; index < mime_types.size(); ++index)
+		{
+			detail::validate_mime_type(mime_types[index]);
+			if (std::find(mime_types.begin(), mime_types.begin() + index, mime_types[index]) != mime_types.begin() + index)
+			{
+				throw std::invalid_argument("clipboard offer contains a duplicate MIME type");
+			}
+		}
+
+		auto state = std::make_unique<detail::offer_state>();
+		state->mime_types = std::move(mime_types);
+		state->provide = std::move(provide);
+
+		std::vector<const char*> mime_type_names;
+		mime_type_names.reserve(state->mime_types.size());
+		for (const auto& type : state->mime_types)
+		{
+			mime_type_names.push_back(type.c_str());
+		}
+
+		if (!SDL_SetClipboardData(
+			detail::provide_data,
+			detail::cleanup_offer,
+			state.get(),
+			mime_type_names.data(),
+			mime_type_names.size()))
+		{
+			throw sdl_error("failed to set clipboard data: ");
+		}
+		state.release();
+	}
+
+	inline void clear()
+	{
+		if (!SDL_ClearClipboardData())
+		{
+			throw sdl_error("failed to clear clipboard: ");
+		}
+	}
+}

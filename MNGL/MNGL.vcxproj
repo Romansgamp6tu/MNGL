@@ -216,6 +216,11 @@
     <ClInclude Include="compute_pipeline.hpp" />
     <ClInclude Include="frame_graph.hpp" />
     <ClInclude Include="device.hpp" />
+    <ClInclude Include="dialog.hpp" />
+    <ClInclude Include="async_io.hpp" />
+    <ClInclude Include="clipboard.hpp" />
+    <ClInclude Include="process.hpp" />
+    <ClInclude Include="storage.hpp" />
     <ClInclude Include="event.hpp" />
     <ClInclude Include="audio.hpp" />
     <ClInclude Include="detail\audio\sdl3_mixer_backend.hpp" Condition="'$(MNGL_CUSTOM_AUDIO_BACKEND)' != 'true' And '$(MNGL_CUSTOM_AUDIO_INTERFACE)' != 'true' And '$(MNGL_CUSTOM_MIXER_INTERFACE)' != 'true'" />
@@ -229,6 +234,7 @@
     <ClInclude Include="mod_loader.hpp" />
     <ClInclude Include="mods.hpp" />
     <ClInclude Include="pixel_format.hpp" />
+    <ClInclude Include="paths.hpp" />
     <ClInclude Include="proxy.hpp" />
     <ClInclude Include="rectangle.hpp" />
     <ClInclude Include="render_pass.hpp" />

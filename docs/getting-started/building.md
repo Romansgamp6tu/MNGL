@@ -1,12 +1,20 @@
 # Сборка и подключение
 
+Для готового CMake-проекта приложения начните с [Использования MNGL](using-mngl.md).
+Эта страница описывает сборку самого репозитория, зависимости и создание пакетов.
+
 ## Статус проекта
 
 MNGL — header-oriented C++23 библиотека. Обычная сборка CMake собирает
 `mngl_demo`; на Windows demo использует отдельную DLL `mngl_imgui`, а на Linux
-ImGui собирается в `libmngl_imgui.so`. Для Windows x64 также есть development
-ZIP с заголовками и CMake package targets. Отдельные runtime-пакеты собираются
-для Windows x64 и Linux x86_64.
+ImGui собирается в `libmngl_imgui.so`. Предусмотрены development-пакеты с
+заголовками и CMake targets: Windows x64 ZIP и Linux x64 tar.gz. Отдельные
+runtime-пакеты собираются для Windows x64 и Linux x86_64.
+
+В `main` реализованы Input v2 и аудио поверх SDL3_mixer. Заголовки микшера
+подключены, но его автоматическая линковка и доставка бинарников CI/CD
+отложены до следующего релиза. Для `audio.hpp` нужен отдельный SDL3_mixer;
+см. [руководство по аудио](../core/audio.md#sdl3-mixer).
 
 CMake также собирает отдельную консольную цель `mngl_mod_host` и динамический
 мод `mngl_example_tree_mod`. Запуск host показывает загрузку мода и вызов
@@ -23,6 +31,9 @@ CMake также собирает отдельную консольную цел
   Dear ImGui.
 - `include/SDL3/`, `include/SDL3_image/`, `include/glm/` — заголовки SDL3,
   SDL3_image и GLM.
+- `third_party/SDL_mixer/` — Git submodule SDL3_mixer `release-3.2.4`;
+  заголовки используются встроенным аудиофасадом, микшер локально не собирается
+  корневым CMake-проектом.
 - `MNGL/imgui/` — Dear ImGui `v1.92.9b-docking`, включая backend-ы
   SDL3/SDL_GPU и файл шрифта `Roboto-Medium.ttf`. Отдельно скачивать ImGui
   для текущей сборки не нужно.
@@ -36,13 +47,24 @@ PDB-файлы содержат отладочную информацию и д�
 
 - CMake 3.24 или новее (для CMake-сборки).
 - C++23-компилятор и стандартная библиотека с поддержкой используемых
-  возможностей, включая `std::format`.
+  возможностей, включая `std::format` и `std::expected`.
 - SDL3, SDL3_image и FreeType, собранные для той же ОС и архитектуры, что и
   приложение.
 
 Для окон, событий, клавиатуры, мыши и геймпадов отдельная input-библиотека
 не нужна: MNGL использует SDL3. Демо обрабатывает события через
 `mngl::Input::continue_work()`.
+
+### Получение исходников
+
+```sh
+git clone --recurse-submodules https://github.com/Romansgamp6tu/MNGL.git
+cd MNGL
+```
+
+Для существующей копии выполните `git submodule update --init --recursive`.
+Submodule содержит исходники и заголовки SDL3_mixer; получение его бинарников
+остаётся отдельным шагом при использовании аудиофасада.
 
 ### Windows и MSVC
 
@@ -51,7 +73,7 @@ CMake. Сборка CMake для x64:
 
 ```powershell
 cmake -S . -B build -A x64
-cmake --build build --config Debug
+cmake --build build --config Debug --target mngl_demo
 ```
 
 Если CMake не выбрал желаемую версию Visual Studio, укажите generator явно,
@@ -59,7 +81,7 @@ cmake --build build --config Debug
 
 ```powershell
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Debug
+cmake --build build --config Debug --target mngl_demo
 ```
 
 Также можно открыть `MNGL.slnx` и собрать конфигурацию `Debug|x64` или
@@ -173,6 +195,31 @@ Win32-конфигурация Visual Studio и x86 CMake-сборка ищут 
 `libs/x86/` и копируют оттуда runtime DLL. Пока эти файлы не добавлены, x86
 линковка/сборка не пройдёт. AVX2 не включается для Win32-конфигураций.
 
+### Параметры CMake
+
+| Параметр | По умолчанию | Назначение |
+|---|---|---|
+| `BUILD_TESTING` | `ON` | Объявляет `mngl_input_compat_test` и его CTest-проверку |
+| `MNGL_BUILD_MOD_EXAMPLE` | `ON` | Собирает host, пример мода и связанные mod targets |
+| `MNGL_CUSTOM_AUDIO_BACKEND` | `OFF` | Отключает аудиоинтеграцию MNGL целиком |
+| `MNGL_CUSTOM_AUDIO_INTERFACE` | `OFF` | Отключает фасад и встроенную интеграцию SDL3_mixer |
+| `MNGL_CUSTOM_MIXER_INTERFACE` | `OFF` | Отключает только фасад `mngl::audio` |
+| `MNGL_BUILD_WINDOWS_DEVEL_PACKAGE` | `OFF` | Добавляет Windows x64 install rules и CPack ZIP |
+| `MNGL_BUILD_LINUX_DEVEL_PACKAGE` | `OFF` | Добавляет Linux x64 install rules и CPack TGZ |
+| `MNGL_PACKAGE_VERSION` | `0.0.0` при включённой упаковке | Версия создаваемого development-пакета |
+
+Например, для демо без mod targets и тестов:
+
+```powershell
+cmake -S . -B build -A x64 -DBUILD_TESTING=OFF -DMNGL_BUILD_MOD_EXAMPLE=OFF
+cmake --build build --config Debug --target mngl_demo
+```
+
+Свойства аудио применяются ко всем потребителям source target `mngl`.
+Режимы и их приоритет описаны в [настройках аудио](../core/audio.md#audio-configuration).
+В готовом CMake-пакете это уже экспортированные настройки: изменения
+одноимённых options стороннего проекта не пересобирают MNGL.
+
 ### macOS
 
 Нужны Xcode Command Line Tools, CMake и SDL3/SDL3_image/FreeType. Например,
@@ -253,6 +300,7 @@ DXIL-файлы в `MNGL/shaders/` рассчитаны на Windows; на macOS
 |---|---|---|
 | SDL3 | Окна, события, ввод, SDL GPU | [репозиторий](https://github.com/libsdl-org/SDL), [релизы](https://github.com/libsdl-org/SDL/releases) |
 | SDL3_image | Загрузка изображений | [репозиторий](https://github.com/libsdl-org/SDL_image), [релизы](https://github.com/libsdl-org/SDL_image/releases) |
+| SDL3_mixer | Эффекты и потоковая музыка; заголовки в submodule, бинарники пока подключаются отдельно | [репозиторий](https://github.com/libsdl-org/SDL_mixer), [релизы](https://github.com/libsdl-org/SDL_mixer/releases) |
 | GLM | Векторы и математика; заголовки уже в `include/glm/` | [репозиторий](https://github.com/g-truc/glm), [релизы](https://github.com/g-truc/glm/releases) |
 | FreeType | Текущая Windows link-зависимость; `freetype.lib`/`.dll` в `libs/` | [сайт и загрузки](https://freetype.org/download.html), [исходный код](https://gitlab.freedesktop.org/freetype/freetype) |
 | Dear ImGui | UI демо; исходники уже в `MNGL/imgui/` | [репозиторий](https://github.com/ocornut/imgui), [релизы](https://github.com/ocornut/imgui/releases) |
@@ -263,5 +311,6 @@ DXIL-файлы в `MNGL/shaders/` рассчитаны на Windows; на macOS
 | MoltenVK | Vulkan backend поверх Metal на macOS; не нужен нативному Metal backend | [репозиторий Khronos](https://github.com/KhronosGroup/MoltenVK) |
 
 При распространении бинарников зафиксируйте версии и SHA-256 вместе с лицензиями
-и notices upstream-зависимостей. На этом этапе пользователи устанавливают
-внешние библиотеки и shader tools самостоятельно.
+и notices upstream-зависимостей. Для ручной сборки устанавливайте нужные
+библиотеки и shader tools самостоятельно либо используйте соответствующий
+runtime-пакет. SDL3_mixer пока нужно добавлять отдельно и в этом случае.

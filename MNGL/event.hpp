@@ -739,6 +739,13 @@ namespace mngl
     struct pinchUpdate : eventBase { uint32_t windowID; float scale; };
     struct pinchEnd : eventBase { uint32_t windowID; float scale; };
 
+    // --- Clipboard ---
+    struct clipboardUpdate : eventBase
+    {
+        bool owner;
+        std::vector<std::string> mimeTypes;
+    };
+
     // --- Drag & Drop ---
     struct dropFile : windowEvent { glm::vec2 position; std::string source; std::string data; };
     struct dropText : windowEvent { glm::vec2 position; std::string source; std::string data; };
@@ -1299,6 +1306,27 @@ namespace mngl
                 break;
             case Events::finger_canceled:
                 if (!getListeners<fingerCanceled>().empty()) emit(fingerCanceled{ {type, ts}, e.tfinger.touchID, e.tfinger.fingerID, e.tfinger.windowID, {e.tfinger.x, e.tfinger.y}, {e.tfinger.dx, e.tfinger.dy}, e.tfinger.pressure });
+                break;
+
+                // --- Clipboard Events ---
+            case Events::clipboard_update:
+                if (!getListeners<clipboardUpdate>().empty())
+                {
+                    clipboardUpdate update{ {type, ts}, e.clipboard.owner, {} };
+                    if (e.clipboard.mime_types && e.clipboard.num_mime_types > 0)
+                    {
+                        update.mimeTypes.reserve(static_cast<size_t>(e.clipboard.num_mime_types));
+                        for (Sint32 index = 0; index < e.clipboard.num_mime_types; ++index)
+                        {
+                            const char* mime_type = e.clipboard.mime_types[index];
+                            if (mime_type)
+                            {
+                                update.mimeTypes.emplace_back(mime_type);
+                            }
+                        }
+                    }
+                    emit(update);
+                }
                 break;
 
                 // --- Drop Events ---

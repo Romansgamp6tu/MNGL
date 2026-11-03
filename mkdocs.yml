@@ -5,15 +5,22 @@ site_dir: site
 use_directory_urls: true
 strict: true
 
+validation:
+  links:
+    anchors: warn
+
 theme:
   name: mkdocs
 
 nav:
   - Главная: index.md
-  - Сборка: getting-started/building.md
+  - Начало работы:
+      - Подключение MNGL: getting-started/using-mngl.md
+      - Сборка и пакеты: getting-started/building.md
   - 2D:
       - Обзор: 2d/index.md
       - Быстрый старт: 2d/quick-start.md
+      - Текст: 2d/text-rendering.md
       - Рендер в текстуру: 2d/render-to-texture.md
       - Координаты и view: 2d/coordinates-and-view.md
       - Трансформации: 2d/transforms.md
@@ -23,8 +30,12 @@ nav:
   - Основы:
       - Обзор: core/index.md
       - Окна и ввод: core/windows-and-input.md
-      - Проект Input v2: design/input-v2.md
-      - План аудио v1: design/audio-v1.md
+      - Звуки и музыка: core/audio.md
+      - Системные диалоги: core/dialogs.md
+      - Буфер обмена: core/clipboard.md
+      - Хранилище и файлы: core/storage.md
+      - Асинхронный ввод-вывод: core/async-io.md
+      - Процессы: core/processes.md
       - События: core/events.md
       - Поверхности и цвета: core/media-and-colors.md
       - Геометрия: core/geometry.md
@@ -43,3 +54,6 @@ nav:
       - Создание и отладка: mods/creating-and-debugging.md
       - Среда и CI/CD: mods/automation.md
   - Справочник по модулям: reference/index.md
+  - Проектные решения:
+      - Input v2: design/input-v2.md
+      - Аудио v1: design/audio-v1.md

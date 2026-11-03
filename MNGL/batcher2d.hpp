@@ -6,6 +6,7 @@
 #include "graphics_pipeline.hpp"
 #include "graphics_shader.hpp"
 #include "gpu_texture.hpp"
+#include "paths.hpp"
 #include "rectangle.hpp"
 #include "render_pass.hpp"
 #include "sampler.hpp"
@@ -368,13 +369,10 @@ namespace mngl::gpu
 
 		static batcher2d_shader_assets load_default()
 		{
-			const char* base_path = SDL_GetBasePath();
-			if (!base_path)
-			{
-				throw sdl_error("Failed to get application base path for batcher2d shaders: ");
-			}
+			const auto base_path = paths::application_directory();
+			if (!base_path) throw base_path.error();
 
-			const auto directory = std::filesystem::path(base_path) / "shaders";
+			const auto directory = *base_path / "shaders";
 			const auto format = static_cast<shader_format>(MNGL_DEFAULT_SHADER_FORMAT);
 			if (format == shader_format::dxil)
 			{

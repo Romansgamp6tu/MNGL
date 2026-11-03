@@ -4,7 +4,7 @@
 #pragma comment(lib, "SDL3_test.lib")
 #pragma comment(lib, "freetype.lib")
 
-// определим информацию о приложении, если не была задана пользователем
+// Application metadata and stable storage identity can be set by the consumer.
 
 #define MNGL_STRINGIFY_IMPL(x) #x
 #define STR(x) MNGL_STRINGIFY_IMPL(x)
@@ -18,7 +18,15 @@
 #endif
 
 #ifndef APP_ID
-#define APP_ID "com.sdl3.mngl." STR(APP_VERSION)
+#define APP_ID "com.example.mngl"
+#endif
+
+#ifndef APP_ORGANIZATION
+#define APP_ORGANIZATION "MNGL"
+#endif
+
+#ifndef APP_STORAGE_NAME
+#define APP_STORAGE_NAME APP_NAME
 #endif
 
 #if defined(MNGL_CUSTOM_AUDIO_BACKEND)
@@ -89,6 +97,10 @@ class __SDL_While_Runtime__
 			err = "SDL metadata setup error: " + std::string(SDL_GetError());
 			return;
 		}
+		if (!set_optional_metadata())
+		{
+			return;
+		}
 		if (!SDL_Init(init_flags))
 		{
 			has_err = true;
@@ -154,6 +166,37 @@ public:
 	}
 
 private:
+	static bool set_optional_metadata()
+	{
+#if defined(APP_CREATOR) || defined(APP_COPYRIGHT) || defined(APP_URL) || defined(APP_TYPE)
+		const auto set_property = [](const char* property, const char* value)
+		{
+			if (SDL_SetAppMetadataProperty(property, value))
+			{
+				return true;
+			}
+			__SDL_While_Runtime__::has_err = true;
+			__SDL_While_Runtime__::err =
+				"SDL metadata setup error: " + std::string(SDL_GetError());
+			return false;
+		};
+
+#ifdef APP_CREATOR
+		if (!set_property(SDL_PROP_APP_METADATA_CREATOR_STRING, APP_CREATOR)) return false;
+#endif
+#ifdef APP_COPYRIGHT
+		if (!set_property(SDL_PROP_APP_METADATA_COPYRIGHT_STRING, APP_COPYRIGHT)) return false;
+#endif
+#ifdef APP_URL
+		if (!set_property(SDL_PROP_APP_METADATA_URL_STRING, APP_URL)) return false;
+#endif
+#ifdef APP_TYPE
+		if (!set_property(SDL_PROP_APP_METADATA_TYPE_STRING, APP_TYPE)) return false;
+#endif
+#endif
+		return true;
+	}
+
 	inline static bool is_running = false;
 	inline static bool has_err = false;
 	inline static bool is_exit = false;

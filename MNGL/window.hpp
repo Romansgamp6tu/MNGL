@@ -678,11 +678,13 @@ namespace mngl
 			return (SDL_GetWindowFlags(win) & SDL_WINDOW_INPUT_FOCUS) != 0;
 		}
 
+		[[deprecated("Use mngl::clipboard::set_text() from <MNGL/clipboard.hpp>")]]
 		void clipboard_text(const char* text)
 		{
 			if (!SDL_SetClipboardText(text)) throw sdl_error("failed to set clipboard text: ");
 		}
 
+		[[deprecated("Use mngl::clipboard::get_text() from <MNGL/clipboard.hpp>")]]
 		std::string clipboard_text() const
 		{
 			auto* text = SDL_GetClipboardText();

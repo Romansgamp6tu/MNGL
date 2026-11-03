@@ -1,14 +1,133 @@
 # MNGL
 
-MNGL — C++23 header-oriented библиотека поверх SDL3 для окон, ввода, событий,
-2D-рендеринга и SDL GPU. API активно развивается. Текущий Visual Studio/CMake
-проект собирает демо-приложение, а не устанавливаемую библиотеку.
+MNGL — C++23 библиотека поверх SDL3 для окон, ввода, аудио, 2D-рендеринга
+и SDL GPU. Большая часть реализации находится в заголовках; Dear ImGui
+собирается в отдельную библиотеку `mngl_imgui`.
+
+## Возможности
+
+| Модуль | Что доступно |
+|---|---|
+| Окна и события | Окна, дисплеи, типизированные события SDL и автоматический SDL runtime |
+| Идентичность и пути | Метаданные приложения, каталог ресурсов, данные пользователя и стандартные папки ОС |
+| Диалоги | Асинхронный выбор файла, нескольких файлов, места сохранения и папки |
+| Буфер обмена | Текст и произвольные MIME-форматы с отложенным поставщиком данных |
+| Файлы и процессы | Фоновое чтение и запись файлов; запуск команд и долгоживущих помощников |
+| Input v2 | Отдельные мыши, клавиатуры, joystick, gamepad, touch и pen; состояния устройств, действия и контексты |
+| Аудио | Эффекты `Sound`, потоковая музыка `Music`, независимые голоса, пауза, повтор и громкость master/music/sfx |
+| 2D | Фигуры, текстуры, текст, view, рендер в текстуру, hit testing и пакетная отрисовка |
+| SDL GPU | Устройства, ресурсы, шейдеры, compute, pipeline, проходы и граф кадра |
+| Dear ImGui | Интеграция с окнами MNGL и SDL GPU |
+| Инструменты | Консольные команды и точки расширения для нативных модов |
+
+API развивается. Эта документация описывает текущий `main`; пакет другого
+релиза или ветки может содержать другой набор заголовков.
+
+## Подключение к своему проекту
+
+Для разработки нужен **development-пакет** MNGL: заголовки, библиотеки и
+CMake-конфигурация. Для Windows x64 предусмотрен ZIP, для Linux x64 — tar.gz.
+Workflow публикует их как Actions artifacts и прикладывает к тегированным
+[релизам](https://github.com/Romansgamp6tu/MNGL/releases).
+
+Распакуйте подходящий пакет и подключите его в `CMakeLists.txt` приложения:
+
+```cmake
+cmake_minimum_required(VERSION 3.24)
+project(MyGame LANGUAGES CXX)
+
+find_package(MNGL CONFIG REQUIRED)
+add_executable(my_game main.cpp)
+target_link_libraries(my_game PRIVATE MNGL::MNGL)
+```
+
+На Windows с MSVC:
+
+```powershell
+cmake -S . -B build -A x64 -DCMAKE_PREFIX_PATH="C:/SDK/MNGL"
+cmake --build build --config Release
+```
+
+`CMAKE_PREFIX_PATH` указывает на корень распакованного пакета. Target
+`MNGL::MNGL` передаёт include paths, C++23 и зависимости. DLL из `bin/`
+должны быть доступны при запуске. На Linux также нужны системные development
+пакеты SDL3, SDL3_image и FreeType.
+
+**Аудио в текущем `main`:** API и заголовки SDL3_mixer уже подключены,
+но автоматическая линковка и доставка бинарников SDL3_mixer отложены до
+следующего релиза. При использовании `audio.hpp` подключите SDL3_mixer
+самостоятельно по [инструкции](docs/core/audio.md#sdl3-mixer).
+
+Полный пример проекта, подключение из исходников, настройка runtime и
+разбор типичных ошибок: [Использование MNGL](docs/getting-started/using-mngl.md).
+
+## Первое окно
+
+```cpp
+#include <MNGL/input.hpp>
+#include <MNGL/window.hpp>
+#include <exception>
+#include <iostream>
+#include <string>
+
+int main()
+{
+    if (SDL_Runtime) {
+        std::cerr << std::string(SDL_Runtime) << '\n';
+        return 1;
+    }
+
+    try {
+        mngl::window window("My game", { 800, 600 });
+        while (mngl::Input::continue_work()) {
+            for (const auto& keyboard : mngl::Input::keyboards()) {
+                if (keyboard.pressed(mngl::scancode::escape)) {
+                    mngl::Input::should_work = false;
+                }
+            }
+        }
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << '\n';
+        return 1;
+    }
+}
+```
+
+Окно закрывается по Escape или системной кнопке закрытия. Этот пример
+показывает окно и ввод; отрисовка описана в [быстром старте 2D](docs/2d/quick-start.md).
+Для SDL GPU могут понадобиться дополнительные shader tools и файлы шейдеров.
+
+## Сборка демо из исходников
+
+```powershell
+git clone --recurse-submodules https://github.com/Romansgamp6tu/MNGL.git
+cd MNGL
+cmake -S . -B build -A x64
+cmake --build build --config Debug --target mngl_demo
+```
+
+Для уже клонированного репозитория выполните `git submodule update --init --recursive`.
+В Visual Studio откройте `MNGL.slnx` и выберите `x64`, `Debug` или `Release`.
+Windows-сборка использует бинарники из `libs/`; на Linux/macOS зависимости
+нужно установить отдельно. Подробности, платформенные ограничения и ручная
+сборка пакетов: [Сборка и поставка](docs/getting-started/building.md).
 
 ## Документация
 
-Руководство находится в `docs/` и публикуется через MkDocs. Инструкция по
-сборке, зависимостям и дополнительным shader-инструментам:
-[`docs/getting-started/building.md`](docs/getting-started/building.md).
+- [Начало работы и подключение](docs/getting-started/using-mngl.md)
+- [Окна, физические устройства, действия и контексты ввода](docs/core/windows-and-input.md)
+- [Системные диалоги](docs/core/dialogs.md)
+- [Буфер обмена: MIME-форматы и отложенный provider callback](docs/core/clipboard.md)
+- [Хранилище и файлы](docs/core/storage.md)
+- [Асинхронный ввод-вывод](docs/core/async-io.md)
+- [Запуск процессов и помощников](docs/core/processes.md)
+- [Runtime, идентичность приложения и пути](docs/core/runtime-and-utilities.md)
+- [Звуки и потоковая музыка](docs/core/audio.md)
+- [2D API](docs/2d/index.md) и [SDL GPU](docs/gpu/index.md)
+- [Создание модов](docs/mods/creating-and-debugging.md)
+- [Карта публичных заголовков](docs/reference/index.md)
+
+Руководство написано в Markdown и собирается через MkDocs:
 
 ```powershell
 python -m pip install -r requirements-docs.txt
@@ -16,17 +135,6 @@ python -m mkdocs serve
 python -m mkdocs build --strict
 ```
 
-Для сборки демо через Visual Studio используйте `MNGL.slnx`, платформу `x64`
-и конфигурацию `Debug` или `Release`. Экспериментальная сборка через CMake:
-
-```powershell
-cmake -S . -B build -A x64
-cmake --build build --config Debug
-```
-
-На macOS/Linux CMake ожидает SDL3, SDL3_image и FreeType, установленные в
-системе или доступные через `CMAKE_PREFIX_PATH`. Кроссплатформенные сборки и
-GPU-бэкенды пока требуют отдельной проверки.
-
-Для автоматической справки по C++ API позднее можно добавить Doxygen и
-разместить его результат внутри того же сайта.
+Публичные заголовки сторонних библиотек находятся в `include/`, SDL3_mixer —
+в `third_party/SDL_mixer`. Полный справочник символов C++ пока не генерируется;
+карта модулей ведёт к руководствам и исходным заголовкам.

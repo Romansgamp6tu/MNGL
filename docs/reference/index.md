@@ -2,17 +2,28 @@
 
 Здесь перечислены основные заголовки MNGL и руководство по соответствующему модулю. Встроенные заголовки `include/SDL3`, `include/SDL3_image` и `include/glm` — сторонние библиотеки; их документация здесь не дублируется.
 
-Текущий процесс сборки и статус подключения к стороннему проекту описаны в разделе [Сборка и подключение](../getting-started/building.md).
+Подключение к стороннему проекту описано в разделе [Использование MNGL](../getting-started/using-mngl.md),
+сборка самого проекта — в разделе [Сборка и пакеты](../getting-started/building.md).
+В development-пакете `main` заголовки ниже доступны с префиксом `MNGL/`,
+например `<MNGL/audio.hpp>`; CMake target также поддерживает короткие include paths.
 
 | Заголовки | Назначение | Руководство |
 |---|---|---|
-| `window.hpp`, `input.hpp` | Окна, дисплеи, ввод | [Окна и ввод](../core/windows-and-input.md) |
+| `window.hpp`, `input.hpp` | Окна, дисплеи, отдельные устройства и состояния ввода | [Окна и ввод](../core/windows-and-input.md) |
+| `action_map.hpp` | Привязки действий, контексты и пресеты ввода | [Действия и контексты](../core/windows-and-input.md#actions-and-contexts) |
+| `audio.hpp` | `Sound`, потоковый `Music`, независимые голоса и громкость | [Звуки и музыка](../core/audio.md) |
+| `dialog.hpp` | Системные диалоги выбора файлов и папок | [Системные диалоги](../core/dialogs.md) |
+| `clipboard.hpp` | Текстовый и MIME-буфер обмена, отложенная выдача данных | [Буфер обмена](../core/clipboard.md) |
+| `storage.hpp` | RAII-хранилища приложения, пользователя и локального каталога | [Хранилище и файлы](../core/storage.md) |
+| `async_io.hpp` | Фоновое чтение и запись файлов через очередь запросов | [Асинхронный ввод-вывод](../core/async-io.md) |
+| `process.hpp` | Запуск процессов, управление потоками и получение кода завершения | [Процессы](../core/processes.md) |
+| `paths.hpp` | Каталоги приложения и стандартные папки пользователя | [Runtime и утилиты](../core/runtime-and-utilities.md) |
 | `imgui_compat.hpp` | Header-only обёртка Dear ImGui, GPU overlay и настройка шрифтов | [Окна и ввод](../core/windows-and-input.md) |
 | `event.hpp` | Типизированная система событий | [События](../core/events.md) |
 | `surface.hpp`, `pixel_format.hpp` | SDL surfaces, изображения и форматы пикселей | [Поверхности и цвета](../core/media-and-colors.md) |
 | `color.hpp` | Цвета, преобразования RGB/HSV/HSL | [Поверхности и цвета](../core/media-and-colors.md) |
 | `line.hpp`, `rectangle.hpp` | Геометрические примитивы и пересечения | [Геометрия](../core/geometry.md) |
-| `utilities.hpp`, `logger.h`, `iupdate.h`, `proxy.hpp` | Runtime, ошибки, logging, обновления и SDL interop | [Runtime и утилиты](../core/runtime-and-utilities.md) |
+| `utilities.hpp`, `paths.hpp`, `logger.h`, `iupdate.h`, `proxy.hpp` | Runtime, идентичность приложения, пути, ошибки, logging, обновления и SDL interop | [Runtime и утилиты](../core/runtime-and-utilities.md) |
 | `console.hpp` | Реестр типизированных CLI-команд, режимы вывода и результатов обработчиков | [Консольные команды](../core/console.md) |
 | `device.hpp`, `command_buffer.hpp` | GPU device и command buffers | [Устройство и команды](../gpu/device-and-commands.md) |
 | `gpu_buffer.hpp`, `gpu_texture.hpp`, `sampler.hpp` | Низкоуровневые GPU-ресурсы | [GPU-ресурсы](../gpu/resources.md) |
@@ -20,5 +31,11 @@
 | `vertex_layout.hpp`, `graphics_pipeline.hpp`, `render_pass.hpp` | Vertex input и графические проходы | [Pipeline и render pass](../gpu/pipelines-and-passes.md) |
 | `render_window.hpp`, `renderer2d.hpp`, `texture.hpp`, `view.hpp`, `transform.hpp`, `hit_test.hpp` | Высокоуровневый 2D API | [Раздел 2D](../2d/index.md) |
 | `batcher2d.hpp` | Низкоуровневая пакетная 2D-отрисовка | [Расширенный 2D-рендеринг](../2d/advanced-rendering.md) |
+| `text.hpp` | Шрифты, текст, текстовые документы и атлас глифов | [Рендер текста](../2d/text-rendering.md) |
+| `mods.hpp`, `mod_loader.hpp` | Точки расширения и загрузка нативных модов | [Контракт модов](../mods/api-contract.md) |
+
+`detail/audio/sdl3_mixer_backend.hpp` — внутренняя реализация аудио; приложению
+достаточно `audio.hpp`. Конфигурации с отключёнными слоями могут исключать
+заголовки и интерфейсы, см. [настройки аудио](../core/audio.md#audio-configuration).
 
 Руководства объясняют главные сценарии и ограничения. Полный symbol-by-symbol справочник по объявлениям C++ пока не генерируется; его можно добавить отдельным Doxygen-выводом, не меняя исходники страниц MkDocs.

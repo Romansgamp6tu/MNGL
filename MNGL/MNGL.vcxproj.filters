@@ -113,6 +113,18 @@
     <ClInclude Include="window.hpp">
       <Filter>Файлы заголовков\window</Filter>
     </ClInclude>
+    <ClInclude Include="clipboard.hpp">
+      <Filter>Файлы заголовков\window</Filter>
+    </ClInclude>
+    <ClInclude Include="storage.hpp">
+      <Filter>Файлы заголовков\utility</Filter>
+    </ClInclude>
+    <ClInclude Include="async_io.hpp">
+      <Filter>Файлы заголовков\utility</Filter>
+    </ClInclude>
+    <ClInclude Include="process.hpp">
+      <Filter>Файлы заголовков\utility</Filter>
+    </ClInclude>
     <ClInclude Include="input.hpp">
       <Filter>Файлы заголовков\event</Filter>
     </ClInclude>
