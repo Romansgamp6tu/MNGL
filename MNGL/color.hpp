@@ -421,6 +421,17 @@ namespace mngl
 	};
 }
 
+// MNGL intentionally exposes these compact literal suffixes without a leading underscore.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 4455)
+#elif defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wuser-defined-literals"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wliteral-suffix"
+#endif
 constexpr mngl::color operator""rgb(uint64_t x)
 {
 	return mngl::color((x >> 16) & 255, (x >> 8) & 255, (x & 255));
@@ -430,6 +441,13 @@ constexpr mngl::color operator""rgba(uint64_t x)
 {
 	return mngl::color((x >> 24) & 255, (x >> 16) & 255, (x >> 8) & 255, (x & 255));
 }
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#elif defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 //есть несколько способов хеширования
 //#define COLOR_HASH_UINT32_T

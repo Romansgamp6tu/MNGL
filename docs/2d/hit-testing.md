@@ -10,10 +10,13 @@ panel.enable_hit_testing();
 Окно записывает компактные данные вызовов `draw()` только для включённых целей. Для поиска передайте позицию мыши в логических координатах окна SDL: начало координат находится в левом верхнем углу.
 
 ```cpp
-if (const auto hit = window.hit_test(mngl::Input::get_mouse_position()))
+for (const auto& mouse : mngl::Input::mice())
 {
-    const auto& deepest = hit->path.back();
-    const glm::vec2 local = deepest.local_coords;
+    if (const auto hit = window.hit_test(mouse.position()))
+    {
+        const auto& deepest = hit->path.back();
+        const glm::vec2 local = deepest.local_coords;
+    }
 }
 ```
 
@@ -43,10 +46,16 @@ button.on_click([](
 bool has_completed_frame = false;
 while (mngl::Input::continue_work())
 {
-    if (has_completed_frame &&
-        mngl::Input::is_mouse_button_pressed(mngl::mouse_button::left))
+    const auto mice = mngl::Input::mice();
+    if (has_completed_frame)
     {
-        (void)window.dispatch_click(mngl::Input::get_mouse_position());
+        for (const auto& mouse : mice)
+        {
+            if (mouse.pressed(mngl::mouse_button::left))
+            {
+                (void)window.dispatch_click(mouse.position());
+            }
+        }
     }
     window.clear();
     // Draw the next frame here.
@@ -54,6 +63,8 @@ while (mngl::Input::continue_work())
     has_completed_frame = true;
 }
 ```
+
+При нескольких мышах обработчик получает отдельный клик и позицию от каждой.
 
 `on_click()` доступен у `mngl::sprite`, `mngl::two_d::circle`, `ellipse` и `rounded_rectangle`. Обработчик вызывается синхронно при `dispatch_click()` и получает весь путь попадания и запись drawable, которому принадлежит обработчик; `clicked.local_coords` — локальные координаты этого drawable. `dispatch_click()` возвращает `true`, если обработчик был вызван.
 

@@ -133,6 +133,9 @@ static int run_demo()
 
 	while (mngl::Input::continue_work())
 	{
+		const auto keyboards = mngl::Input::keyboards();
+		const auto mice = mngl::Input::mice();
+		const glm::vec2 mouse_position = mice.empty() ? glm::vec2{} : mice.front().position();
 		const auto target_size = window.pixel_size();
 		if (target_size.x == 0 || target_size.y == 0)
 		{
@@ -151,7 +154,8 @@ static int run_demo()
 			panel = create_panel_texture(next_panel_size);
 		}
 		const auto workspace_size = window.coordinate_size();
-		if (mngl::Input::is_key_pressed(mngl::scancode::f1))
+		if (std::any_of(keyboards.begin(), keyboards.end(), [](const mngl::keyboard& device)
+			{ return device.pressed(mngl::scancode::f1); }))
 		{
 			show_workspace_surface = !show_workspace_surface;
 		}
@@ -205,7 +209,6 @@ static int run_demo()
 						"Поворот + обрезка UV",
 						mapping_mode,
 						4);
-					const auto mouse_position = mngl::Input::get_mouse_position();
 					controls.text(std::format(
 						"Курсор окна: {:.1f}, {:.1f}",
 						mouse_position.x,
@@ -402,16 +405,21 @@ static int run_demo()
 			SDL_Log("MNGL startup checkpoint: workspace texture rendered");
 		}
 
-		if (has_completed_frame &&
-			mngl::Input::is_mouse_button_pressed(mngl::mouse_button::left))
+		if (has_completed_frame)
 		{
-			(void)window.dispatch_click(mngl::Input::get_mouse_position());
+			for (const auto& mouse : mice)
+			{
+				if (mouse.pressed(mngl::mouse_button::left))
+				{
+					(void)window.dispatch_click(mouse.position());
+				}
+			}
 		}
 
 		mngl::color fill{ 0.9f, 0.25f, 0.15f, 1.0f };
 		if (has_completed_frame)
 		{
-			if (const auto hit = window.hit_test(mngl::Input::get_mouse_position());
+			if (const auto hit = window.hit_test(mouse_position);
 				hit && hit->path.size() > 1)
 			{
 				const auto local = hit->path.back().local_coords;

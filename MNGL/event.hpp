@@ -132,9 +132,11 @@ namespace mngl
         drop_position = SDL_EVENT_DROP_POSITION,
 
         // --- Audio ---
+#if !defined(MNGL_CUSTOM_AUDIO_BACKEND)
         audio_device_added = SDL_EVENT_AUDIO_DEVICE_ADDED,
         audio_device_removed = SDL_EVENT_AUDIO_DEVICE_REMOVED,
         audio_device_format_changed = SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED,
+#endif
 
         // --- Sensor ---
         sensor_update = SDL_EVENT_SENSOR_UPDATE,
@@ -167,21 +169,90 @@ namespace mngl
         user = SDL_EVENT_USER,
     };
 
-    enum class hat_position : uint8_t { centered, up, leftup, left, leftdown, down, rightdown, right, rightup, none = 0xFF };
+    enum class hat_position : uint8_t
+    {
+        centered = SDL_HAT_CENTERED,
+        up = SDL_HAT_UP,
+        right = SDL_HAT_RIGHT,
+        rightup = SDL_HAT_RIGHTUP,
+        down = SDL_HAT_DOWN,
+        rightdown = SDL_HAT_RIGHTDOWN,
+        left = SDL_HAT_LEFT,
+        leftup = SDL_HAT_LEFTUP,
+        leftdown = SDL_HAT_LEFTDOWN,
+        none = 0xFF
+    };
     enum class power_state : uint8_t { unknown, on_battery, no_battery, charging, charged, error = 0xFF };
     enum class wheel_direction : uint8_t { normal, flipped };
     enum class drop_type : uint8_t { none, file, text, begin, complete, position };
     enum class camera_status : uint8_t { added, removed, approved, denied };
     enum class render_reason : uint8_t { targets_reset, device_reset, device_lost };
-    enum class pen_axis_type : uint8_t { pressure, xtilt, ytilt, rotation, slider, distance };
-    enum class gamepad_axis : uint8_t { invalid, leftx, lefty, rightx, righty, lefttrigger, righttrigger };
-    enum class gamepad_button : uint8_t
+    enum class pen_axis_type : uint8_t
     {
-        invalid, a, b, x, y, back, guide, start,
-        leftstick, rightstick, leftshoulder, rightshoulder,
-        dpad_up, dpad_down, dpad_left, dpad_right, misc1, misc2
+        pressure = SDL_PEN_AXIS_PRESSURE,
+        xtilt = SDL_PEN_AXIS_XTILT,
+        ytilt = SDL_PEN_AXIS_YTILT,
+        distance = SDL_PEN_AXIS_DISTANCE,
+        rotation = SDL_PEN_AXIS_ROTATION,
+        slider = SDL_PEN_AXIS_SLIDER,
+        tangential_pressure = SDL_PEN_AXIS_TANGENTIAL_PRESSURE
     };
-    enum class sensor_type : uint8_t { invalid, accelerometer, gyroscope, accelerometer_uncalibrated, gyroscope_uncalibrated };
+    enum class gamepad_axis : int8_t
+    {
+        invalid = SDL_GAMEPAD_AXIS_INVALID,
+        leftx = SDL_GAMEPAD_AXIS_LEFTX,
+        lefty = SDL_GAMEPAD_AXIS_LEFTY,
+        rightx = SDL_GAMEPAD_AXIS_RIGHTX,
+        righty = SDL_GAMEPAD_AXIS_RIGHTY,
+        lefttrigger = SDL_GAMEPAD_AXIS_LEFT_TRIGGER,
+        righttrigger = SDL_GAMEPAD_AXIS_RIGHT_TRIGGER
+    };
+    enum class gamepad_button : int8_t
+    {
+        invalid = SDL_GAMEPAD_BUTTON_INVALID,
+        a = SDL_GAMEPAD_BUTTON_SOUTH,
+        b = SDL_GAMEPAD_BUTTON_EAST,
+        x = SDL_GAMEPAD_BUTTON_WEST,
+        y = SDL_GAMEPAD_BUTTON_NORTH,
+        back = SDL_GAMEPAD_BUTTON_BACK,
+        guide = SDL_GAMEPAD_BUTTON_GUIDE,
+        start = SDL_GAMEPAD_BUTTON_START,
+        leftstick = SDL_GAMEPAD_BUTTON_LEFT_STICK,
+        rightstick = SDL_GAMEPAD_BUTTON_RIGHT_STICK,
+        leftshoulder = SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,
+        rightshoulder = SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,
+        dpad_up = SDL_GAMEPAD_BUTTON_DPAD_UP,
+        dpad_down = SDL_GAMEPAD_BUTTON_DPAD_DOWN,
+        dpad_left = SDL_GAMEPAD_BUTTON_DPAD_LEFT,
+        dpad_right = SDL_GAMEPAD_BUTTON_DPAD_RIGHT,
+        misc1 = SDL_GAMEPAD_BUTTON_MISC1,
+        right_paddle1 = SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1,
+        left_paddle1 = SDL_GAMEPAD_BUTTON_LEFT_PADDLE1,
+        right_paddle2 = SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2,
+        left_paddle2 = SDL_GAMEPAD_BUTTON_LEFT_PADDLE2,
+        touchpad = SDL_GAMEPAD_BUTTON_TOUCHPAD,
+        misc2 = SDL_GAMEPAD_BUTTON_MISC2,
+        misc3 = SDL_GAMEPAD_BUTTON_MISC3,
+        misc4 = SDL_GAMEPAD_BUTTON_MISC4,
+        misc5 = SDL_GAMEPAD_BUTTON_MISC5,
+        misc6 = SDL_GAMEPAD_BUTTON_MISC6,
+        count = SDL_GAMEPAD_BUTTON_COUNT,
+        south = a,
+        east = b,
+        west = x,
+        north = y
+    };
+    enum class sensor_type : int8_t
+    {
+        invalid = SDL_SENSOR_INVALID,
+        unknown = SDL_SENSOR_UNKNOWN,
+        accelerometer = SDL_SENSOR_ACCEL,
+        gyroscope = SDL_SENSOR_GYRO,
+        accelerometer_left = SDL_SENSOR_ACCEL_L,
+        gyroscope_left = SDL_SENSOR_GYRO_L,
+        accelerometer_right = SDL_SENSOR_ACCEL_R,
+        gyroscope_right = SDL_SENSOR_GYRO_R
+    };
     enum class display_orientation
     {
         unknown = SDL_ORIENTATION_UNKNOWN,
@@ -676,9 +747,11 @@ namespace mngl
     struct dropPosition : windowEvent { glm::vec2 position; std::string source; std::string data; };
 
     // --- Audio ---
+#if !defined(MNGL_CUSTOM_AUDIO_BACKEND)
     struct audioDeviceAdded : eventBase { uint32_t deviceID; bool recording; };
     struct audioDeviceRemoved : eventBase { uint32_t deviceID; bool recording; };
     struct audioDeviceFormatChanged : eventBase { uint32_t deviceID; bool recording; };
+#endif
 
     // --- Sensor ---
     struct sensorEvent : eventBase
@@ -687,9 +760,15 @@ namespace mngl
     };
 
     // --- Pen ---
-    struct penProximityIn : eventBase { uint32_t penID; uint32_t windowID; glm::vec2 position; };
-    struct penProximityOut : eventBase { uint32_t penID; uint32_t windowID; glm::vec2 position; };
-    struct penMotion : eventBase { uint32_t penID; uint32_t windowID; glm::vec2 position; };
+    // SDL proximity events have no coordinates; position is zero for compatibility.
+    struct penProximityIn : eventBase { SDL_PenID penID; SDL_WindowID windowID; glm::vec2 position; };
+    struct penProximityOut : eventBase { SDL_PenID penID; SDL_WindowID windowID; glm::vec2 position; };
+    struct penMotion : eventBase { SDL_PenID penID; SDL_WindowID windowID; glm::vec2 position; SDL_PenInputFlags state; };
+    struct penDown : eventBase { SDL_PenID penID; SDL_WindowID windowID; glm::vec2 position; SDL_PenInputFlags state; bool eraser; };
+    struct penUp : eventBase { SDL_PenID penID; SDL_WindowID windowID; glm::vec2 position; SDL_PenInputFlags state; bool eraser; };
+    struct penButtonDown : eventBase { SDL_PenID penID; SDL_WindowID windowID; glm::vec2 position; uint8_t button; SDL_PenInputFlags state; };
+    struct penButtonUp : eventBase { SDL_PenID penID; SDL_WindowID windowID; glm::vec2 position; uint8_t button; SDL_PenInputFlags state; };
+    struct penAxis : eventBase { SDL_PenID penID; SDL_WindowID windowID; glm::vec2 position; pen_axis_type axis; float value; SDL_PenInputFlags state; };
 
     // --- Camera ---
     struct cameraDeviceAdded : eventBase { uint32_t cameraID; };
@@ -1218,6 +1297,9 @@ namespace mngl
             case Events::finger_up:
                 if (!getListeners<fingerUp>().empty()) emit(fingerUp{ {type, ts}, e.tfinger.touchID, e.tfinger.fingerID, e.tfinger.windowID, {e.tfinger.x, e.tfinger.y}, {e.tfinger.dx, e.tfinger.dy}, e.tfinger.pressure });
                 break;
+            case Events::finger_canceled:
+                if (!getListeners<fingerCanceled>().empty()) emit(fingerCanceled{ {type, ts}, e.tfinger.touchID, e.tfinger.fingerID, e.tfinger.windowID, {e.tfinger.x, e.tfinger.y}, {e.tfinger.dx, e.tfinger.dy}, e.tfinger.pressure });
+                break;
 
                 // --- Drop Events ---
             case Events::drop_file:
@@ -1237,6 +1319,7 @@ namespace mngl
                 break;
 
                 // --- Audio Device Events ---
+#if !defined(MNGL_CUSTOM_AUDIO_BACKEND)
             case Events::audio_device_added:
                 if (!getListeners<audioDeviceAdded>().empty()) emit(audioDeviceAdded{ {type, ts}, e.adevice.which, e.adevice.recording != 0 });
                 break;
@@ -1246,6 +1329,7 @@ namespace mngl
             case Events::audio_device_format_changed:
                 if (!getListeners<audioDeviceFormatChanged>().empty()) emit(audioDeviceFormatChanged{ {type, ts}, e.adevice.which, e.adevice.recording != 0 });
                 break;
+#endif
 
                 // --- Sensor Events ---
             case Events::sensor_update:
@@ -1258,13 +1342,28 @@ namespace mngl
 
                 // --- Pen Events ---
             case Events::pen_proximity_in:
-                if (!getListeners<penProximityIn>().empty()) emit(penProximityIn{ {type, ts}, e.pmotion.which, e.pmotion.windowID, {e.pmotion.x, e.pmotion.y} });
+                if (!getListeners<penProximityIn>().empty()) emit(penProximityIn{ {type, ts}, e.pproximity.which, e.pproximity.windowID, {} });
                 break;
             case Events::pen_proximity_out:
-                if (!getListeners<penProximityOut>().empty()) emit(penProximityOut{ {type, ts}, e.pmotion.which, e.pmotion.windowID, {e.pmotion.x, e.pmotion.y} });
+                if (!getListeners<penProximityOut>().empty()) emit(penProximityOut{ {type, ts}, e.pproximity.which, e.pproximity.windowID, {} });
+                break;
+            case Events::pen_down:
+                if (!getListeners<penDown>().empty()) emit(penDown{ {type, ts}, e.ptouch.which, e.ptouch.windowID, {e.ptouch.x, e.ptouch.y}, e.ptouch.pen_state, e.ptouch.eraser });
+                break;
+            case Events::pen_up:
+                if (!getListeners<penUp>().empty()) emit(penUp{ {type, ts}, e.ptouch.which, e.ptouch.windowID, {e.ptouch.x, e.ptouch.y}, e.ptouch.pen_state, e.ptouch.eraser });
+                break;
+            case Events::pen_button_down:
+                if (!getListeners<penButtonDown>().empty()) emit(penButtonDown{ {type, ts}, e.pbutton.which, e.pbutton.windowID, {e.pbutton.x, e.pbutton.y}, e.pbutton.button, e.pbutton.pen_state });
+                break;
+            case Events::pen_button_up:
+                if (!getListeners<penButtonUp>().empty()) emit(penButtonUp{ {type, ts}, e.pbutton.which, e.pbutton.windowID, {e.pbutton.x, e.pbutton.y}, e.pbutton.button, e.pbutton.pen_state });
                 break;
             case Events::pen_motion:
-                if (!getListeners<penMotion>().empty()) emit(penMotion{ {type, ts}, e.pmotion.which, e.pmotion.windowID, {e.pmotion.x, e.pmotion.y} });
+                if (!getListeners<penMotion>().empty()) emit(penMotion{ {type, ts}, e.pmotion.which, e.pmotion.windowID, {e.pmotion.x, e.pmotion.y}, e.pmotion.pen_state });
+                break;
+            case Events::pen_axis:
+                if (!getListeners<penAxis>().empty()) emit(penAxis{ {type, ts}, e.paxis.which, e.paxis.windowID, {e.paxis.x, e.paxis.y}, static_cast<pen_axis_type>(e.paxis.axis), e.paxis.value, e.paxis.pen_state });
                 break;
 
                 // --- Camera Device Events ---

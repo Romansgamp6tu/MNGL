@@ -4,6 +4,13 @@ project(MNGL LANGUAGES CXX)
 
 include(CTest)
 
+option(MNGL_CUSTOM_AUDIO_BACKEND
+	"Disable all MNGL audio integration" OFF)
+option(MNGL_CUSTOM_AUDIO_INTERFACE
+	"Disable the MNGL audio facade and bundled SDL3_mixer integration" OFF)
+option(MNGL_CUSTOM_MIXER_INTERFACE
+	"Disable the MNGL audio facade while keeping SDL3_mixer available directly" OFF)
+
 execute_process(
 	COMMAND git branch --show-current
 	WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -110,17 +117,58 @@ target_include_directories(mngl INTERFACE
 	$<INSTALL_INTERFACE:include/MNGL>
 	$<INSTALL_INTERFACE:include/${MNGL_PACKAGE_HEADER_NAMESPACE}>
 )
+if(MNGL_CUSTOM_AUDIO_BACKEND)
+	target_compile_definitions(mngl INTERFACE MNGL_CUSTOM_AUDIO_BACKEND)
+endif()
+if(MNGL_CUSTOM_AUDIO_INTERFACE)
+	target_compile_definitions(mngl INTERFACE MNGL_CUSTOM_AUDIO_INTERFACE)
+endif()
+if(MNGL_CUSTOM_MIXER_INTERFACE)
+	target_compile_definitions(mngl INTERFACE MNGL_CUSTOM_MIXER_INTERFACE)
+endif()
+if(NOT MNGL_CUSTOM_AUDIO_BACKEND AND NOT MNGL_CUSTOM_AUDIO_INTERFACE)
+	target_include_directories(mngl INTERFACE
+		$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL_mixer/include>
+	)
+endif()
 if(MSVC)
 	target_link_directories(mngl INTERFACE
 		$<BUILD_INTERFACE:${MNGL_LIBRARY_DIRECTORY}>
 		$<INSTALL_INTERFACE:lib>
 	)
+	target_compile_options(mngl INTERFACE /bigobj)
 	target_link_libraries(mngl INTERFACE mngl_imgui SDL3_image.lib freetype.lib)
 else()
 	target_link_libraries(mngl INTERFACE
 		mngl_imgui SDL3_image::SDL3_image Freetype::Freetype)
 endif()
 target_link_libraries(mngl_demo PRIVATE mngl)
+
+if(BUILD_TESTING)
+	add_executable(mngl_input_compat_test tests/input_compat_test.cpp)
+	target_compile_features(mngl_input_compat_test PRIVATE cxx_std_23)
+	target_link_libraries(mngl_input_compat_test PRIVATE mngl)
+	add_test(NAME mngl_input_compat_test COMMAND mngl_input_compat_test)
+	set_tests_properties(mngl_input_compat_test PROPERTIES
+		ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+	if(WIN32 AND MSVC)
+		add_custom_command(TARGET mngl_input_compat_test POST_BUILD
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+				"$<TARGET_FILE:mngl_imgui>"
+				"$<TARGET_FILE_DIR:mngl_input_compat_test>"
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+				"${MNGL_LIBRARY_DIRECTORY}/SDL3.dll"
+				"$<TARGET_FILE_DIR:mngl_input_compat_test>"
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+				"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.dll"
+				"$<TARGET_FILE_DIR:mngl_input_compat_test>"
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+				"${MNGL_LIBRARY_DIRECTORY}/freetype.dll"
+				"$<TARGET_FILE_DIR:mngl_input_compat_test>"
+			VERBATIM
+		)
+	endif()
+endif()
 
 option(MNGL_BUILD_MOD_EXAMPLE "Build the native mod host and example module" ON)
 include(cmake/MNGLMods.cmake)
@@ -240,6 +288,10 @@ find_dependency(Freetype REQUIRED)]=])
 			file(RELATIVE_PATH MNGL_HEADER_RELATIVE_PATH
 				"${CMAKE_CURRENT_SOURCE_DIR}" "${MNGL_HEADER}")
 			file(TO_CMAKE_PATH "${MNGL_HEADER_RELATIVE_PATH}" MNGL_HEADER_RELATIVE_PATH)
+			if(MNGL_HEADER_RELATIVE_PATH STREQUAL "MNGL/detail/audio/sdl3_mixer_backend.hpp"
+				AND (MNGL_CUSTOM_AUDIO_BACKEND OR MNGL_CUSTOM_AUDIO_INTERFACE OR MNGL_CUSTOM_MIXER_INTERFACE))
+				continue()
+			endif()
 			if(MNGL_HEADER_RELATIVE_PATH MATCHES "^MNGL/imgui(/|$)")
 				continue()
 			endif()
@@ -268,6 +320,12 @@ find_dependency(Freetype REQUIRED)]=])
 		"${CMAKE_CURRENT_SOURCE_DIR}/include/glm"
 		DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 	)
+	if(NOT MNGL_CUSTOM_AUDIO_BACKEND AND NOT MNGL_CUSTOM_AUDIO_INTERFACE)
+		install(DIRECTORY
+			"${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL_mixer/include/SDL3_mixer"
+			DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+		)
+	endif()
 	install(FILES
 		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui/imconfig.h"
 		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui/imgui.h"

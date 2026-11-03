@@ -76,14 +76,23 @@
     <IntDir>$(SolutionDir)$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <MNGL_CUSTOM_AUDIO_BACKEND Condition="'$(MNGL_CUSTOM_AUDIO_BACKEND)' == ''">false</MNGL_CUSTOM_AUDIO_BACKEND>
+    <MNGL_CUSTOM_AUDIO_INTERFACE Condition="'$(MNGL_CUSTOM_AUDIO_INTERFACE)' == ''">false</MNGL_CUSTOM_AUDIO_INTERFACE>
+    <MNGL_CUSTOM_MIXER_INTERFACE Condition="'$(MNGL_CUSTOM_MIXER_INTERFACE)' == ''">false</MNGL_CUSTOM_MIXER_INTERFACE>
+    <MNGLAudioCompileDefinitions Condition="'$(MNGL_CUSTOM_AUDIO_BACKEND)' == 'true'">$(MNGLAudioCompileDefinitions)MNGL_CUSTOM_AUDIO_BACKEND;</MNGLAudioCompileDefinitions>
+    <MNGLAudioCompileDefinitions Condition="'$(MNGL_CUSTOM_AUDIO_INTERFACE)' == 'true'">$(MNGLAudioCompileDefinitions)MNGL_CUSTOM_AUDIO_INTERFACE;</MNGLAudioCompileDefinitions>
+    <MNGLAudioCompileDefinitions Condition="'$(MNGL_CUSTOM_MIXER_INTERFACE)' == 'true'">$(MNGLAudioCompileDefinitions)MNGL_CUSTOM_MIXER_INTERFACE;</MNGLAudioCompileDefinitions>
+    <MNGLSDL3MixerIncludeDirectory Condition="'$(MNGL_CUSTOM_AUDIO_BACKEND)' != 'true' And '$(MNGL_CUSTOM_AUDIO_INTERFACE)' != 'true'">$(SolutionDir)third_party\SDL_mixer\include</MNGLSDL3MixerIncludeDirectory>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;$(MNGLAudioCompileDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp23</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)MNGL\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)MNGL\imgui;$(MNGLSDL3MixerIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
@@ -108,10 +117,10 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;$(MNGLAudioCompileDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp23</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)MNGL\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)MNGL\imgui;$(MNGLSDL3MixerIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
@@ -134,10 +143,10 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;$(MNGLAudioCompileDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp23</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)MNGL\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)MNGL\imgui;$(MNGLSDL3MixerIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
@@ -163,10 +172,10 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;$(MNGLAudioCompileDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp23</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)MNGL\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)MNGL\imgui;$(MNGLSDL3MixerIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
@@ -208,6 +217,9 @@
     <ClInclude Include="frame_graph.hpp" />
     <ClInclude Include="device.hpp" />
     <ClInclude Include="event.hpp" />
+    <ClInclude Include="audio.hpp" />
+    <ClInclude Include="detail\audio\sdl3_mixer_backend.hpp" Condition="'$(MNGL_CUSTOM_AUDIO_BACKEND)' != 'true' And '$(MNGL_CUSTOM_AUDIO_INTERFACE)' != 'true' And '$(MNGL_CUSTOM_MIXER_INTERFACE)' != 'true'" />
+    <ClInclude Include="..\third_party\SDL_mixer\include\SDL3_mixer\SDL_mixer.h" Condition="'$(MNGL_CUSTOM_AUDIO_BACKEND)' != 'true' And '$(MNGL_CUSTOM_AUDIO_INTERFACE)' != 'true'" />
     <ClInclude Include="graphics_pipeline.hpp" />
     <ClInclude Include="input.hpp" />
     <ClInclude Include="iupdate.h" />

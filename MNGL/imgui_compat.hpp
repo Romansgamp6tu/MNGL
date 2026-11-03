@@ -1308,7 +1308,9 @@ namespace mngl
 				const auto logical_size = attached_window->size();
 				if (logical_size.x != 0 && logical_size.y != 0)
 				{
-					const glm::vec2 mouse_position = Input::get_mouse_position();
+					const auto mice = Input::mice();
+					const glm::vec2 mouse_position = mice.empty()
+						? glm::vec2{} : mice.front().position();
 					const glm::vec2 window_pixel_position{
 						mouse_position.x * static_cast<float>(hit_frame.target_size.x) /
 							static_cast<float>(logical_size.x),
