@@ -1,6 +1,7 @@
 #pragma once
 
 #include "input_events.hpp"
+#include "move_only_function.hpp"
 #include "system_events.hpp"
 #include <atomic>
 #include <concepts>
@@ -68,7 +69,7 @@ namespace mngl
 	class event_manager
 	{
 	public:
-		template <event_payload T> using callback = std::move_only_function<void(const T&)>;
+		template <event_payload T> using callback = detail::move_only_function<void(const T&)>;
 
 		event_manager(const event_manager&) = delete;
 		event_manager& operator=(const event_manager&) = delete;
@@ -85,7 +86,7 @@ namespace mngl
 			auto subscription = std::make_shared<listener<T>>(std::move(cb));
 			auto& listeners = listeners_for<T>();
 			std::lock_guard lock(listeners.writer_mutex);
-			const auto current = listeners.callbacks.load(std::memory_order_acquire);
+			const auto current = std::atomic_load_explicit(&listeners.callbacks, std::memory_order_acquire);
 			auto updated = std::make_shared<typename listener_collection<T>::listener_vector>();
 			updated->reserve(current->size() + 1);
 			for (const auto& existing : *current)
@@ -96,7 +97,8 @@ namespace mngl
 				}
 			}
 			updated->push_back(subscription);
-			listeners.callbacks.store(std::move(updated), std::memory_order_release);
+			std::shared_ptr<const typename listener_collection<T>::listener_vector> snapshot = std::move(updated);
+			std::atomic_store_explicit(&listeners.callbacks, std::move(snapshot), std::memory_order_release);
 			return event_connection(std::move(subscription));
 		}
 
@@ -140,7 +142,7 @@ namespace mngl
 		friend class input;
 		friend void poll_events();
 
-		using deferred_callback = std::move_only_function<void()>;
+		using deferred_callback = detail::move_only_function<void()>;
 
 		struct pending_event_batch
 		{
@@ -160,7 +162,8 @@ namespace mngl
 		template <event_payload T> static void dispatch_typed_event(const T& event)
 		{
 			std::lock_guard lock(dispatch_mutex);
-			const auto listeners = listeners_for<T>().callbacks.load(std::memory_order_acquire);
+			const auto listeners =
+			    std::atomic_load_explicit(&listeners_for<T>().callbacks, std::memory_order_acquire);
 			for (const auto& weak_listener : *listeners)
 			{
 				if (auto listener = weak_listener.lock();
@@ -310,12 +313,13 @@ namespace mngl
 			using listener_vector = std::vector<std::weak_ptr<listener<T>>>;
 
 			std::mutex writer_mutex;
-			std::atomic<std::shared_ptr<const listener_vector>> callbacks{
+			std::shared_ptr<const listener_vector> callbacks{
 			    std::make_shared<const listener_vector>()};
 
 			bool empty() const
 			{
-				for (const auto& weak_listener : *callbacks.load(std::memory_order_acquire))
+				for (const auto& weak_listener :
+				     *std::atomic_load_explicit(&callbacks, std::memory_order_acquire))
 				{
 					if (auto listener = weak_listener.lock();
 					    listener && listener->connected.load(std::memory_order_acquire))

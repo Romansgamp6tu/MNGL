@@ -110,11 +110,11 @@ namespace mngl
 		}
 		template <std::floating_point RGB, glm::qualifier Q> constexpr operator glm::vec<3, RGB, Q>() const
 		{
-			return glm::vec<3, RGB, Q>(rgb);
+			return glm::vec<3, RGB, Q>(rgb_glsl());
 		}
 		template <std::integral RGB, glm::qualifier Q> constexpr operator glm::vec<3, RGB, Q>() const
 		{
-			return glm::vec<3, RGB, Q>(rgb * 255.f);
+			return glm::vec<3, RGB, Q>(rgb_glsl() * 255.f);
 		}
 		constexpr explicit operator std::uint8_t() const { return static_cast<std::uint8_t>(r * 255); }
 		template <std::floating_point R> constexpr explicit operator R() const { return r; }
@@ -139,7 +139,7 @@ namespace mngl
 		// hsv or hsl
 
 		constexpr static color from_hsv(glm::vec3 hsv) { return {hsv_to_rgb(hsv), 1.f}; }
-		constexpr glm::vec3 to_hsv() const { return rgb_to_hsv(rgb); }
+		constexpr glm::vec3 to_hsv() const { return rgb_to_hsv(rgb_glsl()); }
 
 		constexpr static color from_hsv(glm::uvec3 hsv)
 		{
@@ -154,7 +154,7 @@ namespace mngl
 		}
 
 		constexpr static color from_hsl(glm::vec3 hsl) { return {hsl_to_rgb(hsl), 1.f}; }
-		constexpr glm::vec3 to_hsl() const { return rgb_to_hsl(rgb); }
+		constexpr glm::vec3 to_hsl() const { return rgb_to_hsl(rgb_glsl()); }
 
 		constexpr static color from_hsl(glm::uvec3 hsl)
 		{
@@ -264,18 +264,18 @@ namespace mngl
 				return 1.055f * std::pow(c, 1 / 2.4f) - 0.055f;
 		}
 
-		constexpr color premultiplied() { return {glm::clamp(rgb * a, 0.f, 1.f), a}; }
+		constexpr color premultiplied() { return {glm::clamp(rgb_glsl() * a, 0.f, 1.f), a}; }
 
-		color& premultiply() { return (*this) = {glm::clamp(rgb * a, 0.f, 1.f), a}; }
+		color& premultiply() { return (*this) = {glm::clamp(rgb_glsl() * a, 0.f, 1.f), a}; }
 
 		constexpr color unmultiplied()
 		{
-			return a == 0 ? glm::vec4{0, 0, 0, a} : glm::vec4{glm::clamp(rgb / a, 0.f, 1.f), a};
+			return a == 0 ? glm::vec4{0, 0, 0, a} : glm::vec4{glm::clamp(rgb_glsl() / a, 0.f, 1.f), a};
 		}
 
 		color& unmultiply()
 		{
-			return (*this) = a == 0 ? glm::vec4{0, 0, 0, a} : glm::vec4{glm::clamp(rgb / a, 0.f, 1.f), a};
+			return (*this) = a == 0 ? glm::vec4{0, 0, 0, a} : glm::vec4{glm::clamp(rgb_glsl() / a, 0.f, 1.f), a};
 		}
 
 		struct blends
@@ -290,14 +290,15 @@ namespace mngl
 
 			static color additive(color a, color b)
 			{
-				return glm::clamp(glm::vec4{a.rgb + b.rgb, std::max(a.a, b.a)}, 0.f, 1.f);
+				return glm::clamp(glm::vec4{a.rgb_glsl() + b.rgb_glsl(), std::max(a.a, b.a)}, 0.f, 1.f);
 			}
 
 			static color multiply(color a, color b) { return a * b; }
 
 			static color screen(color a, color b)
 			{
-				return glm::clamp(glm::vec4{glm::vec3(1, 1, 1) - ((~a).rgb * (~b).rgb), std::max(a.a, b.a)},
+				return glm::clamp(
+				    glm::vec4{glm::vec3(1, 1, 1) - ((~a).rgb_glsl() * (~b).rgb_glsl()), std::max(a.a, b.a)},
 				                  0.f, 1.f);
 			}
 		};
@@ -308,10 +309,6 @@ namespace mngl
 			struct
 			{
 				float r, g, b, a;
-			};
-			struct
-			{
-				glm::vec3 rgb;
 			};
 		};
 
@@ -484,17 +481,20 @@ namespace mngl
 	};
 } // namespace mngl
 
-// MNGL intentionally exposes these compact literal suffixes without a leading underscore.
+// Use standard user-defined literal suffixes. Keep the short MSVC spelling as a compatibility extension.
+constexpr mngl::color operator""_rgb(unsigned long long x)
+{
+	return mngl::color((x >> 16) & 255, (x >> 8) & 255, (x & 255));
+}
+
+constexpr mngl::color operator""_rgba(unsigned long long x)
+{
+	return mngl::color((x >> 24) & 255, (x >> 16) & 255, (x >> 8) & 255, (x & 255));
+}
+
 #if defined(_MSC_VER)
 #pragma warning(push)
 #pragma warning(disable : 4455)
-#elif defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wuser-defined-literals"
-#elif defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wliteral-suffix"
-#endif
 constexpr mngl::color operator"" rgb(std::uint64_t x)
 {
 	return mngl::color((x >> 16) & 255, (x >> 8) & 255, (x & 255));
@@ -504,12 +504,7 @@ constexpr mngl::color operator"" rgba(std::uint64_t x)
 {
 	return mngl::color((x >> 24) & 255, (x >> 16) & 255, (x >> 8) & 255, (x & 255));
 }
-#if defined(_MSC_VER)
 #pragma warning(pop)
-#elif defined(__clang__)
-#pragma clang diagnostic pop
-#elif defined(__GNUC__)
-#pragma GCC diagnostic pop
 #endif
 
 namespace std

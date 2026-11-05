@@ -134,6 +134,7 @@ jobs:
           sdk="$PWD/build-devel-linux/package-consumer-sdk"
           mkdir -p "$sdk"
           tar -xzf "build-devel-linux/packages/mngl-devel-linux-x64-${MNGL_PACKAGE_VERSION}.tar.gz" -C "$sdk"
+          sdk="$sdk/mngl-devel-linux-x64-${MNGL_PACKAGE_VERSION}"
           cmake -S tests/package-consumer -B build-devel-linux/package-consumer -GNinja \
             -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$sdk;$SDL_PREFIX"
           cmake --build build-devel-linux/package-consumer --parallel 4
@@ -212,6 +213,7 @@ jobs:
           sdk="$PWD/build-devel-macos/package-consumer-sdk"
           mkdir -p "$sdk"
           tar -xzf "build-devel-macos/packages/mngl-devel-macos-${{ matrix.package_arch }}-${MNGL_PACKAGE_VERSION}.tar.gz" -C "$sdk"
+          sdk="$sdk/mngl-devel-macos-${{ matrix.package_arch }}-${MNGL_PACKAGE_VERSION}"
           cmake -S tests/package-consumer -B build-devel-macos/package-consumer -GNinja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="$sdk;$SDL_PREFIX;$(brew --prefix)"

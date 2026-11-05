@@ -4,6 +4,7 @@
 #include <iostream>
 #include <array>
 #include <chrono>
+#include <ctime>
 #include <string>
 #include <format>
 #include <mutex>
@@ -157,15 +158,21 @@ namespace mngl
 		std::string time()
 		{
 			auto now = std::chrono::system_clock::now();
-			auto local_time = std::chrono::zoned_time{std::chrono::current_zone(), now}.get_local_time();
-			auto dp = std::chrono::floor<std::chrono::days>(local_time);
-			auto time_of_day = local_time - dp;
-			auto hms = std::chrono::hh_mm_ss{time_of_day};
-			auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(hms.subseconds()).count();
+			auto timestamp = std::chrono::system_clock::to_time_t(now);
+			std::tm local_time{};
+#if defined(_WIN32)
+			localtime_s(&local_time, &timestamp);
+#else
+			localtime_r(&timestamp, &local_time);
+#endif
+			auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000;
+			if (ms < 0)
+			{
+				ms += 1000;
+			}
 
-			// Используем {:03} для миллисекунд
-			return std::format("[{:02}:{:02}:{:02}:{:03}]", hms.hours().count(), hms.minutes().count(),
-			                   hms.seconds().count(), ms);
+			return std::format("[{:02}:{:02}:{:02}:{:03}]", local_time.tm_hour, local_time.tm_min,
+			                   local_time.tm_sec, ms);
 		}
 
 		std::ofstream fout;
