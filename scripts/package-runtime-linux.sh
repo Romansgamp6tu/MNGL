@@ -33,7 +33,9 @@ rm -rf "$stage" "$mngl_build" "$glslang_build" "$spirv_build" "$spirv_prefix" "$
 mkdir -p "$stage/bin" "$stage/lib"
 
 # Build only the runtime library; the runtime archive does not contain the demo.
-cmake -S "$repo" -B "$mngl_build" -GNinja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+cmake -S "$repo" -B "$mngl_build" -GNinja \
+	-DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
+	-DCMAKE_PREFIX_PATH="${SDL_PREFIX:-}"
 cmake --build "$mngl_build" --target mngl_audio_runtime_smoke --parallel 4
 cmake --build "$mngl_build" --target mngl_gpu_runtime_smoke --parallel 4
 cmake --install "$mngl_build" --prefix "$stage" --component library

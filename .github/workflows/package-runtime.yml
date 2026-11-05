@@ -95,7 +95,82 @@ jobs:
 
   runtime-linux:
     needs: version
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Check out MNGL
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Check out pinned glslang
+        uses: actions/checkout@v4
+        with:
+          repository: KhronosGroup/glslang
+          ref: e1b562a8bed273a02f30b59b66a5d499793cede5
+          path: upstream/glslang
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Check out pinned SDL_shadercross
+        uses: actions/checkout@v4
+        with:
+          repository: libsdl-org/SDL_shadercross
+          ref: 1ff05bec573988a98ef9e0260b4da44f512b8367
+          path: upstream/SDL_shadercross
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up pinned SDL3 and SDL3_image
+        id: sdl
+        uses: libsdl-org/setup-sdl@afd98199e97f9c2aa739474be7e0886d149a5e47
+        with:
+          version: 3.4.18
+          version-sdl-image: 3.4.8
+          build-type: Release
+          cmake-generator: Ninja
+          install-linux-dependencies: true
+
+      - name: Install Linux runtime build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes build-essential bison flex patchelf binutils libjson-perl libvulkan-dev libfreetype-dev libxrandr-dev
+
+      - name: Fetch pinned glslang dependencies
+        shell: bash
+        working-directory: upstream/glslang
+        run: python3 update_glslang_sources.py
+
+      - name: Build runtime package on Ubuntu 24.04
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ needs.version.outputs.value }}
+          SDL_PREFIX: ${{ steps.sdl.outputs.prefix }}
+          PKG_CONFIG_PATH: ${{ steps.sdl.outputs.prefix }}/lib/pkgconfig
+        run: bash scripts/package-runtime-linux.sh
+
+      - name: Upload Linux runtime artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mngl-runtime-linux-x64-${{ needs.version.outputs.value }}
+          path: mngl-runtime-linux-x64-*.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+  runtime-macos:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            cmake_arch: arm64
+            package_arch: arm64
+          - runner: macos-15-intel
+            cmake_arch: x86_64
+            package_arch: x64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     steps:
       - name: Check out MNGL
@@ -127,22 +202,43 @@ jobs:
         working-directory: upstream/glslang
         run: python3 update_glslang_sources.py
 
-      - name: Build runtime package on the self-hosted Ubuntu runner
+      - name: Set up pinned SDL3 and SDL3_image
+        id: sdl
+        uses: libsdl-org/setup-sdl@afd98199e97f9c2aa739474be7e0886d149a5e47
+        with:
+          version: 3.4.18
+          version-sdl-image: 3.4.8
+          build-type: Release
+          cmake-generator: Ninja
+          cmake-arguments: -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
+
+      - name: Install macOS runtime build dependencies
+        run: brew install bison flex freetype dylibbundler
+
+      - name: Add Homebrew parser tools to PATH
+        run: |
+          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
+
+      - name: Build and verify macOS runtime package
         shell: bash
         env:
           PACKAGE_VERSION: ${{ needs.version.outputs.value }}
-        run: bash scripts/package-runtime-linux.sh
+          SDL_PREFIX: ${{ steps.sdl.outputs.prefix }}
+          SDL_VERSION: ${{ steps.sdl.outputs.version }}
+          SDL_IMAGE_VERSION: 3.4.8
+        run: bash scripts/package-runtime-macos.sh
 
-      - name: Upload Linux runtime artifact
+      - name: Upload macOS runtime artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mngl-runtime-linux-x64-${{ needs.version.outputs.value }}
-          path: mngl-runtime-linux-x64-*.tar.gz
+          name: mngl-runtime-macos-${{ matrix.package_arch }}-${{ needs.version.outputs.value }}
+          path: mngl-runtime-macos-${{ matrix.package_arch }}-*.tar.gz
           if-no-files-found: error
           retention-days: 30
 
   publish-release:
-    needs: [version, runtime-windows, runtime-linux]
+    needs: [version, runtime-windows, runtime-linux, runtime-macos]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -197,7 +293,7 @@ jobs:
             }));
 
             const files = fs.readdirSync("release-assets").filter((name) => /\.(zip|tar\.gz)$/.test(name));
-            if (files.length !== 2) throw new Error(`Expected two runtime packages, found ${files.length}`);
+            if (files.length !== 4) throw new Error(`Expected four runtime packages, found ${files.length}`);
             const existingAssets = await github.paginate(github.rest.repos.listReleaseAssets, {
               owner,
               repo,

@@ -10,20 +10,96 @@ permissions:
   contents: read
 
 jobs:
-  windows-integration:
-    runs-on: windows-latest
-    timeout-minutes: 30
+  integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            runner: windows-latest
+          - platform: linux
+            runner: ubuntu-24.04
+          - platform: macos-arm64
+            runner: macos-15
+            cmake_arch: arm64
+          - platform: macos-x64
+            runner: macos-15-intel
+            cmake_arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     steps:
       - name: Check out source
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Configure integration targets
+      - name: Set up pinned SDL3 and SDL3_image
+        if: matrix.platform != 'windows'
+        id: sdl
+        uses: libsdl-org/setup-sdl@afd98199e97f9c2aa739474be7e0886d149a5e47
+        with:
+          version: 3.4.18
+          version-sdl-image: 3.4.8
+          build-type: Release
+          cmake-generator: Ninja
+          install-linux-dependencies: ${{ matrix.platform == 'linux' }}
+          cmake-arguments: ${{ startsWith(matrix.platform, 'macos-') && '-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0' || '' }}
+
+      - name: Install Linux and macOS build dependencies
+        if: matrix.platform == 'linux' || startsWith(matrix.platform, 'macos-')
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            sudo apt-get update
+            sudo apt-get install --yes libfreetype-dev
+          else
+            brew install freetype
+          fi
+
+      - name: Configure Windows integration targets
+        if: matrix.platform == 'windows'
         run: cmake -S . -B build -A x64 -DBUILD_TESTING=ON -DMNGL_BUILD_MOD_EXAMPLE=ON
 
+      - name: Configure Linux and macOS integration targets
+        if: matrix.platform != 'windows'
+        shell: bash
+        env:
+          SDL_PREFIX: ${{ steps.sdl.outputs.prefix }}
+          CMAKE_ARCH: ${{ matrix.cmake_arch }}
+        run: |
+          prefix="$SDL_PREFIX"
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            prefix="$prefix;$(brew --prefix)"
+          fi
+          arch_options=()
+          if [[ -n "$CMAKE_ARCH" ]]; then
+            arch_options=(-DCMAKE_OSX_ARCHITECTURES="$CMAKE_ARCH" -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0)
+          fi
+          cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=Release \
+            "${arch_options[@]}" \
+            -DCMAKE_PREFIX_PATH="$prefix" \
+            -DBUILD_TESTING=ON -DMNGL_BUILD_MOD_EXAMPLE=ON
+
       - name: Build mod integration test and test modules
+        if: matrix.platform == 'windows'
         run: cmake --build build --config Release --target mngl_mod_integration_test --parallel 4
 
+      - name: Build mod integration test and test modules
+        if: matrix.platform != 'windows'
+        run: cmake --build build --target mngl_mod_integration_test --parallel 4
+
       - name: Run mod integration test
-        run: ctest --test-dir build -C Release --output-on-failure
+        if: matrix.platform == 'windows'
+        run: ctest --test-dir build -C Release -R '^mngl_mod_integration$' --output-on-failure
+
+      - name: Run mod integration test
+        if: matrix.platform == 'linux'
+        env:
+          LD_LIBRARY_PATH: ${{ steps.sdl.outputs.prefix }}/lib
+        run: ctest --test-dir build -R '^mngl_mod_integration$' --output-on-failure
+
+      - name: Run mod integration test
+        if: startsWith(matrix.platform, 'macos-')
+        env:
+          SDL_PREFIX: ${{ steps.sdl.outputs.prefix }}
+        run: DYLD_LIBRARY_PATH="$SDL_PREFIX/lib:$(brew --prefix)/lib" ctest --test-dir build -R '^mngl_mod_integration$' --output-on-failure

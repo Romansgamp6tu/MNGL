@@ -35,16 +35,24 @@
 
 		static void run_glslang(const std::filesystem::path& source_path,
 		                        const std::filesystem::path& output_path,
-		                        const shader_compile_options& options)
+		                        const shader_compile_options& options, bool hlsl_input = false)
 		{
-			const std::vector<std::filesystem::path> args{argument("-V"),
-			                                              argument("-S"),
-			                                              argument(glsl_stage_name_for(options.stage)),
-			                                              argument("-e"),
-			                                              argument(options.entrypoint),
-			                                              argument("-o"),
-			                                              output_path,
-			                                              source_path};
+			std::vector<std::filesystem::path> args;
+			args.reserve(hlsl_input ? 11 : 8);
+			if (hlsl_input)
+			{
+				args.push_back(argument("-D"));
+				args.push_back(argument("--hlsl-offsets"));
+				args.push_back(argument("--hlsl-iomap"));
+			}
+			args.insert(args.end(), {argument("-V"),
+			                         argument("-S"),
+			                         argument(glsl_stage_name_for(options.stage)),
+			                         argument("-e"),
+			                         argument(options.entrypoint),
+			                         argument("-o"),
+			                         output_path,
+			                         source_path});
 			run_compiler(options.glslang_validator_executable, args, "glslangValidator", source_path);
 		}
 
@@ -101,6 +109,22 @@
 
 			if (options.source_language == shader_source_language::hlsl)
 			{
+				// SDL_shadercross's prebuilt DXC is only shipped for Windows and Linux.
+				// On macOS, compile HLSL to SPIR-V first, then translate it to MSL.
+#if defined(SDL_PLATFORM_MACOS)
+				if (options.format == shader_format::spirv || options.format == shader_format::msl)
+				{
+					const auto spirv_path = temp_dir.path() / "source.spv";
+					run_glslang(source_path, spirv_path, compile_options, true);
+					if (options.format == shader_format::spirv)
+					{
+						return read_shader_output(spirv_path, "glslangValidator", source_path);
+					}
+					run_shadercross(spirv_path, source_path, "SPIRV", stage_name, output_format,
+					                compiled_path, compile_options);
+					return read_shader_output(compiled_path, "shadercross", source_path);
+				}
+#endif
 				run_shadercross(source_path, source_path, "HLSL", stage_name, output_format, compiled_path,
 				                compile_options);
 				return read_shader_output(compiled_path, "shadercross", source_path);

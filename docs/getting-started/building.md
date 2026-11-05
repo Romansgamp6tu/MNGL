@@ -7,9 +7,11 @@
 
 MNGL — header-oriented C++23 библиотека. Обычная сборка CMake собирает
 `mngl_demo`; на Windows demo использует отдельную DLL `mngl_imgui`, а на Linux
-ImGui собирается в `libmngl_imgui.so`. Предусмотрены development-пакеты с
-заголовками и CMake targets: Windows x64 ZIP и Linux x64 tar.gz. Отдельные
-runtime-пакеты собираются для Windows x64 и Linux x86_64.
+ImGui собирается в `libmngl_imgui.so`. Целевые настольные платформы — Windows
+x64, Linux x86_64 и macOS arm64/x86_64. Для всех трёх систем собираются
+development- и runtime-пакеты; CI собирает архивы и проверяет проект-
+потребитель. Актуальные ограничения и проверки описаны в
+[политике платформ](../design/platform-support.md).
 
 В `main` реализованы input v2 и аудио поверх SDL3_mixer. Корневой CMake-проект
 собирает микшер из submodule, связывает его с `MNGL::MNGL` и добавляет библиотеку
@@ -94,10 +96,10 @@ SDL3_image и FreeType, шейдеры и шрифт ImGui. Runtime DLL микш
 
 #### Development-пакеты
 
-GitHub Actions собирает Windows x64 ZIP на GitHub-hosted `windows-latest` runner
-и Linux x64 tar.gz на self-hosted runner при push и для ручного запуска workflow.
-При push тега `vX.Y.Z` оба пакета прикладываются к GitHub Release. Для ручной
-сборки Windows-пакета:
+GitHub Actions собирает Windows x64 ZIP на GitHub-hosted `windows-latest` runner,
+Linux x64 tar.gz на `ubuntu-24.04` и macOS-пакеты для arm64/x86_64 при push и
+для ручного запуска workflow. При push тега `vX.Y.Z` все четыре пакета
+прикладываются к GitHub Release. Для ручной сборки Windows-пакета:
 
 ```powershell
 cmake -S . -B build-package -A x64 `
@@ -129,8 +131,8 @@ target_link_libraries(my_app PRIVATE MNGL::MNGL)
 заголовки ImGui не копируются. При ручной сборке feature-ветки укажите её через
 `-DMNGL_PACKAGE_BRANCH=<имя-ветки>` и убедитесь, что `origin/main` доступен.
 
-Linux x64 development-пакет собирается на self-hosted runner с теми же
-development-пакетами SDL3, SDL3_image и FreeType, что нужны runtime-сборке:
+Linux x64 development-пакет собирается на GitHub-hosted `ubuntu-24.04` с
+SDL3/SDL3_image 3.4.18/3.4.8 и системным FreeType:
 
 ```sh
 cmake -S . -B build-devel -GNinja -DCMAKE_BUILD_TYPE=Release \
@@ -155,23 +157,30 @@ ImGui не гарантирует совместимость ABI между ве
 #### Runtime-пакеты
 
 Workflow `Package MNGL runtime` собирает Windows x64 на GitHub-hosted runner,
-а Linux x86_64 — на self-hosted runner с метками `self-hosted`, `linux`, `x64`.
-Для Linux runner нужны CMake, Ninja, Git, `pkg-config`, Bison, `patchelf`,
-`readelf`, SDL3/SDL3_image/FreeType development-пакеты и XRandR development
-пакет. На Ubuntu их можно установить один раз:
+Linux x86_64 на GitHub-hosted `ubuntu-24.04`, а macOS arm64 и x86_64 — на
+GitHub-hosted `macos-15` и `macos-15-intel`. Для локального повторения Linux
+сборки установите CMake, Ninja, Git, `pkg-config`, Bison, `patchelf`, `readelf`,
+SDL3/SDL3_image и FreeType development-пакеты, а также XRandR development-пакет:
 
 ```sh
 sudo apt update
 sudo apt install build-essential cmake ninja-build git pkg-config bison patchelf binutils \
-  libxrandr-dev flex libjson-perl libvulkan1 libsdl3-dev libsdl3-image-dev libfreetype-dev
+  libxrandr-dev flex libjson-perl libvulkan-dev libfreetype-dev
 ```
 
+Для локальной runtime-сборки также установите CMake-конфигурации SDL3 3.4.18 и
+SDL3_image 3.4.8, задайте `SDL_PREFIX` на их install prefix и добавьте
+`$SDL_PREFIX/lib/pkgconfig` в `PKG_CONFIG_PATH`. CI устанавливает эти версии из
+исходников через `setup-sdl`.
+
 На push в `main` или ручной запуск workflow runtime ZIP/tar.gz доступен как
-Actions artifact. При push тега `vX.Y.Z` оба runtime-пакета также добавляются к
-GitHub Release:
+Actions artifact. При push тега `vX.Y.Z` четыре runtime-пакета также
+добавляются к GitHub Release:
 
 - `mngl-runtime-windows-x64-X.Y.Z.zip`
 - `mngl-runtime-linux-x64-X.Y.Z.tar.gz`
+- `mngl-runtime-macos-arm64-X.Y.Z.tar.gz`
+- `mngl-runtime-macos-x64-X.Y.Z.tar.gz`
 
 В архивах находятся `mngl_imgui.dll`/`libmngl_imgui.so`, SDL3, SDL3_image,
 SDL3_mixer, FreeType и их переносимые зависимости, лицензии микшера и
@@ -190,10 +199,17 @@ export PATH="/path/to/mngl-runtime/bin:$PATH"
 export LD_LIBRARY_PATH="/path/to/mngl-runtime/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
 
-Linux-пакет собирается на Ubuntu 26.04 x86_64. glibc, Vulkan loader
+Linux-пакет собирается на Ubuntu 24.04 x86_64. glibc, Vulkan loader
 (`libvulkan1`), GPU-драйверы и системные графические/аудио-библиотеки не
 копируются в архив; для запуска нужна совместимая Ubuntu-система с установленным
 драйвером.
+
+На macOS runtime-архив включает `.dylib` зависимости в `lib/` и задаёт путь
+`@executable_path/../lib` для приложения, собранного через `MNGL::MNGL`. Для
+готового приложения используйте `bin/` как каталог исполняемого файла и
+запускайте его с рабочим каталогом в корне runtime-архива — там лежат
+`shaders/`. macOS application bundle требует отдельной раскладки библиотек
+внутрь `.app`.
 
 Все `.lib` и DLL должны совпадать с архитектурой программы. Сейчас бинарники в
 `libs/` — только x64. Для x86 положите отдельные 32-битные сборки SDL3,
@@ -214,6 +230,7 @@ Win32-конфигурация Visual Studio и x86 CMake-сборка ищут 
 | `MNGL_CUSTOM_MIXER_INTERFACE` | `OFF` | Отключает только фасад `mngl::audio` |
 | `MNGL_BUILD_WINDOWS_DEVEL_PACKAGE` | `OFF` | Добавляет Windows x64 install rules и CPack ZIP |
 | `MNGL_BUILD_LINUX_DEVEL_PACKAGE` | `OFF` | Добавляет Linux x64 install rules и CPack TGZ |
+| `MNGL_BUILD_MACOS_DEVEL_PACKAGE` | `OFF` | Добавляет macOS install rules и CPack TGZ для arm64 или x86_64 |
 | `MNGL_PACKAGE_VERSION` | `0.0.0` при включённой упаковке | Версия создаваемого development-пакета |
 
 Например, для демо без mod targets и тестов:
@@ -241,8 +258,29 @@ cmake --build build-macos --parallel
 
 На macOS SDL GPU использует нативный Metal backend, когда SDL выбирает его;
 MoltenVK для этого не нужен. Для текущего демо встроенные шейдеры HLSL
-компилируются во время запуска в MSL, поэтому `shadercross` и его runtime
-зависимости должны быть доступны приложению. См. [Шейдеры](../gpu/shaders.md).
+компилируются во время запуска: MNGL преобразует HLSL в SPIR-V через
+`glslangValidator`, затем в MSL через `shadercross`. Оба инструмента и их
+runtime-библиотеки входят в macOS runtime-пакеты. CI проверяет встроенные
+vertex- и fragment-шейдеры через `mngl_shader_compile_smoke`.
+macOS-пакеты требуют macOS 15 или новее. См. [Шейдеры](../gpu/shaders.md).
+
+Для ручной сборки development-пакета установите SDL3, SDL3_image и FreeType.
+Задайте `CMAKE_PREFIX_PATH` со всеми префиксами зависимостей и включите
+`MNGL_BUILD_MACOS_DEVEL_PACKAGE`:
+
+```sh
+cmake -S . -B build-macos-package -GNinja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+  -DCMAKE_PREFIX_PATH="$(brew --prefix)" \
+  -DMNGL_BUILD_MACOS_DEVEL_PACKAGE=ON -DMNGL_PACKAGE_VERSION=1.2.3
+cmake --build build-macos-package --target mngl_imgui SDL3_mixer-shared --parallel 4
+cpack --config build-macos-package/CPackConfig.cmake -G TGZ
+```
+
+Для Intel задайте `-DCMAKE_OSX_ARCHITECTURES=x86_64`; имена пакетов используют
+суффиксы `arm64` и `x64`. Development-пакет содержит `libmngl_imgui.dylib`,
+SDL3_mixer, заголовки и CMake targets. SDL3, SDL3_image и FreeType остаются
+зависимостями, устанавливаемыми в окружении приложения.
 
 ### Linux
 
@@ -289,9 +327,14 @@ Runtime workflow запускает аудиосмоук-тест с SDL dummy a
 файл в `glslangValidator.exe`.
 
 Поставки инструментов различаются: у них могут быть дополнительные DLL,
-`.dylib` или `.so`. Runtime workflow собирает инструменты для Windows x64 и
-Linux x86_64, а обычная локальная CMake-сборка их не скачивает и не копирует.
-macOS runtime-пакет пока не собирается.
+`.dylib` или `.so`. Runtime workflow собирает инструменты для Windows x64,
+Linux x86_64, macOS arm64 и x86_64. Обычная локальная CMake-сборка их не
+скачивает и не копирует.
+
+Для Windows и Linux SDL_shadercross компилирует HLSL через DXC. Для macOS пакет
+собирает shadercross без DXC и использует проверенную цепочку glslangValidator
+(HLSL → SPIR-V) и shadercross/SPIRV-Cross (SPIR-V → MSL). Runtime-архив macOS
+включает оба инструмента и их `.dylib` зависимости.
 
 DXIL-файлы в `MNGL/shaders/` рассчитаны на Windows; на macOS и Linux
 используются соответствующие MSL/SPIR-V пути и HLSL-файлы. MoltenVK — Vulkan

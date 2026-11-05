@@ -16,10 +16,11 @@ MSVC x64. Сборка самого MNGL и пакетов описана [от�
 | Runtime | Динамические библиотеки, shader tools, встроенные шейдеры и манифест | Запуск и распространение приложения |
 | Исходники | Код MNGL, демо, моды, тесты и заголовки зависимостей | Разработка библиотеки и подключение свежего API |
 
-Development и runtime пакеты собираются для Windows x64 и Linux x64.
-macOS пока требует подключения из исходников и самостоятельной установки
-зависимостей. Скачивайте пакеты одной версии и подходящей архитектуры:
-заголовки, import libraries и runtime должны соответствовать друг другу.
+Development и runtime пакеты собираются для Windows x64, Linux x86_64 и macOS
+arm64/x86_64. macOS development-пакет рассчитан на установленный SDL3,
+SDL3_image и FreeType; пакет содержит MNGL и SDL3_mixer. Выбирайте архивы одной
+версии и архитектуры: заголовки, библиотеки и runtime должны соответствовать
+друг другу.
 
 Workflow `Package MNGL development kits` в репозитории создаёт development
 артефакты, `Package MNGL runtime` — runtime артефакты. В тегированных релизах
@@ -170,8 +171,9 @@ target_link_libraries(my_game PRIVATE MNGL::MNGL)
 системные SDL3, SDL3_image и FreeType. CMake options аудио нужно задать до
 `add_subdirectory()`; подробности — в [руководстве по аудио](../core/audio.md).
 
-При создании собственного install tree включите
-`MNGL_BUILD_WINDOWS_DEVEL_PACKAGE` или `MNGL_BUILD_LINUX_DEVEL_PACKAGE`:
+При создании собственного install tree включите option для целевой платформы:
+`MNGL_BUILD_WINDOWS_DEVEL_PACKAGE`, `MNGL_BUILD_LINUX_DEVEL_PACKAGE` или
+`MNGL_BUILD_MACOS_DEVEL_PACKAGE`:
 install rules и экспорт CMake config объявляются именно в этих режимах.
 Команды приведены в [руководстве по сборке](building.md).
 

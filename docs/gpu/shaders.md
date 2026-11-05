@@ -4,13 +4,20 @@
 
 `mngl::gpu::shader_loader` создаёт CPU-side assets из HLSL или GLSL:
 
-- HLSL компилируется через `shadercross`.
+- На Windows и Linux HLSL компилируется через `shadercross` и DXC. На macOS
+  MNGL компилирует HLSL в SPIR-V через `glslangValidator`, затем преобразует
+  SPIR-V в MSL через `shadercross`/SPIRV-Cross.
 - GLSL сначала компилируется в SPIR-V через `glslangValidator`; для других выходных форматов используется `shadercross`.
 - `load_binary()` и `load_compute_binary()` загружают уже скомпилированный графический или compute-байткод.
 - `compile_vertex()` и `compile_fragment()` задают стадию без ручной настройки `shader_compile_options`.
 - `compile_compute()` использует тот же набор compile options и возвращает `compute_shader_asset`; его готовый pipeline записывается через `compute_pass`.
 
-Обе внешние программы должны быть доступны через `PATH` или заданы в `shader_compile_options`. Целевой `shader_format` по умолчанию выбирается библиотекой для текущей платформы. Если загрузка байткода запрашивает отражение именованных uniform-полей, нужно также передать соответствующий HLSL-файл: layout восстанавливается из исходника.
+`shadercross` и `glslangValidator` должны быть доступны через `PATH` или заданы в
+`shader_compile_options`. На Windows/Linux для HLSL достаточно shadercross с
+DXC; на macOS нужны оба инструмента. Целевой `shader_format` по умолчанию
+выбирается библиотекой для текущей платформы. Если загрузка байткода запрашивает
+отражение именованных uniform-полей, нужно также передать соответствующий
+HLSL-файл: layout восстанавливается из исходника.
 
 После загрузки asset передаётся в `mngl::gpu::graphics_shader`, который создаёт GPU-объект на конкретном устройстве. GPU поддержка выбранного формата должна быть доступна на этом устройстве.
 

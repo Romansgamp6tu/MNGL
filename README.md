@@ -122,6 +122,8 @@ cmake --build build --config Debug --target mngl_demo
 Windows-сборка использует бинарники из `libs/`; на Linux/macOS зависимости
 нужно установить отдельно. Подробности, платформенные ограничения и ручная
 сборка пакетов: [Сборка и поставка](docs/getting-started/building.md).
+Целевая матрица и обязательные CI-проверки закреплены в
+[политике платформ](docs/design/platform-support.md).
 
 ## Документация
 
