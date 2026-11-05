@@ -403,7 +403,9 @@ namespace mngl
 			}
 		};
 
-		window(const std::string& name, glm::uvec2 size, flags f = flags())
+		window(const std::string& name, glm::uvec2 size) : window(name, size, flags{}) {}
+
+		window(const std::string& name, glm::uvec2 size, flags f)
 		{
 			win = SDL_CreateWindow(name.data(), size.x, size.y, f);
 			if (!win)

@@ -346,7 +346,7 @@ namespace mngl::two_d
 
 		::mngl::rectangle bounds{};
 		color tint{1.0f, 1.0f, 1.0f, 1.0f};
-		transform transform{};
+		::mngl::two_d::transform transform{};
 
 	private:
 		friend class frame_2d;
@@ -396,7 +396,7 @@ namespace mngl::two_d
 		float point_size = 0.01f;
 		bool closed = false;
 		gpu::sprite_blend_mode blend = gpu::sprite_blend_mode::alpha;
-		transform transform{};
+		::mngl::two_d::transform transform{};
 
 	private:
 		friend class frame_2d;
@@ -424,7 +424,7 @@ namespace mngl::two_d
 		color outline_color{0.0f, 0.0f, 0.0f, 0.0f};
 		float outline_thickness = 0.0f;
 		gpu::sprite_blend_mode blend = gpu::sprite_blend_mode::alpha;
-		transform transform{};
+		::mngl::two_d::transform transform{};
 
 	private:
 		friend class frame_2d;

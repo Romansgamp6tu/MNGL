@@ -1126,7 +1126,7 @@ namespace mngl::audio::detail
 			return nullptr;
 		}
 
-		auto find_voice_iterator(std::uint64_t id)
+		std::vector<voice>::iterator find_voice_iterator(std::uint64_t id)
 		{
 			return std::find_if(voices.begin(), voices.end(),
 			                    [id](const voice& voice) { return voice.id == id; });

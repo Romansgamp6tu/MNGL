@@ -11,6 +11,9 @@ option(MNGL_CUSTOM_AUDIO_INTERFACE
 	"Disable the MNGL audio facade and bundled SDL3_mixer integration" OFF)
 option(MNGL_CUSTOM_MIXER_INTERFACE
 	"Disable the MNGL audio facade while keeping SDL3_mixer available directly" OFF)
+option(MNGL_BUILD_WINDOWS_DEVEL_PACKAGE "Create a Windows x64 MNGL development ZIP" OFF)
+option(MNGL_BUILD_LINUX_DEVEL_PACKAGE "Create a Linux x64 MNGL development tarball" OFF)
+option(MNGL_BUILD_MACOS_DEVEL_PACKAGE "Create a macOS MNGL development tarball" OFF)
 
 execute_process(
 	COMMAND git branch --show-current
@@ -87,10 +90,20 @@ else()
 	target_include_directories(mngl_imgui PUBLIC
 		$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 		$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/MNGL>
-		$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui>
 		$<INSTALL_INTERFACE:include>
 		$<INSTALL_INTERFACE:include/imgui>
 	)
+	if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+		# Avoid shadowing the standard <version> header with Dear ImGui's metadata file.
+		target_compile_options(mngl_imgui PRIVATE
+			-idirafter "${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui")
+		target_compile_options(mngl_imgui INTERFACE
+			"$<BUILD_INTERFACE:-idirafter>"
+			"$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui>")
+	else()
+		target_include_directories(mngl_imgui PUBLIC
+			$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui>)
+	endif()
 	target_link_libraries(mngl_imgui PUBLIC SDL3::SDL3)
 
 	add_executable(mngl_demo MNGL/MNGL.cpp)
@@ -98,7 +111,6 @@ else()
 	target_include_directories(mngl_demo PRIVATE
 		"${CMAKE_CURRENT_SOURCE_DIR}/include"
 		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
-		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui"
 	)
 endif()
 
@@ -107,6 +119,9 @@ if(NOT MNGL_CUSTOM_AUDIO_BACKEND AND NOT MNGL_CUSTOM_AUDIO_INTERFACE)
 	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL_mixer/CMakeLists.txt")
 		message(FATAL_ERROR
 			"SDL3_mixer submodule is missing. Clone MNGL with --recurse-submodules or run git submodule update --init --recursive.")
+	endif()
+	if(MNGL_BUILD_WINDOWS_DEVEL_PACKAGE OR MNGL_BUILD_LINUX_DEVEL_PACKAGE OR MNGL_BUILD_MACOS_DEVEL_PACKAGE)
+		set(SDLMIXER_INSTALL ON CACHE BOOL "Install SDL3_mixer with MNGL development packages" FORCE)
 	endif()
 
 	if(MSVC)
@@ -375,9 +390,6 @@ if(WIN32)
 	endif()
 endif()
 
-option(MNGL_BUILD_WINDOWS_DEVEL_PACKAGE "Create a Windows x64 MNGL development ZIP" OFF)
-option(MNGL_BUILD_LINUX_DEVEL_PACKAGE "Create a Linux x64 MNGL development tarball" OFF)
-option(MNGL_BUILD_MACOS_DEVEL_PACKAGE "Create a macOS MNGL development tarball" OFF)
 set(MNGL_DEVEL_PACKAGE_OPTIONS
 	MNGL_BUILD_WINDOWS_DEVEL_PACKAGE
 	MNGL_BUILD_LINUX_DEVEL_PACKAGE
