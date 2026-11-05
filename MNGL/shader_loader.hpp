@@ -32,6 +32,10 @@
 #include <unistd.h>
 #endif
 
+#if !defined(_WIN32)
+extern "C" char** environ;
+#endif
+
 namespace mngl::gpu
 {
 	enum class shader_source_language : std::uint8_t
