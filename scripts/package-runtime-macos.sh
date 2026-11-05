@@ -42,7 +42,7 @@ cmake --build "$mngl_build" --target \
 cmake --install "$mngl_build" --prefix "$stage" --component library
 
 mngl_library=$(find "$mngl_build" -type f -name 'libmngl_imgui.dylib' -print -quit)
-mixer_library=$(find "$mngl_build" -type f -name 'libSDL3_mixer.dylib' -print -quit)
+mixer_library=$(find "$mngl_build" \( -type f -o -type l \) -name 'libSDL3_mixer*.dylib' -print -quit)
 audio_smoke=$(find "$mngl_build" -type f -name 'mngl_audio_runtime_smoke' -print -quit)
 gpu_smoke=$(find "$mngl_build" -type f -name 'mngl_gpu_runtime_smoke' -print -quit)
 shader_smoke=$(find "$mngl_build" -type f -name 'mngl_shader_compile_smoke' -print -quit)
