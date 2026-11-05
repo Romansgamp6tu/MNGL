@@ -256,6 +256,7 @@ namespace mngl::audio
 		friend std::expected<void, error> try_pause(voice_handle);
 		friend std::expected<void, error> try_resume(voice_handle);
 		friend std::expected<void, error> try_stop(voice_handle);
+		friend std::expected<void, error> try_set_position(voice_handle, std::optional<position3d>);
 	};
 
 	// Loads and pre-decodes an effect from a UTF-8 filesystem path.
