@@ -12,10 +12,12 @@
 #include <functional>
 #include <iterator>
 #include <limits>
+#include <locale>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -547,11 +549,11 @@ namespace mngl::mods
 
 			static T decode(std::string_view value)
 			{
+				std::istringstream input{std::string(value)};
+				input.imbue(std::locale::classic());
 				T parsed{};
-				const auto result = std::from_chars(value.data(), value.data() + value.size(), parsed,
-				                                    std::chars_format::general);
-				if (result.ec != std::errc{} || result.ptr != value.data() + value.size() ||
-				    !std::isfinite(parsed))
+				input >> std::noskipws >> parsed;
+				if (!input || input.peek() != std::char_traits<char>::eof() || !std::isfinite(parsed))
 					throw std::runtime_error("floating-point value is malformed or non-finite");
 				return parsed;
 			}

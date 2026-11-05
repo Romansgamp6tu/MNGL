@@ -1,6 +1,8 @@
 #pragma once
 
 #include "registry.hpp"
+#include <locale>
+#include <sstream>
 
 namespace mngl::console
 {
@@ -657,15 +659,10 @@ namespace mngl::console
 			case argument_type::floating_point:
 			{
 				double value{};
-				const auto result = std::from_chars(token.data(), token.data() + token.size(), value,
-				                                    std::chars_format::general);
-				if (result.ec == std::errc::result_out_of_range)
-				{
-					error = "argument '" + spec.name + "' is outside the supported floating-point range";
-					return std::nullopt;
-				}
-				if (result.ec != std::errc{} || result.ptr != token.data() + token.size() ||
-				    !std::isfinite(value))
+				std::istringstream input{std::string(token)};
+				input.imbue(std::locale::classic());
+				input >> std::noskipws >> value;
+				if (!input || input.peek() != std::char_traits<char>::eof() || !std::isfinite(value))
 				{
 					error = "argument '" + spec.name + "' expects a finite number, got '" +
 					        std::string(token) + "'";
