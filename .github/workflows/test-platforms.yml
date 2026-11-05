@@ -1,4 +1,4 @@
-name: Test MNGL mods
+name: Test MNGL platform matrix
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  integration:
+  test-matrix:
     strategy:
       fail-fast: false
       matrix:
@@ -26,7 +26,7 @@ jobs:
             runner: macos-15-intel
             cmake_arch: x86_64
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -56,11 +56,11 @@ jobs:
             brew install freetype
           fi
 
-      - name: Configure Windows integration targets
+      - name: Configure Windows tests and demo
         if: matrix.platform == 'windows'
         run: cmake -S . -B build -A x64 -DBUILD_TESTING=ON -DMNGL_BUILD_MOD_EXAMPLE=ON
 
-      - name: Configure Linux and macOS integration targets
+      - name: Configure Linux and macOS tests and demo
         if: matrix.platform != 'windows'
         shell: bash
         env:
@@ -80,26 +80,26 @@ jobs:
             -DCMAKE_PREFIX_PATH="$prefix" \
             -DBUILD_TESTING=ON -DMNGL_BUILD_MOD_EXAMPLE=ON
 
-      - name: Build mod integration test and test modules
+      - name: Build all targets
         if: matrix.platform == 'windows'
-        run: cmake --build build --config Release --target mngl_mod_integration_test --parallel 4
+        run: cmake --build build --config Release --parallel 4
 
-      - name: Build mod integration test and test modules
+      - name: Build all targets
         if: matrix.platform != 'windows'
-        run: cmake --build build --target mngl_mod_integration_test --parallel 4
+        run: cmake --build build --parallel 4
 
-      - name: Run mod integration test
+      - name: Run CTest suite
         if: matrix.platform == 'windows'
-        run: ctest --test-dir build -C Release -R '^mngl_mod_integration$' --output-on-failure
+        run: ctest --test-dir build -C Release --output-on-failure
 
-      - name: Run mod integration test
+      - name: Run CTest suite
         if: matrix.platform == 'linux'
         env:
           LD_LIBRARY_PATH: ${{ steps.sdl.outputs.prefix }}/lib
-        run: ctest --test-dir build -R '^mngl_mod_integration$' --output-on-failure
+        run: ctest --test-dir build --output-on-failure
 
-      - name: Run mod integration test
+      - name: Run CTest suite (shader toolchain is verified by runtime packaging)
         if: startsWith(matrix.platform, 'macos-')
         env:
           SDL_PREFIX: ${{ steps.sdl.outputs.prefix }}
-        run: DYLD_LIBRARY_PATH="$SDL_PREFIX/lib:$(brew --prefix)/lib" ctest --test-dir build -R '^mngl_mod_integration$' --output-on-failure
+        run: DYLD_LIBRARY_PATH="$SDL_PREFIX/lib:$(brew --prefix)/lib" ctest --test-dir build -E '^mngl_shader_compile_smoke$' --output-on-failure

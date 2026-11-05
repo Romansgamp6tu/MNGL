@@ -10,10 +10,10 @@ MNGL ориентируется на настольные приложения. 
 
 | Платформа | Архитектура | Development-пакет | Runtime-пакет | CI |
 |---|---|---|---|---|
-| Windows | x64 | ZIP | ZIP | Сборка и package-consumer на GitHub-hosted Windows runner |
-| Linux | x86_64 | tar.gz | tar.gz | Сборка и package-consumer на GitHub-hosted Ubuntu 24.04 |
-| macOS | arm64 | tar.gz | tar.gz | Сборка, package-consumer и HLSL-to-MSL smoke на Apple Silicon runner |
-| macOS | x86_64 | tar.gz | tar.gz | Сборка, package-consumer и HLSL-to-MSL smoke на Intel runner |
+| Windows | x64 | ZIP | ZIP | Полная сборка, CTest и package-consumer на GitHub-hosted Windows runner |
+| Linux | x86_64 | tar.gz | tar.gz | Полная сборка, CTest и package-consumer на GitHub-hosted Ubuntu 24.04 |
+| macOS | arm64 | tar.gz | tar.gz | Полная сборка, CTest, package-consumer и HLSL-to-MSL smoke на Apple Silicon runner |
+| macOS | x86_64 | tar.gz | tar.gz | Полная сборка, CTest, package-consumer и HLSL-to-MSL smoke на Intel runner |
 
 Пакеты каждой платформы выпускаются вместе с тегированным релизом. Development-
 архив проверяется после распаковки отдельным CMake-проектом, который находит

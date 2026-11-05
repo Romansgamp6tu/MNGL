@@ -34,9 +34,11 @@ API развивается. Эта документация описывает �
 ## Подключение к своему проекту
 
 Для разработки нужен **development-пакет** MNGL: заголовки, библиотеки и
-CMake-конфигурация. Для Windows x64 предусмотрен ZIP, для Linux x64 — tar.gz.
-Workflow публикует их как Actions artifacts и прикладывает к тегированным
-[релизам](https://github.com/Romansgamp6tu/MNGL/releases).
+CMake-конфигурация. Пакеты выпускаются для Windows x64 (ZIP), Linux x86_64
+(tar.gz), macOS arm64 и x86_64 (tar.gz; macOS 15+). Workflow публикует их как
+Actions artifacts и прикладывает к тегированным
+[релизам](https://github.com/Romansgamp6tu/MNGL/releases). Runtime-пакеты для
+этих же платформ содержат динамические библиотеки и инструменты шейдеров.
 
 Распакуйте подходящий пакет и подключите его в `CMakeLists.txt` приложения:
 
