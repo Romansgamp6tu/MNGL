@@ -1,0 +1,15 @@
+BasedOnStyle: Microsoft
+Standard: Latest
+UseTab: ForIndentation
+IndentWidth: 4
+TabWidth: 4
+ColumnLimit: 110
+BreakBeforeBraces: Allman
+NamespaceIndentation: All
+AccessModifierOffset: -4
+PointerAlignment: Left
+ReferenceAlignment: Left
+SortIncludes: Never
+AllowShortFunctionsOnASingleLine: InlineOnly
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false

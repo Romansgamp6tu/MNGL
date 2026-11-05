@@ -4,6 +4,14 @@ MNGL — C++23 библиотека поверх SDL3 для окон, ввод�
 и SDL GPU. Большая часть реализации находится в заголовках; Dear ImGui
 собирается в отдельную библиотеку `mngl_imgui`.
 
+## Принципы
+
+Обычные задачи решаются короткими вызовами с разумными настройками по умолчанию.
+Детальная настройка и доступ к SDL/GPU подключаются по необходимости; MNGL сохраняет
+свободу архитектуры приложения. Правила API, владения, ошибок и оформления закреплены
+в [стиле библиотеки](docs/design/api-style.md); изменения имён и контрактов описаны
+в [миграции](docs/design/migration.md).
+
 ## Возможности
 
 | Модуль | Что доступно |
@@ -13,8 +21,8 @@ MNGL — C++23 библиотека поверх SDL3 для окон, ввод�
 | Диалоги | Асинхронный выбор файла, нескольких файлов, места сохранения и папки |
 | Буфер обмена | Текст и произвольные MIME-форматы с отложенным поставщиком данных |
 | Файлы и процессы | Фоновое чтение и запись файлов; запуск команд и долгоживущих помощников |
-| Input v2 | Отдельные мыши, клавиатуры, joystick, gamepad, touch и pen; состояния устройств, действия и контексты |
-| Аудио | Эффекты `Sound`, потоковая музыка `Music`, независимые голоса, пауза, повтор и громкость master/music/sfx |
+| input v2 | Отдельные мыши, клавиатуры, joystick, gamepad, touch и pen; состояния устройств, действия и контексты |
+| Аудио | Эффекты, музыка, запись, живой PCM-поток, пространственное позиционирование и управляемые голоса |
 | 2D | Фигуры, текстуры, текст, view, рендер в текстуру, hit testing и пакетная отрисовка |
 | SDL GPU | Устройства, ресурсы, шейдеры, compute, pipeline, проходы и граф кадра |
 | Dear ImGui | Интеграция с окнами MNGL и SDL GPU |
@@ -53,10 +61,11 @@ cmake --build build --config Release
 должны быть доступны при запуске. На Linux также нужны системные development
 пакеты SDL3, SDL3_image и FreeType.
 
-**Аудио в текущем `main`:** API и заголовки SDL3_mixer уже подключены,
-но автоматическая линковка и доставка бинарников SDL3_mixer отложены до
-следующего релиза. При использовании `audio.hpp` подключите SDL3_mixer
-самостоятельно по [инструкции](docs/core/audio.md#sdl3-mixer).
+`MNGL::MNGL` включает SDL3_mixer как транзитивную зависимость. Development- и
+runtime-пакеты содержат нужную библиотеку; при использовании CMake target
+отдельная настройка SDL3_mixer не нужна. Сборка из исходников клонирует её
+вместе с submodule MNGL. Подробности и способы отключения аудиослоя описаны в
+[руководстве по аудио](docs/core/audio.md#sdl3-mixer).
 
 Полный пример проекта, подключение из исходников, настройка runtime и
 разбор типичных ошибок: [Использование MNGL](docs/getting-started/using-mngl.md).
@@ -72,24 +81,26 @@ cmake --build build --config Release
 
 int main()
 {
-    if (SDL_Runtime) {
-        std::cerr << std::string(SDL_Runtime) << '\n';
-        return 1;
-    }
-
-    try {
-        mngl::window window("My game", { 800, 600 });
-        while (mngl::Input::continue_work()) {
-            for (const auto& keyboard : mngl::Input::keyboards()) {
-                if (keyboard.pressed(mngl::scancode::escape)) {
-                    mngl::Input::should_work = false;
-                }
-            }
-        }
-    } catch (const std::exception& error) {
-        std::cerr << error.what() << '\n';
-        return 1;
-    }
+	try
+	{
+		mngl::runtime::ensure();
+		mngl::window window("My game", {800, 600});
+		while (mngl::input::continue_work())
+		{
+			for (const auto& keyboard : mngl::input::keyboards())
+			{
+				if (keyboard.pressed(mngl::scancode::escape))
+				{
+					mngl::input::should_work = false;
+				}
+			}
+		}
+	}
+	catch (const std::exception& error)
+	{
+		std::cerr << error.what() << '\n';
+		return 1;
+	}
 }
 ```
 
@@ -122,7 +133,7 @@ Windows-сборка использует бинарники из `libs/`; на 
 - [Асинхронный ввод-вывод](docs/core/async-io.md)
 - [Запуск процессов и помощников](docs/core/processes.md)
 - [Runtime, идентичность приложения и пути](docs/core/runtime-and-utilities.md)
-- [Звуки и потоковая музыка](docs/core/audio.md)
+- [Аудио](docs/core/audio.md)
 - [2D API](docs/2d/index.md) и [SDL GPU](docs/gpu/index.md)
 - [Создание модов](docs/mods/creating-and-debugging.md)
 - [Карта публичных заголовков](docs/reference/index.md)

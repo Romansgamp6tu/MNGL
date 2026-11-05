@@ -110,21 +110,21 @@ GitHub Actions запускает эту проверку на Windows при pu
 ```cpp
 #include <mngl/mod_loader.hpp>
 
-extern "C" MNGL_MOD_EXPORT bool MNGL_MOD_CALL
-mngl_mod_load_v1(mngl::mods::mod_context& context)
+extern "C" MNGL_MOD_EXPORT bool MNGL_MOD_CALL mngl_mod_load_v1(mngl::mods::mod_context& context)
 {
-    context.around_function<bool(tree_base&, int)>(
-        "demo.tree.insert", 10,
-        [](auto next, tree_base& tree, int key) {
-            // Изменить аргументы, вызвать next один раз и обработать результат.
-            return next(tree, key);
-        });
-    return true;
+	context.around_function<bool(tree_base&, int)>("demo.tree.insert", 10,
+	                                               [](auto next, tree_base& tree, int key)
+	                                               {
+		                                               // Изменить аргументы, вызвать next один раз и
+		                                               // обработать результат.
+		                                               return next(tree, key);
+	                                               });
+	return true;
 }
 
 extern "C" MNGL_MOD_EXPORT void MNGL_MOD_CALL mngl_mod_unload_v1()
 {
-    // Остановить потоки или освободить состояние мода.
+	// Остановить потоки или освободить состояние мода.
 }
 ```
 
@@ -133,10 +133,8 @@ extern "C" MNGL_MOD_EXPORT void MNGL_MOD_CALL mngl_mod_unload_v1()
 Для новой реализации базовый интерфейс должен наследовать `mngl::mods::modable`, а фабрика должна возвращать `std::unique_ptr<Base>`:
 
 ```cpp
-context.add_implementation<tree_base>(
-    "demo.tree", "demo.tree.my-tree", [] {
-        return std::make_unique<my_tree>();
-    });
+context.add_implementation<tree_base>("demo.tree", "demo.tree.my-tree",
+                                      [] { return std::make_unique<my_tree>(); });
 ```
 
 Установка свойства использует объявленный host-ом ID и его точный тип:

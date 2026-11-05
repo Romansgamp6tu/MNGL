@@ -1,0 +1,4 @@
+include/**
+third_party/**
+MNGL/imgui/**
+build*/**

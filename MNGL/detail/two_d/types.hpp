@@ -1,0 +1,486 @@
+#pragma once
+
+#include "common.hpp"
+#include <cstdint>
+#include <initializer_list>
+#include <span>
+#include <vector>
+
+namespace mngl::detail
+{
+	class texture_render_session_impl;
+}
+
+namespace mngl::two_d
+{
+	struct texture_handle
+	{
+		constexpr static std::uint32_t invalid_value = std::numeric_limits<std::uint32_t>::max();
+
+		std::uint32_t value = invalid_value;
+
+		[[nodiscard]] constexpr bool valid() const noexcept { return value != invalid_value; }
+		constexpr bool operator==(const texture_handle&) const noexcept = default;
+	};
+
+	struct texture_region
+	{
+		texture_handle page{};
+		glm::vec4 uv_bounds{0.0f, 0.0f, 1.0f, 1.0f};
+	};
+
+	class texture_store
+	{
+	public:
+		explicit texture_store(const gpu::device& device) : m_device(device)
+		{
+			if (!m_device.raw())
+			{
+				throw std::invalid_argument("Cannot create a 2D texture store with a null GPU device");
+			}
+
+			m_white_page = add(create_white_texture(m_device));
+		}
+
+		texture_store(const texture_store&) = delete;
+		texture_store& operator=(const texture_store&) = delete;
+		texture_store(texture_store&&) = delete;
+		texture_store& operator=(texture_store&&) = delete;
+
+		[[nodiscard]] texture_handle add(::mngl::texture&& page)
+		{
+			if (!page.valid())
+			{
+				throw std::invalid_argument("Cannot register an invalid 2D texture");
+			}
+			if (page.raw_gpu_texture().device_raw() != m_device.raw())
+			{
+				throw std::invalid_argument("2D texture page belongs to a different GPU device");
+			}
+			if (m_pages.size() >= texture_handle::invalid_value)
+			{
+				throw std::length_error("2D texture store exhausted its 32-bit handle space");
+			}
+
+			m_pages.push_back(std::move(page));
+			return texture_handle{static_cast<std::uint32_t>(m_pages.size() - 1)};
+		}
+
+		[[nodiscard]] texture_region region(texture_handle page,
+		                                    glm::vec4 uv_bounds = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f)) const
+		{
+			(void)resolve(page);
+			if (!std::isfinite(uv_bounds.x) || !std::isfinite(uv_bounds.y) || !std::isfinite(uv_bounds.z) ||
+			    !std::isfinite(uv_bounds.w) || uv_bounds.x < 0.0f || uv_bounds.x > 1.0f ||
+			    uv_bounds.y < 0.0f || uv_bounds.y > 1.0f || uv_bounds.z < 0.0f || uv_bounds.z > 1.0f ||
+			    uv_bounds.w < 0.0f || uv_bounds.w > 1.0f)
+			{
+				throw std::invalid_argument("2D texture region UVs must be finite and normalized");
+			}
+			return texture_region{page, uv_bounds};
+		}
+
+		[[nodiscard]] texture_region white_region() const noexcept
+		{
+			return texture_region{m_white_page, glm::vec4(0.0f, 0.0f, 1.0f, 1.0f)};
+		}
+
+		[[nodiscard]] const ::mngl::texture& resolve(texture_handle page) const
+		{
+			if (!page.valid() || page.value >= m_pages.size())
+			{
+				throw std::out_of_range("Invalid 2D texture handle");
+			}
+			return m_pages[page.value];
+		}
+
+		[[nodiscard]] ::mngl::texture& resolve(texture_handle page)
+		{
+			if (!page.valid() || page.value >= m_pages.size())
+			{
+				throw std::out_of_range("Invalid 2D texture handle");
+			}
+			return m_pages[page.value];
+		}
+
+		[[nodiscard]] SDL_GPUDevice* device_raw() const noexcept { return m_device.raw(); }
+
+	private:
+		static ::mngl::texture create_white_texture(const gpu::device& device)
+		{
+			std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface(
+			    SDL_CreateSurface(1, 1, SDL_PIXELFORMAT_RGBA32), &SDL_DestroySurface);
+			if (!surface)
+			{
+				throw ::sdl_error("Failed to create the built-in white texture: ");
+			}
+			if (!surface->pixels || surface->pitch < 4)
+			{
+				throw std::runtime_error("SDL created an invalid surface for the built-in white texture");
+			}
+
+			const std::array<Uint8, 4> white_pixel{255, 255, 255, 255};
+			std::memcpy(surface->pixels, white_pixel.data(), white_pixel.size());
+
+			gpu::command_buffer cmd(device);
+			::mngl::texture texture(device, cmd, surface.get());
+			cmd.submit();
+			return texture;
+		}
+
+		gpu::device m_device;
+		// V2 handles are append-only and stable until the store is destroyed.
+		std::deque<::mngl::texture> m_pages;
+		texture_handle m_white_page{};
+	};
+
+} // namespace mngl::two_d
+
+namespace mngl::two_d
+{
+	class frame_2d;
+}
+
+namespace mngl
+{
+	class drawable
+	{
+	public:
+		virtual ~drawable() = default;
+
+	protected:
+		virtual void draw(two_d::frame_2d& frame) const = 0;
+		virtual void prepare(two_d::frame_2d&) const {}
+
+	private:
+		friend class two_d::frame_2d;
+	};
+
+	struct sprite : drawable
+	{
+		sprite() = default;
+
+		explicit sprite(const texture& image)
+		    : sprite(image, rectangle{glm::vec2(0.0f), image.coordinate_size()})
+		{
+		}
+
+		sprite(const texture& image, const rectangle& destination,
+		       const color& tint = color(1.0f, 1.0f, 1.0f, 1.0f), gpu::quad_draw_state state = {})
+		    : source_texture(&image), destination(destination), tint(tint), state(std::move(state))
+		{
+		}
+
+		sprite(two_d::texture_region source, const rectangle& destination = {},
+		       const color& tint = color(1.0f, 1.0f, 1.0f, 1.0f), gpu::quad_draw_state state = {})
+		    : source(source), destination(destination), tint(tint), state(std::move(state))
+		{
+		}
+
+		sprite(glm::uvec2 target_size, const gpu::graphics_shader_asset& fragment_shader)
+		    : sprite(glm::vec2(target_size), fragment_shader)
+		{
+		}
+
+		sprite(glm::vec2 target_size, const gpu::graphics_shader_asset& fragment_shader)
+		    : m_fragment_shader(&fragment_shader)
+		{
+			const float short_side = std::min(target_size.x, target_size.y);
+			if (short_side > 0.0f)
+			{
+				destination = rectangle{glm::vec2(0.0f), target_size / short_side};
+			}
+		}
+
+		sprite& shader(const gpu::graphics_shader_asset& value) noexcept
+		{
+			m_fragment_shader = &value;
+			return *this;
+		}
+
+		[[nodiscard]] glm::vec2 position() const noexcept { return destination.pos; }
+
+		sprite& position(glm::vec2 value) noexcept
+		{
+			destination.pos = value;
+			return *this;
+		}
+
+		[[nodiscard]] glm::vec2 size() const noexcept { return destination.size; }
+
+		sprite& size(glm::vec2 value) noexcept
+		{
+			destination.size = value;
+			return *this;
+		}
+
+		[[nodiscard]] float rotation() const noexcept { return rotation_radians; }
+
+		sprite& rotation(float value) noexcept
+		{
+			rotation_radians = value;
+			return *this;
+		}
+
+		void on_click(hit_test_callback callback)
+		{
+			detail::set_hit_test_callback(click_callback, std::move(callback));
+		}
+
+		void clear_on_click() noexcept { click_callback.reset(); }
+
+		two_d::texture_region source{};
+		// Non-owning; keep this texture alive until each frame using the sprite is submitted.
+		const texture* source_texture = nullptr;
+		rectangle destination{};
+		glm::vec2 pivot{0.5f, 0.5f};
+		float rotation_radians = 0.0f;
+		two_d::transform transform{};
+		color tint = color(1.0f, 1.0f, 1.0f, 1.0f);
+		gpu::quad_draw_state state{};
+		std::shared_ptr<const hit_test_callback> click_callback{};
+
+	private:
+		friend class two_d::frame_2d;
+		void draw(two_d::frame_2d& frame) const override;
+		void prepare(two_d::frame_2d& frame) const override;
+		const gpu::graphics_shader_asset* m_fragment_shader = nullptr;
+	};
+} // namespace mngl
+
+namespace mngl::two_d
+{
+	struct circle : ::mngl::drawable
+	{
+		circle() = default;
+		circle(glm::vec2 center, float radius, color tint = color(1.0f, 1.0f, 1.0f, 1.0f),
+		       gpu::quad_draw_state state = {})
+		    : center(center), radius(radius), tint(tint), state(std::move(state))
+		{
+		}
+
+		glm::vec2 center{0.0f, 0.0f};
+		float radius = 0.0f;
+		color tint = color(1.0f, 1.0f, 1.0f, 1.0f);
+		gpu::quad_draw_state state{};
+		::mngl::two_d::transform transform{};
+		std::shared_ptr<const ::mngl::hit_test_callback> click_callback{};
+
+		void on_click(::mngl::hit_test_callback callback)
+		{
+			::mngl::detail::set_hit_test_callback(click_callback, std::move(callback));
+		}
+
+		void clear_on_click() noexcept { click_callback.reset(); }
+
+	private:
+		friend class frame_2d;
+		void draw(frame_2d& frame) const override;
+	};
+
+	struct ellipse : ::mngl::drawable
+	{
+		ellipse() = default;
+		ellipse(glm::vec2 center, glm::vec2 radii, color tint = color(1.0f, 1.0f, 1.0f, 1.0f),
+		        gpu::quad_draw_state state = {})
+		    : center(center), radii(radii), tint(tint), state(std::move(state))
+		{
+		}
+
+		glm::vec2 center{0.0f, 0.0f};
+		glm::vec2 radii{0.0f, 0.0f};
+		color tint = color(1.0f, 1.0f, 1.0f, 1.0f);
+		gpu::quad_draw_state state{};
+		::mngl::two_d::transform transform{};
+		std::shared_ptr<const ::mngl::hit_test_callback> click_callback{};
+
+		void on_click(::mngl::hit_test_callback callback)
+		{
+			::mngl::detail::set_hit_test_callback(click_callback, std::move(callback));
+		}
+
+		void clear_on_click() noexcept { click_callback.reset(); }
+
+	private:
+		friend class frame_2d;
+		void draw(frame_2d& frame) const override;
+	};
+
+	struct rounded_rectangle : ::mngl::drawable
+	{
+		rounded_rectangle() = default;
+		rounded_rectangle(::mngl::rectangle bounds, float radius, color tint = color(1.0f, 1.0f, 1.0f, 1.0f),
+		                  gpu::quad_draw_state state = {})
+		    : bounds(bounds), radius(radius), tint(tint), state(std::move(state))
+		{
+		}
+
+		rectangle bounds{};
+		float radius = 0.0f;
+		color tint = color(1.0f, 1.0f, 1.0f, 1.0f);
+		gpu::quad_draw_state state{};
+		::mngl::two_d::transform transform{};
+		std::shared_ptr<const ::mngl::hit_test_callback> click_callback{};
+
+		void on_click(::mngl::hit_test_callback callback)
+		{
+			::mngl::detail::set_hit_test_callback(click_callback, std::move(callback));
+		}
+
+		void clear_on_click() noexcept { click_callback.reset(); }
+
+	private:
+		friend class frame_2d;
+		void draw(frame_2d& frame) const override;
+	};
+
+	class rectangle_shape : public ::mngl::drawable
+	{
+	public:
+		rectangle_shape() = default;
+		explicit rectangle_shape(::mngl::rectangle bounds, color tint = color(1.0f, 1.0f, 1.0f, 1.0f),
+		                         transform object_transform = {})
+		    : bounds(bounds), tint(tint), transform(std::move(object_transform))
+		{
+		}
+
+		::mngl::rectangle bounds{};
+		color tint{1.0f, 1.0f, 1.0f, 1.0f};
+		transform transform{};
+
+	private:
+		friend class frame_2d;
+		void draw(frame_2d& frame) const override;
+	};
+
+	enum class primitive_type : std::uint8_t
+	{
+		points,
+		lines,
+		line_strip,
+		triangles,
+		triangle_strip,
+		triangle_fan
+	};
+
+	class vertex_array : public ::mngl::drawable
+	{
+	public:
+		vertex_array() = default;
+		explicit vertex_array(primitive_type primitive) : primitive(primitive) {}
+		vertex_array(primitive_type primitive, std::span<const glm::vec2> vertices)
+		    : primitive(primitive), vertices(vertices.begin(), vertices.end())
+		{
+		}
+		vertex_array(primitive_type primitive, std::initializer_list<glm::vec2> vertices)
+		    : vertex_array(primitive, std::span<const glm::vec2>(vertices.begin(), vertices.size()))
+		{
+		}
+
+		vertex_array& add_vertex(glm::vec2 value)
+		{
+			vertices.push_back(value);
+			return *this;
+		}
+
+		vertex_array& clear() noexcept
+		{
+			vertices.clear();
+			return *this;
+		}
+
+		primitive_type primitive = primitive_type::triangles;
+		std::vector<glm::vec2> vertices;
+		color tint{1.0f, 1.0f, 1.0f, 1.0f};
+		float line_width = 0.002f;
+		float point_size = 0.01f;
+		bool closed = false;
+		gpu::sprite_blend_mode blend = gpu::sprite_blend_mode::alpha;
+		transform transform{};
+
+	private:
+		friend class frame_2d;
+		void draw(frame_2d& frame) const override;
+	};
+
+	class convex_polygon : public ::mngl::drawable
+	{
+	public:
+		convex_polygon() = default;
+		explicit convex_polygon(std::span<const glm::vec2> points) : points(points.begin(), points.end()) {}
+		convex_polygon(std::initializer_list<glm::vec2> points)
+		    : convex_polygon(std::span<const glm::vec2>(points.begin(), points.size()))
+		{
+		}
+
+		convex_polygon& add_point(glm::vec2 value)
+		{
+			points.push_back(value);
+			return *this;
+		}
+
+		std::vector<glm::vec2> points;
+		color fill_color{1.0f, 1.0f, 1.0f, 1.0f};
+		color outline_color{0.0f, 0.0f, 0.0f, 0.0f};
+		float outline_thickness = 0.0f;
+		gpu::sprite_blend_mode blend = gpu::sprite_blend_mode::alpha;
+		transform transform{};
+
+	private:
+		friend class frame_2d;
+		void draw(frame_2d& frame) const override;
+	};
+
+	class text : public ::mngl::drawable
+	{
+	public:
+		// Owns string text, but borrows its font and, for document text, the document.
+		text(font& typeface, std::string_view value, glm::vec2 top_left, text_draw_options options = {})
+		    : m_typeface(&typeface), m_text(value), m_top_left(top_left), m_options(std::move(options))
+		{
+		}
+
+		text(font& typeface, const text_document& document, glm::vec2 top_left,
+		     text_draw_options options = {})
+		    : m_typeface(&typeface), m_document(&document), m_top_left(top_left),
+		      m_options(std::move(options))
+		{
+		}
+
+		text& set_text(std::string_view value)
+		{
+			m_text.assign(value);
+			m_document = nullptr;
+			return *this;
+		}
+
+		text& set_document(const text_document& value) noexcept
+		{
+			m_document = &value;
+			return *this;
+		}
+
+		text& position(glm::vec2 value) noexcept
+		{
+			m_top_left = value;
+			return *this;
+		}
+
+		text& options(text_draw_options value)
+		{
+			m_options = std::move(value);
+			return *this;
+		}
+
+	private:
+		friend class frame_2d;
+		void draw(frame_2d& frame) const override;
+		void prepare(frame_2d& frame) const override;
+
+		font* m_typeface;
+		std::string m_text;
+		const text_document* m_document = nullptr;
+		glm::vec2 m_top_left{};
+		text_draw_options m_options{};
+	};
+} // namespace mngl::two_d

@@ -10,13 +10,13 @@ panel.enable_hit_testing();
 Окно записывает компактные данные вызовов `draw()` только для включённых целей. Для поиска передайте позицию мыши в логических координатах окна SDL: начало координат находится в левом верхнем углу.
 
 ```cpp
-for (const auto& mouse : mngl::Input::mice())
+for (const auto& mouse : mngl::input::mice())
 {
-    if (const auto hit = window.hit_test(mouse.position()))
-    {
-        const auto& deepest = hit->path.back();
-        const glm::vec2 local = deepest.local_coords;
-    }
+	if (const auto hit = window.hit_test(mouse.position()))
+	{
+		const auto& deepest = hit->path.back();
+		const glm::vec2 local = deepest.local_coords;
+	}
 }
 ```
 
@@ -35,32 +35,28 @@ for (const auto& mouse : mngl::Input::mice())
 Чтобы вызывать обработчик только при нажатии, назначьте его drawable через `on_click()` и явно вызовите `window.dispatch_click()` из цикла ввода:
 
 ```cpp
-mngl::two_d::rounded_rectangle button{ { 0.2f, 0.2f, 0.4f, 0.2f }, 0.05f };
-button.on_click([](
-    const mngl::hit_test_result&,
-    const mngl::hit_test_path_entry& clicked)
-{
-    const glm::vec2 local = clicked.local_coords;
-});
+mngl::two_d::rounded_rectangle button{{0.2f, 0.2f, 0.4f, 0.2f}, 0.05f};
+button.on_click([](const mngl::hit_test_result&, const mngl::hit_test_path_entry& clicked)
+                { const glm::vec2 local = clicked.local_coords; });
 
 bool has_completed_frame = false;
-while (mngl::Input::continue_work())
+while (mngl::input::continue_work())
 {
-    const auto mice = mngl::Input::mice();
-    if (has_completed_frame)
-    {
-        for (const auto& mouse : mice)
-        {
-            if (mouse.pressed(mngl::mouse_button::left))
-            {
-                (void)window.dispatch_click(mouse.position());
-            }
-        }
-    }
-    window.clear();
-    // Draw the next frame here.
-    window.display();
-    has_completed_frame = true;
+	const auto mice = mngl::input::mice();
+	if (has_completed_frame)
+	{
+		for (const auto& mouse : mice)
+		{
+			if (mouse.pressed(mngl::mouse_button::left))
+			{
+				(void)window.dispatch_click(mouse.position());
+			}
+		}
+	}
+	window.clear();
+	// Draw the next frame here.
+	window.display();
+	has_completed_frame = true;
 }
 ```
 

@@ -3,7 +3,7 @@
 `<MNGL/dialog.hpp>` открывает системные диалоги SDL для выбора файла,
 нескольких файлов, места сохранения и папки. Вызов сразу возвращает
 `mngl::dialog::request`; результат появляется позже и проверяется через
-`request::poll()`.
+`request::result()`.
 
 ## Открыть один файл
 
@@ -13,34 +13,33 @@
 #include <MNGL/window.hpp>
 #include <utility>
 
-mngl::window window("Open a file", { 800, 600 });
+mngl::window window("Open a file", {800, 600});
 
 mngl::dialog::file_dialog_options options;
 options.parent = &window;
-options.filters = {
-    { "Images", "png;jpg;jpeg" },
-    { "All files", "*" }
-};
+options.filters = {{"Images", "png;jpg;jpeg"}, {"All files", "*"}};
 
 auto request = mngl::dialog::open_file(std::move(options));
 bool finished = false;
-while (!finished && mngl::Input::continue_work()) {
-    const auto result = request.poll();
-    switch (result.status) {
-    case mngl::dialog::request_status::pending:
-        break;
-    case mngl::dialog::request_status::selected:
-        // result.paths содержит выбранный std::filesystem::path.
-        finished = true;
-        break;
-    case mngl::dialog::request_status::cancelled:
-        finished = true;
-        break;
-    case mngl::dialog::request_status::failed:
-        logger.error("File dialog failed: ", result.error);
-        finished = true;
-        break;
-    }
+while (!finished && mngl::input::continue_work())
+{
+	const auto result = request.result();
+	switch (result.status)
+	{
+	case mngl::dialog::request_status::pending:
+		break;
+	case mngl::dialog::request_status::selected:
+		// result.paths содержит выбранный std::filesystem::path.
+		finished = true;
+		break;
+	case mngl::dialog::request_status::cancelled:
+		finished = true;
+		break;
+	case mngl::dialog::request_status::failed:
+		logger.error("File dialog failed: ", result.error);
+		finished = true;
+		break;
+	}
 }
 ```
 
@@ -79,7 +78,7 @@ auto folder = mngl::dialog::open_folder(std::move(folder_options));
 ## Потоки и время жизни
 
 SDL запускает диалог асинхронно; callback может прийти с другого потока.
-MNGL копирует результат в защищённое состояние, поэтому `request::poll()`
+MNGL копирует результат в защищённое состояние, поэтому `request::result()`
 можно вызывать из игрового цикла. Фильтры и начальный путь копируются в
 контекст запроса и остаются живыми до callback.
 
@@ -90,7 +89,7 @@ MNGL копирует результат в защищённое состоян�
 нужен, callback сам освобождает внутреннее состояние.
 
 В Linux системный диалог может использовать XDG Portal и требует работающий
-цикл событий SDL. `Input::continue_work()` обрабатывает события MNGL; не
+цикл событий SDL. `input::continue_work()` обрабатывает события MNGL; не
 запускайте дополнительный цикл `SDL_PollEvent()`. Само открытие диалога и
 чтение готового результата не требуют отдельного `update()`.
 

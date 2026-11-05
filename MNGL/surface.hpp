@@ -1,4 +1,6 @@
 #pragma once
+
+#include <cstddef>
 #include "utilities.hpp"
 #include "iupdate.h"
 #include <string>
@@ -8,7 +10,7 @@
 
 namespace mngl
 {
-	class surface : Iupdatable
+	class surface : updatable
 	{
 	public:
 		surface(const std::string& path)
@@ -17,7 +19,7 @@ namespace mngl
 			{
 				anim = a;
 			}
-			else if(SDL_Surface* s = IMG_Load(path.c_str()))
+			else if (SDL_Surface* s = IMG_Load(path.c_str()))
 			{
 				single = s;
 			}
@@ -27,19 +29,14 @@ namespace mngl
 			}
 		}
 
-		~surface()
-		{
-			destroy();
-		}
+		~surface() { destroy(); }
 
 		surface(surface&& other) noexcept
-			: Iupdatable()
-			, on_frame_changed(std::move(other.on_frame_changed))
-			, single(std::exchange(other.single, nullptr))
-			, anim(std::exchange(other.anim, nullptr))
-			, current_frame(std::exchange(other.current_frame, 0))
-			, accum(std::exchange(other.accum, 0.0))
-		{ }
+		    : updatable(), on_frame_changed(std::move(other.on_frame_changed)),
+		      single(std::exchange(other.single, nullptr)), anim(std::exchange(other.anim, nullptr)),
+		      current_frame(std::exchange(other.current_frame, 0)), accum(std::exchange(other.accum, 0.0))
+		{
+		}
 
 		surface& operator=(surface&& other) noexcept
 		{
@@ -57,17 +54,21 @@ namespace mngl
 
 		void update(double dt)
 		{
-			if (!animated()) return;
+			if (!animated())
+				return;
 			accum += dt * 1'000;
 			int cur_delay = anim->delays[current_frame];
-			if (cur_delay <= 0) cur_delay = 100;
+			if (cur_delay <= 0)
+				cur_delay = 100;
 			while (accum >= cur_delay)
 			{
 				accum -= cur_delay;
 				current_frame = (current_frame + 1) % anim->count;
-				if (on_frame_changed) on_frame_changed(anim->frames[current_frame]);
+				if (on_frame_changed)
+					on_frame_changed(anim->frames[current_frame]);
 				cur_delay = anim->delays[current_frame];
-				if (cur_delay <= 0) cur_delay = 100;
+				if (cur_delay <= 0)
+					cur_delay = 100;
 			}
 		}
 
@@ -78,27 +79,25 @@ namespace mngl
 			return single;
 		}
 
-		bool animated() const noexcept
-		{
-			return anim && anim->count > 1;
-		}
+		bool animated() const noexcept { return anim && anim->count > 1; }
 
 		std::function<void(SDL_Surface*)> on_frame_changed;
 
 	private:
-		
 		SDL_Surface* single = nullptr;
 		IMG_Animation* anim = nullptr;
 
-		size_t current_frame = 0;
+		std::size_t current_frame = 0;
 		double accum = 0;
 
 		void destroy() noexcept
 		{
-			if (anim) IMG_FreeAnimation(std::exchange(anim, nullptr));
-			if (single) SDL_DestroySurface(std::exchange(single, nullptr));
+			if (anim)
+				IMG_FreeAnimation(std::exchange(anim, nullptr));
+			if (single)
+				SDL_DestroySurface(std::exchange(single, nullptr));
 			current_frame = 0;
 			accum = 0.0;
 		}
 	};
-}
+} // namespace mngl

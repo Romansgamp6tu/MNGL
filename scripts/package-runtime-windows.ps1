@@ -23,8 +23,17 @@ if (Test-Path -LiteralPath $work) {
 }
 New-Item -ItemType Directory -Path $bin -Force | Out-Null
 
-cmake -S $repo -B $mnglBuild -A x64
-cmake --build $mnglBuild --config Release --target mngl_imgui --parallel 4
+cmake -S $repo -B $mnglBuild -A x64 -DBUILD_TESTING=ON
+if ($LASTEXITCODE -ne 0) { throw "MNGL runtime configuration failed with exit code $LASTEXITCODE." }
+cmake --build $mnglBuild --config Release --target mngl_audio_runtime_smoke --parallel 4
+if ($LASTEXITCODE -ne 0) { throw "Audio runtime smoke build failed with exit code $LASTEXITCODE." }
+cmake --build $mnglBuild --config Release --target mngl_gpu_runtime_smoke --parallel 4
+if ($LASTEXITCODE -ne 0) { throw "GPU runtime smoke build failed with exit code $LASTEXITCODE." }
+cmake --install $mnglBuild --config Release --prefix $stage --component library
+if ($LASTEXITCODE -ne 0) { throw "SDL3_mixer runtime install failed with exit code $LASTEXITCODE." }
+if (-not (Test-Path -LiteralPath (Join-Path $bin 'SDL3_mixer.dll'))) {
+	throw 'SDL3_mixer.dll was not installed into the runtime package.'
+}
 
 cmake -S (Join-Path $repo 'upstream/glslang') -B $glslangBuild -A x64 -DCMAKE_BUILD_TYPE=Release -DENABLE_GLSLANG_BINARIES=ON
 cmake --build $glslangBuild --config Release --target glslang-standalone --parallel 4
@@ -70,6 +79,11 @@ cmake --install $shadercrossBuild --config Release
 # setup-sdl is copied afterward so shadercross and MNGL share the same SDL3.
 Get-ChildItem -LiteralPath (Join-Path $repo 'libs') -Filter *.dll -File |
 	Copy-Item -Destination $bin
+$sdlDll = Join-Path $env:SDL_ROOT 'bin/SDL3.dll'
+if (-not (Test-Path -LiteralPath $sdlDll)) {
+	throw "SDL3.dll was not found in the setup-sdl prefix: $sdlDll"
+}
+Copy-Item -LiteralPath $sdlDll -Destination $bin -Force
 $mnglDll = Get-ChildItem -LiteralPath $mnglBuild -Filter mngl_imgui.dll -File -Recurse |
 	Select-Object -First 1
 if (-not $mnglDll) {
@@ -99,6 +113,35 @@ if (-not $crtDirectory) {
 Get-ChildItem -LiteralPath $crtDirectory.FullName -Filter *.dll -File |
 	Copy-Item -Destination $bin -Force
 
+$smokeDirectory = Join-Path $work 'smoke'
+New-Item -ItemType Directory -Path $smokeDirectory -Force | Out-Null
+$audioSmoke = Get-ChildItem -LiteralPath $mnglBuild -Filter mngl_audio_runtime_smoke.exe -File -Recurse |
+	Select-Object -First 1
+if (-not $audioSmoke) {
+	throw 'mngl_audio_runtime_smoke.exe was not produced.'
+}
+Copy-Item -LiteralPath $audioSmoke.FullName -Destination $smokeDirectory
+$gpuSmoke = Get-ChildItem -LiteralPath $mnglBuild -Filter mngl_gpu_runtime_smoke.exe -File -Recurse |
+	Select-Object -First 1
+if (-not $gpuSmoke) {
+	throw 'mngl_gpu_runtime_smoke.exe was not produced.'
+}
+Copy-Item -LiteralPath $gpuSmoke.FullName -Destination $smokeDirectory
+
+$env:PATH = "$bin;$env:PATH"
+$env:SDL_AUDIODRIVER = 'dummy'
+& (Join-Path $smokeDirectory 'mngl_audio_runtime_smoke.exe')
+if ($LASTEXITCODE -ne 0) {
+	throw "Packaged audio smoke test failed with exit code $LASTEXITCODE."
+}
+Remove-Item Env:SDL_AUDIODRIVER -ErrorAction SilentlyContinue
+
+& (Join-Path $smokeDirectory 'mngl_gpu_runtime_smoke.exe')
+$gpuSmokeStatus = $LASTEXITCODE
+if ($gpuSmokeStatus -notin @(0, 77)) {
+	throw "Packaged GPU smoke test failed with exit code $gpuSmokeStatus."
+}
+
 Copy-Item -LiteralPath (Join-Path $repo 'MNGL/shaders') -Destination (Join-Path $stage 'shaders') -Recurse
 Copy-Item -LiteralPath (Join-Path $repo 'MNGL/imgui/LICENSE.txt') -Destination (Join-Path $stage 'MNGL-ImGui-LICENSE.txt')
 
@@ -109,7 +152,11 @@ MNGL source: $($env:GITHUB_SHA)
 glslang: $(git -C (Join-Path $repo 'upstream/glslang') rev-parse HEAD)
 SDL_shadercross: $(git -C (Join-Path $repo 'upstream/SDL_shadercross') rev-parse HEAD)
 SDL3 / SDL3_image: setup-sdl versions $($env:SDL_VERSION) / 3.4.8
+SDL3_mixer: bundled release-3.2.4 with built-in decoders
+SDL3_mixer and built-in decoder license notices: included
 MSVC runtime: app-local x64 Microsoft.VC143.CRT
+Audio runtime smoke: passed
+GPU device smoke: $(if ($gpuSmokeStatus -eq 0) { 'passed' } else { 'skipped; no usable video/GPU backend or adapter on runner' })
 
 This archive contains runtime files and shaders only. It does not include a demo or development headers/import libraries.
 "@

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "utilities.hpp"
+#include "runtime.hpp"
 
 #include <SDL3/SDL_storage.h>
 
@@ -52,9 +52,9 @@ namespace mngl::storage
 				throw std::invalid_argument("storage path cannot be empty");
 			}
 			if (path.front() == '/' || path.find('\\') != std::string_view::npos ||
-				(path.size() >= 2 &&
-					((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
-					path[1] == ':'))
+			    (path.size() >= 2 &&
+			     ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
+			     path[1] == ':'))
 			{
 				throw std::invalid_argument("storage paths must be relative and use '/' separators");
 			}
@@ -78,9 +78,8 @@ namespace mngl::storage
 			{
 				const auto separator = normalized.find('/', component_begin);
 				const auto component_end = separator == std::string::npos ? normalized.size() : separator;
-				const auto component = std::string_view(normalized).substr(
-					component_begin,
-					component_end - component_begin);
+				const auto component =
+				    std::string_view(normalized).substr(component_begin, component_end - component_begin);
 				if (component.empty() || component == "." || component == "..")
 				{
 					throw std::invalid_argument("storage paths cannot contain empty, '.' or '..' components");
@@ -97,9 +96,7 @@ namespace mngl::storage
 		inline std::string path_to_utf8(const std::filesystem::path& path)
 		{
 			const auto encoded = path.u8string();
-			std::string result(
-				reinterpret_cast<const char*>(encoded.data()),
-				encoded.size());
+			std::string result(reinterpret_cast<const char*>(encoded.data()), encoded.size());
 			if (result.find('\0') != std::string::npos)
 			{
 				throw std::invalid_argument("storage root cannot contain a null character");
@@ -111,9 +108,12 @@ namespace mngl::storage
 		{
 			switch (type)
 			{
-			case SDL_PATHTYPE_FILE: return entry_type::file;
-			case SDL_PATHTYPE_DIRECTORY: return entry_type::directory;
-			default: return entry_type::other;
+			case SDL_PATHTYPE_FILE:
+				return entry_type::file;
+			case SDL_PATHTYPE_DIRECTORY:
+				return entry_type::directory;
+			default:
+				return entry_type::other;
 			}
 		}
 
@@ -123,10 +123,8 @@ namespace mngl::storage
 			std::exception_ptr exception;
 		};
 
-		inline SDL_EnumerationResult SDLCALL collect_entry(
-			void* userdata,
-			const char*,
-			const char* filename) noexcept
+		inline SDL_EnumerationResult SDLCALL collect_entry(void* userdata, const char*,
+		                                                   const char* filename) noexcept
 		{
 			auto& state = *static_cast<enumeration_state*>(userdata);
 			if (!filename)
@@ -144,20 +142,17 @@ namespace mngl::storage
 				return SDL_ENUM_FAILURE;
 			}
 		}
-	}
+	} // namespace detail
 
-	class Storage
+	class store
 	{
 	public:
-		Storage(const Storage&) = delete;
-		Storage& operator=(const Storage&) = delete;
+		store(const store&) = delete;
+		store& operator=(const store&) = delete;
 
-		Storage(Storage&& other) noexcept
-			: m_storage(std::exchange(other.m_storage, nullptr))
-		{
-		}
+		store(store&& other) noexcept : m_storage(std::exchange(other.m_storage, nullptr)) {}
 
-		Storage& operator=(Storage&& other) noexcept
+		store& operator=(store&& other) noexcept
 		{
 			if (this != &other)
 			{
@@ -167,26 +162,14 @@ namespace mngl::storage
 			return *this;
 		}
 
-		virtual ~Storage() noexcept
-		{
-			close_noexcept();
-		}
+		virtual ~store() noexcept { close_noexcept(); }
 
-		[[nodiscard]] bool ready() const noexcept
-		{
-			return m_storage && SDL_StorageReady(m_storage);
-		}
+		[[nodiscard]] bool ready() const noexcept { return m_storage && SDL_StorageReady(m_storage); }
 
-		[[nodiscard]] explicit operator bool() const noexcept
-		{
-			return m_storage != nullptr;
-		}
+		[[nodiscard]] explicit operator bool() const noexcept { return m_storage != nullptr; }
 
 		// Non-owning SDL handle for integrations that need lower-level access.
-		[[nodiscard]] SDL_Storage* raw() const noexcept
-		{
-			return m_storage;
-		}
+		[[nodiscard]] SDL_Storage* raw() const noexcept { return m_storage; }
 
 		// Explicit close reports backend flush/close failures. The SDL handle is
 		// released even when SDL_CloseStorage returns false.
@@ -246,11 +229,7 @@ namespace mngl::storage
 			}
 			const std::byte empty_file = {};
 			const void* source = contents.empty() ? &empty_file : contents.data();
-			if (!SDL_WriteStorageFile(
-				m_storage,
-				path.c_str(),
-				source,
-				static_cast<Uint64>(contents.size())))
+			if (!SDL_WriteStorageFile(m_storage, path.c_str(), source, static_cast<Uint64>(contents.size())))
 			{
 				throw sdl_error("failed to write storage file: ");
 			}
@@ -277,7 +256,8 @@ namespace mngl::storage
 				{
 					if (info.type != SDL_PATHTYPE_DIRECTORY)
 					{
-						throw std::runtime_error("storage path already exists and is not a directory: " + current_path);
+						throw std::runtime_error("storage path already exists and is not a directory: " +
+						                         current_path);
 					}
 				}
 				else
@@ -318,27 +298,19 @@ namespace mngl::storage
 			result.reserve(state.names.size());
 			for (auto& name : state.names)
 			{
-				const auto full_path = directory.empty()
-					? name
-					: directory + "/" + name;
+				const auto full_path = directory.empty() ? name : directory + "/" + name;
 				SDL_PathInfo info{};
 				if (!SDL_GetStoragePathInfo(m_storage, full_path.c_str(), &info))
 				{
 					throw sdl_error("failed to get storage entry information: ");
 				}
-				result.push_back({
-					std::move(name),
-					full_path,
-					detail::convert_type(info.type),
-					info.size
-				});
+				result.push_back({std::move(name), full_path, detail::convert_type(info.type), info.size});
 			}
 			return result;
 		}
 
 	private:
-		explicit Storage(SDL_Storage* storage, std::string_view open_error)
-			: m_storage(storage)
+		explicit store(SDL_Storage* storage, std::string_view open_error) : m_storage(storage)
 		{
 			if (!m_storage)
 			{
@@ -368,28 +340,25 @@ namespace mngl::storage
 
 		SDL_Storage* m_storage = nullptr;
 
-		friend class TitleStorage;
-		friend class UserStorage;
-		friend class FileStorage;
+		friend class title_storage;
+		friend class user_storage;
+		friend class file_storage;
 	};
 
-	class TitleStorage final : public Storage
+	class title_storage final : public store
 	{
 	public:
-		TitleStorage()
-			: Storage(SDL_OpenTitleStorage(nullptr, 0), "failed to open title storage: ")
-		{
-		}
+		title_storage() : store(SDL_OpenTitleStorage(nullptr, 0), "failed to open title storage: ") {}
 
-		explicit TitleStorage(const std::filesystem::path& root_override)
-			: Storage(open_override(root_override), "failed to open title storage: ")
+		explicit title_storage(const std::filesystem::path& root_override)
+		    : store(open_override(root_override), "failed to open title storage: ")
 		{
 		}
 
 	private:
-		using Storage::create_directory;
-		using Storage::write_file;
-		using Storage::write_text_file;
+		using store::create_directory;
+		using store::write_file;
+		using store::write_text_file;
 
 		static SDL_Storage* open_override(const std::filesystem::path& root_override)
 		{
@@ -402,34 +371,33 @@ namespace mngl::storage
 		}
 	};
 
-	class UserStorage final : public Storage
+	class user_storage final : public store
 	{
 	public:
-		explicit UserStorage(
-			std::string organization = APP_ORGANIZATION,
-			std::string application = APP_STORAGE_NAME)
-			: Storage(open_user(organization, application), "failed to open user storage: ")
+		explicit user_storage(std::string organization = APP_ORGANIZATION,
+		                      std::string application = APP_STORAGE_NAME)
+		    : store(open_user(organization, application), "failed to open user storage: ")
 		{
 		}
 
 	private:
 		static SDL_Storage* open_user(const std::string& organization, const std::string& application)
 		{
-			if (organization.empty() || application.empty() ||
-				organization.find('\0') != std::string::npos ||
-				application.find('\0') != std::string::npos)
+			if (organization.empty() || application.empty() || organization.find('\0') != std::string::npos ||
+			    application.find('\0') != std::string::npos)
 			{
-				throw std::invalid_argument("user storage organization and application names must be non-empty and contain no null characters");
+				throw std::invalid_argument("user storage organization and application names must be "
+				                            "non-empty and contain no null characters");
 			}
 			return SDL_OpenUserStorage(organization.c_str(), application.c_str(), 0);
 		}
 	};
 
-	class FileStorage final : public Storage
+	class file_storage final : public store
 	{
 	public:
-		explicit FileStorage(const std::filesystem::path& root)
-			: Storage(open_file(root), "failed to open file storage: ")
+		explicit file_storage(const std::filesystem::path& root)
+		    : store(open_file(root), "failed to open file storage: ")
 		{
 		}
 
@@ -444,4 +412,13 @@ namespace mngl::storage
 			return SDL_OpenFileStorage(utf8.c_str());
 		}
 	};
-}
+} // namespace mngl::storage
+
+// Compatibility names; new code uses snake_case.
+namespace mngl::storage
+{
+	using Storage = store;
+	using TitleStorage = title_storage;
+	using UserStorage = user_storage;
+	using FileStorage = file_storage;
+} // namespace mngl::storage

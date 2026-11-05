@@ -1,20 +1,21 @@
 # Процессы
 
-`<MNGL/process.hpp>` предоставляет `mngl::process::Process` для запуска
+`<MNGL/process.hpp>` предоставляет `mngl::process::child_process` для запуска
 внешних программ. Передавайте исполняемый файл и каждый аргумент отдельно:
 MNGL не запускает shell и не интерпретирует shell-операторы вроде `|`, `&&`
 или подстановки переменных.
 
-Для простых команд есть блокирующий `Process::run()`. Он возвращает объединённый
+Для простых команд есть блокирующий `child_process::run()`. Он возвращает объединённый
 вывод stdout и stderr вместе с кодом завершения:
 
 ```cpp
 #include <MNGL/process.hpp>
 
-const auto result = mngl::process::Process::run({ "git", "--version" });
+const auto result = mngl::process::child_process::run({"git", "--version"});
 std::cout.write(result.output.data(), result.output.size());
-if (result.exit_code != 0) {
-    // Команда завершилась с ошибкой.
+if (result.exit_code != 0)
+{
+	// Команда завершилась с ошибкой.
 }
 ```
 
@@ -23,7 +24,7 @@ if (result.exit_code != 0) {
 
 ## Долгоживущий процесс
 
-`Process::launch()` возвращает handle запущенного процесса. Маршруты стандартных
+`child_process::launch()` возвращает handle запущенного процесса. Маршруты стандартных
 потоков настраиваются отдельно: `inherited` использует потоки родителя,
 `discard` отбрасывает данные, а `pipe` позволяет приложению читать или писать
 через методы handle. По умолчанию stdin отбрасывается, а stdout и stderr
@@ -36,8 +37,7 @@ options.standard_input = mngl::process::stdio_route::pipe;
 options.standard_output = mngl::process::stdio_route::pipe;
 options.standard_error = mngl::process::stdio_route::pipe;
 
-auto helper = mngl::process::Process::launch(
-    { "my-helper", "--watch", "project" }, options);
+auto helper = mngl::process::launch({"my-helper", "--watch", "project"}, options);
 
 const std::string_view request = "status\n";
 const auto sent = helper.write_stdin(request);
@@ -45,15 +45,18 @@ const auto sent = helper.write_stdin(request);
 
 const auto output = helper.read_stdout();
 const auto errors = helper.read_stderr();
-if (output.state == mngl::process::stream_state::ready) {
-    // Обработайте output.data; это может быть неполный фрагмент строки.
+if (output.state == mngl::process::stream_state::ready)
+{
+	// Обработайте output.data; это может быть неполный фрагмент строки.
 }
-if (errors.state == mngl::process::stream_state::failed) {
-    logger.error(errors.error);
+if (errors.state == mngl::process::stream_state::failed)
+{
+	logger.error(errors.error);
 }
 
-if (const auto exit_code = helper.poll()) {
-    // Процесс завершился; exit_code содержит его код.
+if (const auto exit_code = helper.poll())
+{
+	// Процесс завершился; exit_code содержит его код.
 }
 ```
 
@@ -73,7 +76,7 @@ stdin может быть частичной; `write_stdin()` возвращае
 - `terminate(force)` останавливает процесс. По умолчанию `force == true`.
 - `id()` возвращает идентификатор процесса, если SDL предоставляет его на
   текущей платформе.
-- Деструктор `Process` освобождает handle SDL, но не завершает сам процесс.
+- Деструктор `child_process` освобождает handle SDL, но не завершает сам процесс.
   Если процесс нужно остановить, вызовите `terminate()` до уничтожения handle.
 
 `launch()` выбрасывает `std::invalid_argument` для пустого списка аргументов,

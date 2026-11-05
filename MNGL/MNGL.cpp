@@ -16,27 +16,24 @@
 
 static int run_demo()
 {
-	if (SDL_Runtime.error())
-	{
-		throw std::runtime_error(SDL_Runtime.content());
-	}
+	mngl::runtime::ensure();
 
 	SDL_Log("MNGL startup checkpoint: SDL initialized");
 	mngl::window::flags window_flags;
-	window_flags.resizeable = true;
+	window_flags.resizable = true;
 	window_flags.high_pixel_density = true;
 
 	float initial_scale = 1.0f;
 	if (auto disp = SDL_GetPrimaryDisplay())
 	{
 		float s = SDL_GetDisplayContentScale(disp);
-		if (s > 0.0f && std::isfinite(s)) initial_scale = s;
+		if (s > 0.0f && std::isfinite(s))
+			initial_scale = s;
 	}
-	const glm::uvec2 base_size{ 960, 720 };
+	const glm::uvec2 base_size{960, 720};
 	const glm::uvec2 initial_size{
-		static_cast<unsigned int>(std::max(1.0f, std::round(base_size.x * initial_scale))),
-		static_cast<unsigned int>(std::max(1.0f, std::round(base_size.y * initial_scale)))
-	};
+	    static_cast<unsigned int>(std::max(1.0f, std::round(base_size.x * initial_scale))),
+	    static_cast<unsigned int>(std::max(1.0f, std::round(base_size.y * initial_scale)))};
 	SDL_Log("MNGL startup checkpoint: creating render window");
 	mngl::render_window window("MNGL — проверка ImGui", initial_size, window_flags);
 	SDL_Log("MNGL startup checkpoint: render window and GPU device ready");
@@ -44,25 +41,20 @@ static int run_demo()
 	auto& workspace_texture = workspace.target();
 	SDL_Log("MNGL startup checkpoint: workspace texture ready");
 	auto& workspace_sprite = workspace.as_sprite();
-	const mngl::rectangle bounds{ 0.2f, 0.2f, 0.8f, 0.5f };
-	const mngl::rectangle panel_bounds{ 0.26666668f, 0.2f, 0.8f, 0.6f };
+	const mngl::rectangle bounds{0.2f, 0.2f, 0.8f, 0.5f};
+	const mngl::rectangle panel_bounds{0.26666668f, 0.2f, 0.8f, 0.6f};
 	const auto panel_resolution = [panel_bounds](glm::uvec2 window_pixels)
 	{
-		const auto short_side = window_pixels.x < window_pixels.y
-			? window_pixels.x
-			: window_pixels.y;
-		const glm::vec2 desired_size =
-			panel_bounds.size * static_cast<float>(short_side);
-		return glm::uvec2{
-			static_cast<unsigned int>(std::max(1.0f, std::round(desired_size.x))),
-			static_cast<unsigned int>(std::max(1.0f, std::round(desired_size.y)))
-		};
+		const auto short_side = window_pixels.x < window_pixels.y ? window_pixels.x : window_pixels.y;
+		const glm::vec2 desired_size = panel_bounds.size * static_cast<float>(short_side);
+		return glm::uvec2{static_cast<unsigned int>(std::max(1.0f, std::round(desired_size.x))),
+		                  static_cast<unsigned int>(std::max(1.0f, std::round(desired_size.y)))};
 	};
 	const auto create_panel_texture = [&window](glm::uvec2 size)
 	{
 		auto result = window.create_texture(size);
 		result.enable_hit_testing();
-		result.set_view(mngl::view{ mngl::rectangle{ 0.0f, 0.0f, 1.2f, 0.9f } });
+		result.set_view(mngl::view{mngl::rectangle{0.0f, 0.0f, 1.2f, 0.9f}});
 		return result;
 	};
 	window.enable_hit_testing();
@@ -77,9 +69,7 @@ static int run_demo()
 	button.transform = panel_transform;
 	int scene_button_clicks = 0;
 	button.on_click([&](const mngl::hit_test_result&, const mngl::hit_test_path_entry&)
-	{
-		++scene_button_clicks;
-	});
+	                { ++scene_button_clicks; });
 	bool has_completed_frame = false;
 	bool show_workspace_surface = true;
 	int mapping_mode = 4;
@@ -87,10 +77,10 @@ static int run_demo()
 	int sample_count = 8;
 	float ui_scale = 1.0f;
 	double precise_value = 0.125;
-	glm::vec2 world_position{ 0.2f, 0.5f };
-	glm::vec3 world_direction{ 0.0f, 0.0f, 1.0f };
-	glm::vec4 tint{ 1.0f, 0.5f, 0.25f, 1.0f };
-	glm::ivec2 grid_position{ 2, 4 };
+	glm::vec2 world_position{0.2f, 0.5f};
+	glm::vec3 world_direction{0.0f, 0.0f, 1.0f};
+	glm::vec4 tint{1.0f, 0.5f, 0.25f, 1.0f};
+	glm::ivec2 grid_position{2, 4};
 	float loading_progress = 0.68f;
 	bool show_texture = true;
 	bool selectable_item = false;
@@ -102,11 +92,9 @@ static int run_demo()
 
 	const auto demo_font_path = []()
 	{
-		const std::filesystem::path candidates[]{
-			"imgui/misc/fonts/Roboto-Medium.ttf",
-			"MNGL/imgui/misc/fonts/Roboto-Medium.ttf",
-			"../../MNGL/imgui/misc/fonts/Roboto-Medium.ttf"
-		};
+		const std::filesystem::path candidates[]{"imgui/misc/fonts/Roboto-Medium.ttf",
+		                                         "MNGL/imgui/misc/fonts/Roboto-Medium.ttf",
+		                                         "../../MNGL/imgui/misc/fonts/Roboto-Medium.ttf"};
 		for (const auto& candidate : candidates)
 		{
 			if (std::filesystem::is_regular_file(candidate))
@@ -121,20 +109,16 @@ static int run_demo()
 	SDL_Log("MNGL startup checkpoint: creating ImGui context");
 	mngl::imgui_context gui(window, font_config);
 	SDL_Log("MNGL startup checkpoint: ImGui context ready");
-	const std::vector<std::string> render_modes{ "Заливка", "Каркас", "Точки" };
-	const std::vector<int> frame_rates{ 30, 60, 120 };
-	const std::vector<mngl::scancode> keys{
-		mngl::scancode::a,
-		mngl::scancode::b,
-		mngl::scancode::escape
-	};
+	const std::vector<std::string> render_modes{"Заливка", "Каркас", "Точки"};
+	const std::vector<int> frame_rates{30, 60, 120};
+	const std::vector<mngl::scancode> keys{mngl::scancode::a, mngl::scancode::b, mngl::scancode::escape};
 	std::string username;
 	const std::regex username_pattern(R"([A-Za-z0-9_]*)");
 
-	while (mngl::Input::continue_work())
+	while (mngl::input::continue_work())
 	{
-		const auto keyboards = mngl::Input::keyboards();
-		const auto mice = mngl::Input::mice();
+		const auto keyboards = mngl::input::keyboards();
+		const auto mice = mngl::input::mice();
 		const glm::vec2 mouse_position = mice.empty() ? glm::vec2{} : mice.front().position();
 		const auto target_size = window.pixel_size();
 		if (target_size.x == 0 || target_size.y == 0)
@@ -154,8 +138,8 @@ static int run_demo()
 			panel = create_panel_texture(next_panel_size);
 		}
 		const auto workspace_size = window.coordinate_size();
-		if (std::any_of(keyboards.begin(), keyboards.end(), [](const mngl::keyboard& device)
-			{ return device.pressed(mngl::scancode::f1); }))
+		if (std::any_of(keyboards.begin(), keyboards.end(),
+		                [](const mngl::keyboard& device) { return device.pressed(mngl::scancode::f1); }))
 		{
 			show_workspace_surface = !show_workspace_surface;
 		}
@@ -189,30 +173,13 @@ static int run_demo()
 				if (controls)
 				{
 					controls.text("Режимы hit-test для offscreen-спрайта:");
-					(void)controls.radio_button(
-						"Окно целиком",
-						mapping_mode,
-						0);
-					(void)controls.radio_button(
-						"Смещение + масштаб",
-						mapping_mode,
-						1);
-					(void)controls.radio_button(
-						"Поворот",
-						mapping_mode,
-						2);
-					(void)controls.radio_button(
-						"Обрезка UV",
-						mapping_mode,
-						3);
-					(void)controls.radio_button(
-						"Поворот + обрезка UV",
-						mapping_mode,
-						4);
-					controls.text(std::format(
-						"Курсор окна: {:.1f}, {:.1f}",
-						mouse_position.x,
-						mouse_position.y));
+					(void)controls.radio_button("Окно целиком", mapping_mode, 0);
+					(void)controls.radio_button("Смещение + масштаб", mapping_mode, 1);
+					(void)controls.radio_button("Поворот", mapping_mode, 2);
+					(void)controls.radio_button("Обрезка UV", mapping_mode, 3);
+					(void)controls.radio_button("Поворот + обрезка UV", mapping_mode, 4);
+					controls.text(
+					    std::format("Курсор окна: {:.1f}, {:.1f}", mouse_position.x, mouse_position.y));
 					controls.text("Прокрути панель, попробуй кнопки, поля и ползунки :)");
 					controls.text("Dear ImGui работает напрямую через SDL_GPU.");
 					if (controls.button("Нажми меня :D"))
@@ -221,17 +188,14 @@ static int run_demo()
 					}
 					controls.text(std::format("Нажатия кнопки: {}", imgui_button_clicks));
 					controls.progress_bar(loading_progress);
-					controls.progress_bar(
-						loading_progress,
-						std::format("Загружено {:.0f}%", loading_progress * 100.0f));
+					controls.progress_bar(loading_progress,
+					                      std::format("Загружено {:.0f}%", loading_progress * 100.0f));
 					if (controls.selectable("Выбираемый пункт :)", selectable_item))
 					{
 						selectable_item = !selectable_item;
 					}
-					if (const auto action = controls.context_menu({
-						std::string_view{ "Выбрать" },
-						std::string_view{ "Снять выбор" }
-					}))
+					if (const auto action = controls.context_menu(
+					        {std::string_view{"Выбрать"}, std::string_view{"Снять выбор"}}))
 					{
 						if (*action == "Выбрать")
 						{
@@ -275,13 +239,12 @@ static int run_demo()
 					{
 						controls.text(mngl::to_string(**key));
 					}
-					if (const auto quick_mode = controls.combo("Быстрый режим", { "A", "B" }))
+					if (const auto quick_mode = controls.combo("Быстрый режим", {"A", "B"}))
 					{
 						controls.text(*quick_mode);
 					}
 					if (const auto quality = controls.combo(
-						"Качество",
-						std::initializer_list<std::string>{ "Низкое", "Среднее", "Высокое" }))
+					        "Качество", std::initializer_list<std::string>{"Низкое", "Среднее", "Высокое"}))
 					{
 						controls.text(*quality);
 					}
@@ -295,7 +258,7 @@ static int run_demo()
 					if (show_texture)
 					{
 						const float eff_scale = gui.effective_scale();
-						controls.image(panel, { 180.0f * eff_scale, 135.0f * eff_scale });
+						controls.image(panel, {180.0f * eff_scale, 135.0f * eff_scale});
 					}
 				}
 			}
@@ -316,10 +279,7 @@ static int run_demo()
 					inspector.text("Параметры выбранного объекта");
 					inspector.text(std::format("Число образцов: {}", sample_count));
 					inspector.text(std::format("Масштаб UI: {:.2f}", ui_scale));
-					inspector.text(std::format(
-						"Положение: {}, {}",
-						world_position.x,
-						world_position.y));
+					inspector.text(std::format("Положение: {}, {}", world_position.x, world_position.y));
 				}
 			}
 			{
@@ -330,18 +290,12 @@ static int run_demo()
 					output.text("F1 скрывает UI-спрайт: за ним можно нажать красную 2D-кнопку.");
 					output.text("Измени размер окна: обе offscreen-текстуры подстроятся.");
 					output.text("Перетаскивание UI продолжается за границами поверхности.");
-					output.text(std::format(
-						"Окно: {}x{} пикс. (Масштаб экрана: {:.2f}, UI: {:.2f})",
-						target_size.x,
-						target_size.y,
-						window.display_scale(),
-						gui.effective_scale()));
-					output.text(std::format(
-						"Текстуры: UI {}x{}; сцена {}x{} пикс.",
-						workspace_texture.width(),
-						workspace_texture.height(),
-						panel.width(),
-						panel.height()));
+					output.text(std::format("Окно: {}x{} пикс. (Масштаб экрана: {:.2f}, UI: {:.2f})",
+					                        target_size.x, target_size.y, window.display_scale(),
+					                        gui.effective_scale()));
+					output.text(std::format("Текстуры: UI {}x{}; сцена {}x{} пикс.",
+					                        workspace_texture.width(), workspace_texture.height(),
+					                        panel.width(), panel.height()));
 					output.text(std::format("Нажатия ImGui: {}", imgui_button_clicks));
 					output.text(std::format("Нажатия 2D-кнопки: {}", scene_button_clicks));
 				}
@@ -354,7 +308,7 @@ static int run_demo()
 
 		glm::vec2 sprite_position{};
 		glm::vec2 sprite_size = workspace_size;
-		glm::vec4 sprite_uv{ 0.0f, 0.0f, 1.0f, 1.0f };
+		glm::vec4 sprite_uv{0.0f, 0.0f, 1.0f, 1.0f};
 		float sprite_rotation = 0.0f;
 		const glm::vec2 inset_position = workspace_size * 0.05f;
 		const glm::vec2 inset_size = workspace_size * 0.90f;
@@ -374,31 +328,26 @@ static int run_demo()
 		case 3:
 			sprite_position = inset_position;
 			sprite_size = inset_size;
-			sprite_uv = { 0.08f, 0.08f, 0.92f, 0.92f };
+			sprite_uv = {0.08f, 0.08f, 0.92f, 0.92f};
 			break;
 		case 4:
 			sprite_position = inset_position;
 			sprite_size = inset_size;
 			sprite_rotation = 0.045f;
-			sprite_uv = { 0.05f, 0.05f, 0.95f, 0.95f };
+			sprite_uv = {0.05f, 0.05f, 0.95f, 0.95f};
 			break;
 		default:
 			mapping_mode = 4;
 			break;
 		}
-		workspace_sprite
-			.position(sprite_position)
-			.size(sprite_size)
-			.rotation(sprite_rotation);
+		workspace_sprite.position(sprite_position).size(sprite_size).rotation(sprite_rotation);
 		workspace_sprite.source.uv_bounds = sprite_uv;
 
 		if (!has_completed_frame)
 		{
 			SDL_Log("MNGL startup checkpoint: rendering workspace texture");
 		}
-		auto workspace_render_frame = window.frame(
-			workspace_texture,
-			mngl::color{ 0.0f, 0.0f, 0.0f, 0.0f });
+		auto workspace_render_frame = window.frame(workspace_texture, mngl::color{0.0f, 0.0f, 0.0f, 0.0f});
 		workspace_render_frame.display();
 		if (!has_completed_frame)
 		{
@@ -416,36 +365,31 @@ static int run_demo()
 			}
 		}
 
-		mngl::color fill{ 0.9f, 0.25f, 0.15f, 1.0f };
+		mngl::color fill{0.9f, 0.25f, 0.15f, 1.0f};
 		if (has_completed_frame)
 		{
-			if (const auto hit = window.hit_test(mouse_position);
-				hit && hit->path.size() > 1)
+			if (const auto hit = window.hit_test(mouse_position); hit && hit->path.size() > 1)
 			{
 				const auto local = hit->path.back().local_coords;
-				fill = {
-					local.x / bounds.size.x,
-					local.y / bounds.size.y,
-					0.15f,
-					1.0f
-				};
+				fill = {local.x / bounds.size.x, local.y / bounds.size.y, 0.15f, 1.0f};
 			}
 		}
 		if (scene_button_clicks != 0)
 		{
-			fill = { 0.2f, 0.75f, 0.3f, 1.0f };
+			fill = {0.2f, 0.75f, 0.3f, 1.0f};
 		}
 
 		if (!has_completed_frame)
 		{
 			SDL_Log("MNGL startup checkpoint: rendering panel texture");
 		}
-		auto panel_render_frame = panel.frame(mngl::color{ 0.08f, 0.09f, 0.12f, 1.0f });
-		panel_render_frame.draw([&](mngl::two_d::Frame2D& frame)
-		{
-			button.tint = fill;
-			frame.draw(button);
-		});
+		auto panel_render_frame = panel.frame(mngl::color{0.08f, 0.09f, 0.12f, 1.0f});
+		panel_render_frame.draw(
+		    [&](mngl::two_d::frame_2d& frame)
+		    {
+			    button.tint = fill;
+			    frame.draw(button);
+		    });
 		panel_render_frame.display();
 		if (!has_completed_frame)
 		{
@@ -456,7 +400,7 @@ static int run_demo()
 		{
 			SDL_Log("MNGL startup checkpoint: rendering swapchain");
 		}
-		auto output_frame = window.frame(mngl::color{ 0.08f, 0.09f, 0.12f, 1.0f });
+		auto output_frame = window.frame(mngl::color{0.08f, 0.09f, 0.12f, 1.0f});
 		output_frame.draw(panel_sprite);
 		if (show_workspace_surface)
 		{

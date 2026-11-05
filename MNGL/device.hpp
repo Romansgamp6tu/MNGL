@@ -3,9 +3,31 @@
 #include "window.hpp"
 
 #include <SDL3/SDL_gpu.h>
+#include <expected>
+#include <memory>
 
 namespace mngl::gpu
 {
+	namespace detail
+	{
+		struct device_state
+		{
+			~device_state() noexcept
+			{
+				if (handle)
+				{
+					if (!SDL_WaitForGPUIdle(handle))
+					{
+						SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+						             "Failed to wait for GPU idle during cleanup: %s", SDL_GetError());
+					}
+					SDL_DestroyGPUDevice(handle);
+				}
+			}
+
+			SDL_GPUDevice* handle = nullptr;
+		};
+	} // namespace detail
 
 	enum class texture_format
 	{
@@ -156,21 +178,25 @@ namespace mngl::gpu
 		constexpr static inline SDL_GPUShaderFormat invalid = SDL_GPU_SHADERFORMAT_INVALID;
 	};
 
-#ifdef SDL_PLATFORM_WINDOWS
-#define MNGL_DEFAULT_SHADER_FORMAT shader_formats::dxil
-#elifdef SDL_PLATFORM_MACOS
-#define MNGL_DEFAULT_SHADER_FORMAT shader_formats::msl
+#if defined(SDL_PLATFORM_WINDOWS)
+	inline constexpr SDL_GPUShaderFormat default_shader_format = shader_formats::dxil;
+#elif defined(SDL_PLATFORM_MACOS)
+	inline constexpr SDL_GPUShaderFormat default_shader_format = shader_formats::msl;
 #else
-#define MNGL_DEFAULT_SHADER_FORMAT shader_formats::spirv
+	inline constexpr SDL_GPUShaderFormat default_shader_format = shader_formats::spirv;
+#endif
+
+// Compatibility macro; new code uses the typed namespace constant.
+#ifndef MNGL_DEFAULT_SHADER_FORMAT
+#define MNGL_DEFAULT_SHADER_FORMAT ::mngl::gpu::default_shader_format
 #endif
 
 	class device
 	{
 	public:
+		// Copies share ownership of the SDL device; raw() returns a borrowed handle.
 		constexpr static inline SDL_GPUShaderFormat base_formats =
-			shader_formats::spirv |
-			shader_formats::dxil |
-			shader_formats::msl;
+		    shader_formats::spirv | shader_formats::dxil | shader_formats::msl;
 
 		[[nodiscard]] static const device& global()
 		{
@@ -178,75 +204,55 @@ namespace mngl::gpu
 			return instance;
 		}
 
-		SDL_GPUDevice* raw() const
+		[[nodiscard]] SDL_GPUDevice* raw() const noexcept { return state ? state->handle : nullptr; }
+
+		// Resources and device copies keep the SDL device alive until their last owner is released.
+		device(const device&) noexcept = default;
+		device& operator=(const device&) noexcept = default;
+
+		[[nodiscard]] std::expected<void, sdl_error> try_wait() const
 		{
-			return handle;
+			auto* gpu_device = raw();
+			if (!gpu_device)
+				return std::unexpected(sdl_error::from_message("GPU device is empty"));
+			if (!SDL_WaitForGPUIdle(gpu_device))
+				return std::unexpected(sdl_error("Failed to wait for GPU idle: "));
+			return {};
 		}
 
-		bool wait() const noexcept
+		void wait() const
 		{
-			if (!handle)
-			{
-				return false;
-			}
-
-			if (!SDL_WaitForGPUIdle(handle))
-			{
-				SDL_LogError(
-					SDL_LOG_CATEGORY_APPLICATION,
-					"Failed to wait for GPU idle: %s",
-					SDL_GetError());
-				return false;
-			}
-			return true;
+			auto result = try_wait();
+			if (!result)
+				throw result.error();
 		}
 
-		device(const device&) = delete;
-		device& operator=(const device&) = delete;
-
-		device(device&& o) noexcept : handle(o.handle) { o.handle = nullptr; }
-
-		device& operator=(device&& o) noexcept
-		{
-			if (this != &o)
-			{
-				destroy();
-				handle = o.handle;
-				o.handle = nullptr;
-			}
-			return *this;
-		}
+		device(device&&) noexcept = default;
+		device& operator=(device&&) noexcept = default;
 
 		device(SDL_GPUShaderFormat allowed_formats = -1)
 		{
-			if (allowed_formats == -1) allowed_formats = base_formats;
+			if (allowed_formats == -1)
+				allowed_formats = base_formats;
+			state = std::make_shared<detail::device_state>();
 			SDL_Log("MNGL startup checkpoint: creating SDL GPU device");
-			TRY_SDL(handle = SDL_CreateGPUDevice(allowed_formats, debug_mode, nullptr));
-			const char* driver = SDL_GetGPUDeviceDriver(handle);
+			::mngl::check_sdl(state->handle = SDL_CreateGPUDevice(allowed_formats, debug_mode, nullptr));
+			const char* driver = SDL_GetGPUDeviceDriver(state->handle);
 			SDL_Log("MNGL startup checkpoint: SDL GPU device created with driver %s",
-				driver ? driver : "<unknown>");
+			        driver ? driver : "<unknown>");
 		}
 
-		~device()
-		{
-			destroy();
-		}
+		~device() = default;
 
-		SDL_GPUShaderFormat shader_format() const
-		{
-			return SDL_GetGPUShaderFormats(handle);
-		}
+		SDL_GPUShaderFormat shader_format() const { return SDL_GetGPUShaderFormats(raw()); }
 
 		void claim_window(window& win) const
 		{
 			SDL_Log("MNGL startup checkpoint: claiming window for GPU device");
-			TRY_SDL(SDL_ClaimWindowForGPUDevice(handle, win.raw()));
+			::mngl::check_sdl(SDL_ClaimWindowForGPUDevice(raw(), win.raw()));
 			SDL_Log("MNGL startup checkpoint: window claimed for GPU device");
 		}
-		void release_window(window& win) const
-		{
-			SDL_ReleaseWindowFromGPUDevice(handle, win.raw());
-		}
+		void release_window(window& win) const { SDL_ReleaseWindowFromGPUDevice(raw(), win.raw()); }
 
 		enum class hdr_mode
 		{
@@ -262,31 +268,25 @@ namespace mngl::gpu
 			immediate = SDL_GPU_PRESENTMODE_IMMEDIATE,
 			mailbox = SDL_GPU_PRESENTMODE_MAILBOX
 		};
-		
+
+		void set_swapchain_parameters(window& win, hdr_mode hdr, vsync_mode vsync)
+		{
+			::mngl::check_sdl(SDL_SetGPUSwapchainParameters(raw(), win.raw(),
+			                                                static_cast<SDL_GPUSwapchainComposition>(hdr),
+			                                                static_cast<SDL_GPUPresentMode>(vsync)));
+		}
+
 		void swapchain_parametrs(window& win, hdr_mode hdr, vsync_mode vsync)
 		{
-			TRY_SDL(SDL_SetGPUSwapchainParameters(
-				handle,
-				win.raw(),
-				(SDL_GPUSwapchainComposition)hdr,
-				(SDL_GPUPresentMode)vsync));
+			set_swapchain_parameters(win, hdr, vsync);
 		}
 
 		texture_format swapchain_texture_format(const window& win) const
 		{
-			return (texture_format)SDL_GetGPUSwapchainTextureFormat(handle, win.raw());
-		}
-	private:
-		void destroy() noexcept
-		{
-			if (handle)
-			{
-				(void)wait();
-				SDL_DestroyGPUDevice(handle);
-				handle = nullptr;
-			}
+			return static_cast<texture_format>(SDL_GetGPUSwapchainTextureFormat(raw(), win.raw()));
 		}
 
-		SDL_GPUDevice* handle;
+	private:
+		std::shared_ptr<detail::device_state> state;
 	};
-}
+} // namespace mngl::gpu

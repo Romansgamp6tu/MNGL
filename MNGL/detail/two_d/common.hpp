@@ -1,0 +1,24 @@
+#pragma once
+
+#include "../../batcher2d.hpp"
+#include "../../hit_test.hpp"
+#include "../../text.hpp"
+#include "../../view.hpp"
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cmath>
+#include <concepts>
+#include <cstdint>
+#include <cstring>
+#include <deque>
+#include <functional>
+#include <iterator>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <stdexcept>
+#include <unordered_map>
+#include <utility>
+#include <vector>

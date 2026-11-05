@@ -23,11 +23,11 @@ auto frag = mngl::gpu::shader_loader::compile_fragment("waves.hlsl");
 
 mngl::sprite fullscreen(win.size(), frag);
 
-while (mngl::Input::continue_work())
+while (mngl::input::continue_work())
 {
-    win.clear();
-    win.draw(fullscreen);
-    win.display();
+	win.clear();
+	win.draw(fullscreen);
+	win.display();
 }
 ```
 
@@ -41,7 +41,7 @@ while (mngl::Input::continue_work())
 
 ```cpp
 auto fragment = mngl::gpu::shader_loader::compile_fragment("shaders/fill.hlsl");
-fragment["tint"] = glm::vec4{ 1.0f, 0.2f, 0.4f, 1.0f };
+fragment["tint"] = glm::vec4{1.0f, 0.2f, 0.4f, 1.0f};
 ```
 
 Поддерживаются scalar-значения, GLM-векторы и матрицы, `std::array` и ranges для массивов. Тип и количество компонентов должны соответствовать объявлению шейдера. Отражение учитывает layout MNGL для HLSL; при ручной сборке asset задайте `shader_resource_layout` самостоятельно.

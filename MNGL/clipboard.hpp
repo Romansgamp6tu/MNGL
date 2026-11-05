@@ -1,6 +1,6 @@
 #pragma once
 
-#include "utilities.hpp"
+#include "runtime.hpp"
 
 #include <SDL3/SDL_clipboard.h>
 
@@ -44,10 +44,7 @@ namespace mngl::clipboard
 
 		struct sdl_free_deleter
 		{
-			void operator()(void* value) const noexcept
-			{
-				SDL_free(value);
-			}
+			void operator()(void* value) const noexcept { SDL_free(value); }
 		};
 
 		struct offer_state
@@ -59,10 +56,8 @@ namespace mngl::clipboard
 			std::vector<std::unique_ptr<std::vector<std::byte>>> buffers;
 		};
 
-		inline const void* SDLCALL provide_data(
-			void* userdata,
-			const char* mime_type,
-			size_t* size) noexcept
+		inline const void* SDLCALL provide_data(void* userdata, const char* mime_type,
+		                                        std::size_t* size) noexcept
 		{
 			if (size)
 			{
@@ -74,7 +69,8 @@ namespace mngl::clipboard
 			}
 
 			auto& state = *static_cast<offer_state*>(userdata);
-			if (std::find(state.mime_types.begin(), state.mime_types.end(), mime_type) == state.mime_types.end())
+			if (std::find(state.mime_types.begin(), state.mime_types.end(), mime_type) ==
+			    state.mime_types.end())
 			{
 				return nullptr;
 			}
@@ -111,7 +107,7 @@ namespace mngl::clipboard
 		{
 			delete static_cast<offer_state*>(userdata);
 		}
-	}
+	} // namespace detail
 
 	// Clipboard text is UTF-8. SDL owns and frees its returned buffer via SDL_free.
 	inline void set_text(std::string_view text)
@@ -167,12 +163,12 @@ namespace mngl::clipboard
 		{
 			return SDL_HasPrimarySelectionText();
 		}
-	}
+	} // namespace primary_selection
 
 	// Returns all formats currently offered by the system clipboard.
 	[[nodiscard]] inline std::vector<std::string> mime_types()
 	{
-		size_t count = 0;
+		std::size_t count = 0;
 		std::unique_ptr<char*, detail::sdl_free_deleter> types(SDL_GetClipboardMimeTypes(&count));
 		if (!types)
 		{
@@ -181,7 +177,7 @@ namespace mngl::clipboard
 
 		std::vector<std::string> result;
 		result.reserve(count);
-		for (size_t index = 0; index < count; ++index)
+		for (std::size_t index = 0; index < count; ++index)
 		{
 			result.emplace_back(types.get()[index]);
 		}
@@ -199,16 +195,15 @@ namespace mngl::clipboard
 	{
 		detail::validate_mime_type(mime_type);
 		const std::string terminated(mime_type);
-		size_t size = 0;
-		std::unique_ptr<void, detail::sdl_free_deleter> data(
-			SDL_GetClipboardData(terminated.c_str(), &size));
+		std::size_t size = 0;
+		std::unique_ptr<void, detail::sdl_free_deleter> data(SDL_GetClipboardData(terminated.c_str(), &size));
 		if (!data)
 		{
 			throw sdl_error("failed to get clipboard data: ");
 		}
 
 		const auto* first = static_cast<const std::byte*>(data.get());
-		return { first, first + size };
+		return {first, first + size};
 	}
 
 	// Offers formats to other applications. Data is generated only when a format
@@ -223,10 +218,11 @@ namespace mngl::clipboard
 		{
 			throw std::invalid_argument("clipboard data provider cannot be empty");
 		}
-		for (size_t index = 0; index < mime_types.size(); ++index)
+		for (std::size_t index = 0; index < mime_types.size(); ++index)
 		{
 			detail::validate_mime_type(mime_types[index]);
-			if (std::find(mime_types.begin(), mime_types.begin() + index, mime_types[index]) != mime_types.begin() + index)
+			if (std::find(mime_types.begin(), mime_types.begin() + index, mime_types[index]) !=
+			    mime_types.begin() + index)
 			{
 				throw std::invalid_argument("clipboard offer contains a duplicate MIME type");
 			}
@@ -243,12 +239,8 @@ namespace mngl::clipboard
 			mime_type_names.push_back(type.c_str());
 		}
 
-		if (!SDL_SetClipboardData(
-			detail::provide_data,
-			detail::cleanup_offer,
-			state.get(),
-			mime_type_names.data(),
-			mime_type_names.size()))
+		if (!SDL_SetClipboardData(detail::provide_data, detail::cleanup_offer, state.get(),
+		                          mime_type_names.data(), mime_type_names.size()))
 		{
 			throw sdl_error("failed to set clipboard data: ");
 		}
@@ -262,4 +254,4 @@ namespace mngl::clipboard
 			throw sdl_error("failed to clear clipboard: ");
 		}
 	}
-}
+} // namespace mngl::clipboard

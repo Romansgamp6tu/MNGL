@@ -73,14 +73,10 @@ namespace mngl::dialog
 		inline std::string path_to_utf8(const std::filesystem::path& path)
 		{
 			const auto encoded = path.u8string();
-			return std::string(
-				reinterpret_cast<const char*>(encoded.data()),
-				encoded.size());
+			return std::string(reinterpret_cast<const char*>(encoded.data()), encoded.size());
 		}
 
-		inline void complete(
-			const std::shared_ptr<request_state>& state,
-			result value) noexcept
+		inline void complete(const std::shared_ptr<request_state>& state, result value) noexcept
 		{
 			try
 			{
@@ -93,13 +89,10 @@ namespace mngl::dialog
 			}
 		}
 
-		inline void SDLCALL file_dialog_callback(
-			void* userdata,
-			const char* const* filelist,
-			int filter) noexcept
+		inline void SDLCALL file_dialog_callback(void* userdata, const char* const* filelist,
+		                                         int filter) noexcept
 		{
-			std::unique_ptr<callback_context> context(
-				static_cast<callback_context*>(userdata));
+			std::unique_ptr<callback_context> context(static_cast<callback_context*>(userdata));
 			if (!context)
 			{
 				return;
@@ -112,9 +105,7 @@ namespace mngl::dialog
 				{
 					completed.status = request_status::failed;
 					const char* message = SDL_GetError();
-					completed.error = message && *message
-						? message
-						: "SDL file dialog failed";
+					completed.error = message && *message ? message : "SDL file dialog failed";
 				}
 				else if (!*filelist)
 				{
@@ -172,10 +163,8 @@ namespace mngl::dialog
 			return state;
 		}
 
-		inline std::shared_ptr<request_state> launch_file_dialog(
-			file_dialog_options options,
-			bool allow_many,
-			bool save)
+		inline std::shared_ptr<request_state> launch_file_dialog(file_dialog_options options, bool allow_many,
+		                                                         bool save)
 		{
 			if (options.parent && !options.parent->raw())
 			{
@@ -201,50 +190,33 @@ namespace mngl::dialog
 			context->sdl_filters.reserve(options.filters.size());
 			for (std::size_t index = 0; index < options.filters.size(); ++index)
 			{
-				context->sdl_filters.push_back({
-					context->filter_names[index].c_str(),
-					context->filter_patterns[index].c_str()
-				});
+				context->sdl_filters.push_back(
+				    {context->filter_names[index].c_str(), context->filter_patterns[index].c_str()});
 			}
 
 			const auto raw_window = options.parent ? options.parent->raw() : nullptr;
-			const auto raw_filters = context->sdl_filters.empty()
-				? nullptr
-				: context->sdl_filters.data();
+			const auto raw_filters = context->sdl_filters.empty() ? nullptr : context->sdl_filters.data();
 			const auto filter_count = static_cast<int>(context->sdl_filters.size());
-			const auto default_location = context->default_location.empty()
-				? nullptr
-				: context->default_location.c_str();
+			const auto default_location =
+			    context->default_location.empty() ? nullptr : context->default_location.c_str();
 			auto state = context->state;
 			auto* userdata = context.release();
 
 			if (save)
 			{
-				SDL_ShowSaveFileDialog(
-					file_dialog_callback,
-					userdata,
-					raw_window,
-					raw_filters,
-					filter_count,
-					default_location);
+				SDL_ShowSaveFileDialog(file_dialog_callback, userdata, raw_window, raw_filters, filter_count,
+				                       default_location);
 			}
 			else
 			{
-				SDL_ShowOpenFileDialog(
-					file_dialog_callback,
-					userdata,
-					raw_window,
-					raw_filters,
-					filter_count,
-					default_location,
-					allow_many);
+				SDL_ShowOpenFileDialog(file_dialog_callback, userdata, raw_window, raw_filters, filter_count,
+				                       default_location, allow_many);
 			}
 
 			return state;
 		}
 
-		inline std::shared_ptr<request_state> launch_folder_dialog(
-			folder_dialog_options options)
+		inline std::shared_ptr<request_state> launch_folder_dialog(folder_dialog_options options)
 		{
 			if (options.parent && !options.parent->raw())
 			{
@@ -259,22 +231,16 @@ namespace mngl::dialog
 			}
 
 			const auto raw_window = options.parent ? options.parent->raw() : nullptr;
-			const auto default_location = context->default_location.empty()
-				? nullptr
-				: context->default_location.c_str();
+			const auto default_location =
+			    context->default_location.empty() ? nullptr : context->default_location.c_str();
 			auto state = context->state;
 			auto* userdata = context.release();
 
-			SDL_ShowOpenFolderDialog(
-				file_dialog_callback,
-				userdata,
-				raw_window,
-				default_location,
-				false);
+			SDL_ShowOpenFolderDialog(file_dialog_callback, userdata, raw_window, default_location, false);
 
 			return state;
 		}
-	}
+	} // namespace detail
 
 	class request
 	{
@@ -283,28 +249,25 @@ namespace mngl::dialog
 		request(request&&) noexcept = default;
 		request& operator=(const request&) = default;
 		request& operator=(request&&) noexcept = default;
+		[[nodiscard]] bool valid() const noexcept { return static_cast<bool>(m_state); }
+		explicit operator bool() const noexcept { return valid(); }
 
 		// Returns a thread-safe snapshot. The result remains available on later polls.
-		[[nodiscard]] result poll() const
+		[[nodiscard]] mngl::dialog::result result() const
 		{
 			if (!m_state)
 			{
-				return {
-					request_status::failed,
-					{},
-					{},
-					"Dialog request is empty"
-				};
+				return {request_status::failed, {}, {}, "Dialog request is empty"};
 			}
 			std::lock_guard lock(m_state->mutex);
 			return m_state->value;
 		}
 
+		[[nodiscard]] bool ready() const { return result().status != request_status::pending; }
+		[[nodiscard]] mngl::dialog::result poll() const { return result(); }
+
 	private:
-		explicit request(std::shared_ptr<detail::request_state> state)
-			: m_state(std::move(state))
-		{
-		}
+		explicit request(std::shared_ptr<detail::request_state> state) : m_state(std::move(state)) {}
 
 		std::shared_ptr<detail::request_state> m_state;
 
@@ -333,4 +296,4 @@ namespace mngl::dialog
 	{
 		return request(detail::launch_folder_dialog(std::move(options)));
 	}
-}
+} // namespace mngl::dialog

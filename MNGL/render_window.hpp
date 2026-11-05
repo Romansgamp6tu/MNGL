@@ -27,7 +27,7 @@ namespace mngl
 			virtual void render(gpu::command_buffer& command_buffer, ::mngl::texture& target) = 0;
 			virtual void detach_from_window() noexcept = 0;
 		};
-	}
+	} // namespace detail
 
 	class imgui_context;
 
@@ -38,13 +38,8 @@ namespace mngl
 		void cancel_active_frame(std::uint64_t generation) noexcept;
 
 	public:
-		render_window(
-			const std::string& title,
-			glm::uvec2 size,
-			window::flags flags = window::flags()
-		)
-			: window(title, size, flags)
-			, m_context(two_d::render_context::global())
+		render_window(const std::string& title, glm::uvec2 size, window::flags flags = window::flags())
+		    : window(title, size, flags), m_context(two_d::render_context::global())
 		{
 			m_context.gpu_device().claim_window(*this);
 		}
@@ -88,10 +83,8 @@ namespace mngl
 			m_view.reset();
 		}
 
-		[[nodiscard]] std::optional<::mngl::view> get_view() const
-		{
-			return m_view;
-		}
+		[[nodiscard]] std::optional<::mngl::view> current_view() const { return m_view; }
+		[[nodiscard]] std::optional<::mngl::view> get_view() const { return current_view(); }
 
 		void enable_hit_testing(bool enabled = true)
 		{
@@ -106,10 +99,7 @@ namespace mngl
 			}
 		}
 
-		[[nodiscard]] bool hit_testing_enabled() const noexcept
-		{
-			return m_hit_testing_enabled;
-		}
+		[[nodiscard]] bool hit_testing_enabled() const noexcept { return m_hit_testing_enabled; }
 
 		// The position is in logical window coordinates, with the origin at the top-left.
 		[[nodiscard]] std::optional<hit_test_result> hit_test(glm::vec2 window_position) const
@@ -128,21 +118,18 @@ namespace mngl
 			}
 
 			const auto logical_size = size();
-			if (logical_size.x == 0 || logical_size.y == 0 ||
-				window_position.x < 0.0f || window_position.y < 0.0f ||
-				window_position.x > static_cast<float>(logical_size.x) ||
-				window_position.y > static_cast<float>(logical_size.y))
+			if (logical_size.x == 0 || logical_size.y == 0 || window_position.x < 0.0f ||
+			    window_position.y < 0.0f || window_position.x > static_cast<float>(logical_size.x) ||
+			    window_position.y > static_cast<float>(logical_size.y))
 			{
 				return std::nullopt;
 			}
 
 			const glm::vec2 pixel_position{
-				window_position.x * static_cast<float>(m_hit_test_frame->target_size.x) /
-					static_cast<float>(logical_size.x),
-				(static_cast<float>(logical_size.y) - window_position.y) *
-					static_cast<float>(m_hit_test_frame->target_size.y) /
-					static_cast<float>(logical_size.y)
-			};
+			    window_position.x * static_cast<float>(m_hit_test_frame->target_size.x) /
+			        static_cast<float>(logical_size.x),
+			    (static_cast<float>(logical_size.y) - window_position.y) *
+			        static_cast<float>(m_hit_test_frame->target_size.y) / static_cast<float>(logical_size.y)};
 			return detail::hit_test_frame_at_pixel(*m_hit_test_frame, pixel_position);
 		}
 
@@ -157,42 +144,28 @@ namespace mngl
 		}
 
 		// The target must remain alive until display() finishes this frame.
-		void clear(
-			::mngl::texture& target,
-			const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f)
-		)
+		void clear(::mngl::texture& target, const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f))
 		{
 			begin_target_frame(&target, clear_color);
 		}
 
-		void draw(const drawable& value)
-		{
-			active_frame().draw(value);
-		}
+		void draw(const drawable& value) { active_frame().draw(value); }
 
-		template<typename DrawFunction>
-			requires std::invocable<DrawFunction, two_d::Frame2D&>
+		template <typename DrawFunction>
+		    requires std::invocable<DrawFunction, two_d::frame_2d&>
 		void draw(DrawFunction&& draw_function)
 		{
 			active_frame().draw(std::forward<DrawFunction>(draw_function));
 		}
 
-		void prepare(const drawable& value)
-		{
-			active_frame().prepare(value);
-		}
+		void prepare(const drawable& value) { active_frame().prepare(value); }
 
-		[[nodiscard]] two_d::recording_context create_recording_context(
-			std::size_t expected_draw_count = 0
-		)
+		[[nodiscard]] two_d::recording_context create_recording_context(std::size_t expected_draw_count = 0)
 		{
 			return active_frame().create_recording_context(expected_draw_count);
 		}
 
-		void merge(two_d::recording_context&& context)
-		{
-			active_frame().merge(std::move(context));
-		}
+		void merge(two_d::recording_context&& context) { active_frame().merge(std::move(context)); }
 
 		void display()
 		{
@@ -218,9 +191,8 @@ namespace mngl
 				m_command_buffer->submit();
 				if (m_swapchain_texture)
 				{
-					m_hit_test_frame = m_hit_testing_enabled
-						? m_swapchain_texture->m_hit_test_frame
-						: nullptr;
+					m_hit_test_frame =
+					    m_hit_testing_enabled ? m_swapchain_texture->m_hit_test_frame : nullptr;
 				}
 			}
 			catch (...)
@@ -242,10 +214,7 @@ namespace mngl
 			frame_scope(frame_scope&&) = delete;
 			frame_scope& operator=(frame_scope&&) = delete;
 
-			~frame_scope() noexcept
-			{
-				cancel();
-			}
+			~frame_scope() noexcept { cancel(); }
 
 			void draw(const drawable& value)
 			{
@@ -253,8 +222,8 @@ namespace mngl
 				m_owner->draw(value);
 			}
 
-			template<typename DrawFunction>
-				requires std::invocable<DrawFunction, two_d::Frame2D&>
+			template <typename DrawFunction>
+			    requires std::invocable<DrawFunction, two_d::frame_2d&>
 			void draw(DrawFunction&& draw_function)
 			{
 				ensure_active();
@@ -268,8 +237,7 @@ namespace mngl
 			}
 
 			[[nodiscard]] two_d::recording_context create_recording_context(
-				std::size_t expected_draw_count = 0
-			)
+			    std::size_t expected_draw_count = 0)
 			{
 				ensure_active();
 				return m_owner->create_recording_context(expected_draw_count);
@@ -291,22 +259,14 @@ namespace mngl
 		private:
 			friend class render_window;
 
-			explicit frame_scope(
-				render_window& owner,
-				const color& clear_color
-			)
-				: m_owner(&owner)
+			explicit frame_scope(render_window& owner, const color& clear_color) : m_owner(&owner)
 			{
 				owner.clear(clear_color);
 				m_generation = owner.m_active_frame_generation;
 			}
 
-			frame_scope(
-				render_window& owner,
-				::mngl::texture& target,
-				const color& clear_color
-			)
-				: m_owner(&owner)
+			frame_scope(render_window& owner, ::mngl::texture& target, const color& clear_color)
+			    : m_owner(&owner)
 			{
 				owner.clear(target, clear_color);
 				m_generation = owner.m_active_frame_generation;
@@ -314,8 +274,7 @@ namespace mngl
 
 			void ensure_active() const
 			{
-				if (!m_owner || m_generation == 0 ||
-					m_owner->m_active_frame_generation != m_generation)
+				if (!m_owner || m_generation == 0 || m_owner->m_active_frame_generation != m_generation)
 				{
 					throw std::logic_error("Render-window frame scope is no longer active");
 				}
@@ -333,17 +292,13 @@ namespace mngl
 			std::uint64_t m_generation = 0;
 		};
 
-		[[nodiscard]] frame_scope frame(
-			const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f)
-		)
+		[[nodiscard]] frame_scope frame(const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f))
 		{
 			return frame_scope(*this, clear_color);
 		}
 
-		[[nodiscard]] frame_scope frame(
-			::mngl::texture& target,
-			const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f)
-		)
+		[[nodiscard]] frame_scope frame(::mngl::texture& target,
+		                                const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f))
 		{
 			return frame_scope(*this, target, clear_color);
 		}
@@ -353,15 +308,13 @@ namespace mngl
 		{
 			if (!m_frame || !m_swapchain_texture)
 			{
-				throw std::logic_error("The swapchain texture is only available during an active window frame");
+				throw std::logic_error(
+				    "The swapchain texture is only available during an active window frame");
 			}
 			return *m_swapchain_texture;
 		}
 
-		[[nodiscard]] const gpu::device& gpu_device() const noexcept
-		{
-			return m_context.gpu_device();
-		}
+		[[nodiscard]] const gpu::device& gpu_device() const noexcept { return m_context.gpu_device(); }
 
 		// Without a custom view, coordinates start at the bottom-left and the shorter target side is 1.
 		[[nodiscard]] glm::vec2 coordinate_size() const
@@ -380,8 +333,8 @@ namespace mngl
 			}
 
 			const auto dimensions = pixel_size();
-			const float short_side = static_cast<float>(
-				dimensions.x < dimensions.y ? dimensions.x : dimensions.y);
+			const float short_side =
+			    static_cast<float>(dimensions.x < dimensions.y ? dimensions.x : dimensions.y);
 			if (short_side == 0.0f)
 			{
 				return {};
@@ -390,27 +343,18 @@ namespace mngl
 			{
 				return m_view->visible_area(dimensions).size;
 			}
-			return {
-				static_cast<float>(dimensions.x) / short_side,
-				static_cast<float>(dimensions.y) / short_side
-			};
+			return {static_cast<float>(dimensions.x) / short_side,
+			        static_cast<float>(dimensions.y) / short_side};
 		}
 
-		[[nodiscard]] two_d::texture_store& textures() noexcept
-		{
-			return m_context.textures();
-		}
+		[[nodiscard]] two_d::texture_store& textures() noexcept { return m_context.textures(); }
 
-		[[nodiscard]] two_d::renderer& renderer()
-		{
-			return renderer_for(swapchain_format(), true);
-		}
+		[[nodiscard]] two_d::renderer& renderer() { return renderer_for(swapchain_format(), true); }
 
 		[[nodiscard]] ::mngl::texture create_texture(
-			glm::uvec2 size,
-			gpu::texture_format format = gpu::texture_format::invalid,
-			uint32_t usage = ::mngl::texture::usage::sampler | ::mngl::texture::usage::color_target
-		) const
+		    glm::uvec2 size, gpu::texture_format format = gpu::texture_format::invalid,
+		    std::uint32_t usage = ::mngl::texture::usage::sampler |
+			                      ::mngl::texture::usage::color_target) const
 		{
 			if (format == gpu::texture_format::invalid)
 			{
@@ -457,9 +401,8 @@ namespace mngl
 			}
 
 			// Target textures are borrowed through display().
-			two_d::renderer* active_renderer = target
-				? &renderer_for(*target)
-				: &renderer_for(swapchain_format(), true);
+			two_d::renderer* active_renderer =
+			    target ? &renderer_for(*target) : &renderer_for(swapchain_format(), true);
 			if (target)
 			{
 				target->begin_external_render();
@@ -474,8 +417,8 @@ namespace mngl
 				}
 				else
 				{
-					auto swapchain_target = ::mngl::texture(
-						m_command_buffer->acquire_swapchain_texture(*this));
+					auto swapchain_target =
+					    ::mngl::texture(m_command_buffer->acquire_swapchain_texture(*this));
 					m_swapchain_texture.emplace(std::move(swapchain_target));
 					m_swapchain_texture->enable_hit_testing(m_hit_testing_enabled);
 					m_frame.emplace(active_renderer->begin_frame(*m_swapchain_texture, clear_color));
@@ -502,7 +445,8 @@ namespace mngl
 		{
 			if (!target.valid() || !target.can_render_to() || target.rendering())
 			{
-				throw std::invalid_argument("render_window target must be a valid, idle color-target texture");
+				throw std::invalid_argument(
+				    "render_window target must be a valid, idle color-target texture");
 			}
 			if (target.raw_gpu_texture().device_raw() != gpu_device().raw())
 			{
@@ -511,18 +455,14 @@ namespace mngl
 			return renderer_for(target.format());
 		}
 
-		[[nodiscard]] two_d::renderer& renderer_for(
-			gpu::texture_format format,
-			bool allow_custom_materials = false
-		)
+		[[nodiscard]] two_d::renderer& renderer_for(gpu::texture_format format,
+		                                            bool allow_custom_materials = false)
 		{
 			auto& target_renderer = m_renderers[format];
 			if (!target_renderer)
 			{
-				target_renderer = std::make_unique<two_d::renderer>(
-					gpu_device(),
-					m_context.textures(),
-					format);
+				target_renderer =
+				    std::make_unique<two_d::renderer>(gpu_device(), m_context.textures(), format);
 			}
 			if (allow_custom_materials)
 			{
@@ -540,7 +480,7 @@ namespace mngl
 			}
 		}
 
-		[[nodiscard]] two_d::Frame2D& active_frame()
+		[[nodiscard]] two_d::frame_2d& active_frame()
 		{
 			if (!m_frame)
 			{
@@ -557,7 +497,7 @@ namespace mngl
 		std::shared_ptr<const detail::hit_test_frame> m_hit_test_frame;
 		std::optional<gpu::command_buffer> m_command_buffer;
 		std::optional<::mngl::texture> m_swapchain_texture;
-		std::optional<two_d::Frame2D> m_frame;
+		std::optional<two_d::frame_2d> m_frame;
 		std::uint64_t m_next_frame_generation = 0;
 		std::uint64_t m_active_frame_generation = 0;
 		detail::render_window_overlay* m_overlay = nullptr;
@@ -583,19 +523,15 @@ namespace mngl
 	class resizable_texture
 	{
 	public:
-		explicit resizable_texture(
-			render_window& window,
-			gpu::texture_format format = gpu::texture_format::invalid,
-			uint32_t usage = texture::usage::sampler | texture::usage::color_target
-		)
-			: m_window(window)
-			, m_format(format)
-			, m_usage(usage)
+		explicit resizable_texture(render_window& window,
+		                           gpu::texture_format format = gpu::texture_format::invalid,
+		                           std::uint32_t usage = texture::usage::sampler |
+		                                                 texture::usage::color_target)
+		    : m_window(window), m_format(format), m_usage(usage)
 		{
 			if ((usage & texture::usage::color_target) == 0)
 			{
-				throw std::invalid_argument(
-					"A resizable texture must have color_target usage");
+				throw std::invalid_argument("A resizable texture must have color_target usage");
 			}
 		}
 
@@ -610,7 +546,7 @@ namespace mngl
 			if (!m_target.valid())
 			{
 				throw std::logic_error(
-					"Cannot access a resizable texture while its window has zero pixel size");
+				    "Cannot access a resizable texture while its window has zero pixel size");
 			}
 			return m_target;
 		}
@@ -622,9 +558,7 @@ namespace mngl
 
 			const auto viewport = m_window.coordinate_size();
 			if (viewport.x > 0.0f && viewport.y > 0.0f &&
-				(!m_has_sprite_size ||
-					m_sprite_size.x != viewport.x ||
-					m_sprite_size.y != viewport.y))
+			    (!m_has_sprite_size || m_sprite_size.x != viewport.x || m_sprite_size.y != viewport.y))
 			{
 				m_sprite.size(viewport);
 				m_sprite_size = viewport;
@@ -638,23 +572,19 @@ namespace mngl
 		{
 			const auto requested_size = m_window.pixel_size();
 			if (requested_size.x == 0 || requested_size.y == 0 ||
-				(m_target.valid() && m_target.size() == requested_size))
+			    (m_target.valid() && m_target.size() == requested_size))
 			{
 				return;
 			}
 			if (m_target.rendering())
 			{
-				throw std::logic_error(
-					"Cannot resize a texture while it is being rendered to");
+				throw std::logic_error("Cannot resize a texture while it is being rendered to");
 			}
 
-			auto replacement = m_window.create_texture(
-				requested_size,
-				m_format,
-				m_usage);
+			auto replacement = m_window.create_texture(requested_size, m_format, m_usage);
 			if (m_target.valid())
 			{
-				if (const auto target_view = m_target.get_view())
+				if (const auto target_view = m_target.current_view())
 				{
 					replacement.set_view(*target_view);
 				}
@@ -670,10 +600,10 @@ namespace mngl
 
 		render_window& m_window;
 		gpu::texture_format m_format;
-		uint32_t m_usage;
+		std::uint32_t m_usage;
 		texture m_target;
 		sprite m_sprite;
 		glm::vec2 m_sprite_size{};
 		bool m_has_sprite_size = false;
 	};
-}
+} // namespace mngl

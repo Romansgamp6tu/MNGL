@@ -8,12 +8,8 @@
 
 ```cpp
 mngl::gpu::vertex_layout layout;
-layout.add_buffer<vertex>(0)
-    .add_attribute(
-        0,
-        0,
-        mngl::gpu::vertex_elemetn_fmt::float2,
-        offsetof(vertex, position));
+layout.add_buffer<vertex>(0).add_attribute(0, 0, mngl::gpu::vertex_elemetn_fmt::float2,
+                                           offsetof(vertex, position));
 ```
 
 Атрибуты в shader должны использовать те же locations и совместимые форматы.
@@ -24,11 +20,11 @@ layout.add_buffer<vertex>(0)
 
 ```cpp
 auto pipeline = mngl::gpu::graphics_pipeline_builder{}
-    .set_vertex_shader(vertex_shader)
-    .set_fragment_shader(fragment_shader)
-    .set_vertex_layout(layout)
-    .add_alpha_blend_target(target.format())
-    .build(device);
+                    .set_vertex_shader(vertex_shader)
+                    .set_fragment_shader(fragment_shader)
+                    .set_vertex_layout(layout)
+                    .add_alpha_blend_target(target.format())
+                    .build(device);
 ```
 
 Pipeline должен быть создан для формата целевого color attachment, с которым он будет использоваться.

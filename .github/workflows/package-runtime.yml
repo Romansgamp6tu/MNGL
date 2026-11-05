@@ -43,6 +43,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+          submodules: recursive
 
       - name: Check out pinned glslang
         uses: actions/checkout@v4
@@ -101,6 +102,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+          submodules: recursive
 
       - name: Check out pinned glslang
         uses: actions/checkout@v4

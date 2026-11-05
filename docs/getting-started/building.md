@@ -11,10 +11,11 @@ ImGui собирается в `libmngl_imgui.so`. Предусмотрены dev
 заголовками и CMake targets: Windows x64 ZIP и Linux x64 tar.gz. Отдельные
 runtime-пакеты собираются для Windows x64 и Linux x86_64.
 
-В `main` реализованы Input v2 и аудио поверх SDL3_mixer. Заголовки микшера
-подключены, но его автоматическая линковка и доставка бинарников CI/CD
-отложены до следующего релиза. Для `audio.hpp` нужен отдельный SDL3_mixer;
-см. [руководство по аудио](../core/audio.md#sdl3-mixer).
+В `main` реализованы input v2 и аудио поверх SDL3_mixer. Корневой CMake-проект
+собирает микшер из submodule, связывает его с `MNGL::MNGL` и добавляет библиотеку
+в development- и runtime-пакеты. Для сборки из исходников submodule нужен
+рекурсивный checkout; отдельные шаги линковки приложения не требуются.
+Подробности: [руководство по аудио](../core/audio.md#sdl3-mixer).
 
 CMake также собирает отдельную консольную цель `mngl_mod_host` и динамический
 мод `mngl_example_tree_mod`. Запуск host показывает загрузку мода и вызов
@@ -31,9 +32,9 @@ CMake также собирает отдельную консольную цел
   Dear ImGui.
 - `include/SDL3/`, `include/SDL3_image/`, `include/glm/` — заголовки SDL3,
   SDL3_image и GLM.
-- `third_party/SDL_mixer/` — Git submodule SDL3_mixer `release-3.2.4`;
-  заголовки используются встроенным аудиофасадом, микшер локально не собирается
-  корневым CMake-проектом.
+- `third_party/SDL_mixer/` — Git submodule SDL3_mixer `release-3.2.4`; корневой
+  CMake собирает динамическую библиотеку микшера со встроенными декодерами
+  распространённых форматов.
 - `MNGL/imgui/` — Dear ImGui `v1.92.9b-docking`, включая backend-ы
   SDL3/SDL_GPU и файл шрифта `Roboto-Medium.ttf`. Отдельно скачивать ImGui
   для текущей сборки не нужно.
@@ -46,14 +47,14 @@ PDB-файлы содержат отладочную информацию и д�
 ## Требования
 
 - CMake 3.24 или новее (для CMake-сборки).
-- C++23-компилятор и стандартная библиотека с поддержкой используемых
+- C и C++23-компиляторы и стандартная библиотека с поддержкой используемых
   возможностей, включая `std::format` и `std::expected`.
 - SDL3, SDL3_image и FreeType, собранные для той же ОС и архитектуры, что и
   приложение.
 
 Для окон, событий, клавиатуры, мыши и геймпадов отдельная input-библиотека
 не нужна: MNGL использует SDL3. Демо обрабатывает события через
-`mngl::Input::continue_work()`.
+`mngl::input::continue_work()`.
 
 ### Получение исходников
 
@@ -63,8 +64,7 @@ cd MNGL
 ```
 
 Для существующей копии выполните `git submodule update --init --recursive`.
-Submodule содержит исходники и заголовки SDL3_mixer; получение его бинарников
-остаётся отдельным шагом при использовании аудиофасада.
+SDL3_mixer и его встроенные декодеры собираются CMake автоматически.
 
 ### Windows и MSVC
 
@@ -87,11 +87,12 @@ cmake --build build --config Debug --target mngl_demo
 Также можно открыть `MNGL.slnx` и собрать конфигурацию `Debug|x64` или
 `Release|x64`.
 
-В Windows x64 CMake и Visual Studio используют `.lib` из `libs/`. В выходную
-папку приложения копируются `mngl_imgui.dll`, DLL SDL3, SDL3_image и FreeType,
-шейдеры и шрифт ImGui.
+В Windows x64 CMake использует `.lib` из `libs/` и собирает SDL3_mixer из
+исходников. В выходную папку приложения копируются `mngl_imgui.dll`, DLL SDL3,
+SDL3_image и FreeType, шейдеры и шрифт ImGui. Runtime DLL микшера также входит
+в собранные выходные файлы и пакеты.
 
-#### Development ZIP и ImGui DLL
+#### Development-пакеты
 
 GitHub Actions собирает Windows x64 ZIP на GitHub-hosted `windows-latest` runner
 и Linux x64 tar.gz на self-hosted runner при push и для ручного запуска workflow.
@@ -101,14 +102,17 @@ GitHub Actions собирает Windows x64 ZIP на GitHub-hosted `windows-late
 ```powershell
 cmake -S . -B build-package -A x64 `
   -DMNGL_BUILD_WINDOWS_DEVEL_PACKAGE=ON `
-  -DMNGL_PACKAGE_VERSION=1.2.3
+  '-DMNGL_PACKAGE_VERSION=1.2.3'
 cmake --build build-package --config Release --target mngl_imgui --parallel 4
+cmake --build build-package --config Release --target SDL3_mixer-shared --parallel 4
 cpack --config build-package/CPackConfig.cmake -C Release -G ZIP
 ```
 
-Артефакт появится в `build-package/packages/`. В нём находятся `mngl_imgui.dll`
-и import library `mngl_imgui.lib`, заголовки, SDL3 runtime-зависимости и CMake
-targets `MNGL::MNGL` и `MNGL::ImGui`. Подключение из проекта-потребителя:
+Артефакт появится в `build-package/packages/`. Он содержит заголовки,
+`mngl_imgui.dll`, SDL3 и SDL3_mixer с import libraries, CMake configs, лицензии
+и targets `MNGL::MNGL` и `MNGL::ImGui`. GitHub Actions после упаковки
+распаковывает архив и собирает из него CMake-потребителя с аудиосмоук-проверкой.
+Подключение в приложении:
 
 ```cmake
 find_package(MNGL CONFIG REQUIRED)
@@ -133,11 +137,13 @@ cmake -S . -B build-devel -GNinja -DCMAKE_BUILD_TYPE=Release \
   -DMNGL_BUILD_LINUX_DEVEL_PACKAGE=ON \
   -DMNGL_PACKAGE_VERSION=1.2.3
 cmake --build build-devel --target mngl_imgui --parallel 4
+cmake --build build-devel --target SDL3_mixer-shared --parallel 4
 cpack --config build-devel/CPackConfig.cmake -G TGZ
 ```
 
 В `build-devel/packages/mngl-devel-linux-x64-1.2.3.tar.gz` находятся
-`libmngl_imgui.so`, заголовки и CMake targets `MNGL::MNGL` и `MNGL::ImGui`.
+`libmngl_imgui.so`, `libSDL3_mixer.so`, заголовки, CMake configs, лицензии и
+targets `MNGL::MNGL` и `MNGL::ImGui`.
 При подключении `find_package(MNGL CONFIG REQUIRED)` на Linux автоматически
 ищутся системные CMake-пакеты SDL3, SDL3_image и FreeType; они должны быть
 установлены в окружении разработчика.
@@ -168,7 +174,9 @@ GitHub Release:
 - `mngl-runtime-linux-x64-X.Y.Z.tar.gz`
 
 В архивах находятся `mngl_imgui.dll`/`libmngl_imgui.so`, SDL3, SDL3_image,
-FreeType и их переносимые зависимости, `shadercross`, `glslangValidator`,
+SDL3_mixer, FreeType и их переносимые зависимости, лицензии микшера и
+встроенных декодеров,
+`shadercross`, `glslangValidator`,
 встроенные `shaders/` и манифест. Demo, headers, `.lib` и статические
 development-библиотеки в runtime-пакет не входят. Распакуйте архив в корень
 папки приложения: тогда `shaders/` окажется рядом с исполняемым файлом,
@@ -199,7 +207,7 @@ Win32-конфигурация Visual Studio и x86 CMake-сборка ищут 
 
 | Параметр | По умолчанию | Назначение |
 |---|---|---|
-| `BUILD_TESTING` | `ON` | Объявляет `mngl_input_compat_test` и его CTest-проверку |
+| `BUILD_TESTING` | `ON` | Объявляет API, audio и GPU runtime smoke-проверки |
 | `MNGL_BUILD_MOD_EXAMPLE` | `ON` | Собирает host, пример мода и связанные mod targets |
 | `MNGL_CUSTOM_AUDIO_BACKEND` | `OFF` | Отключает аудиоинтеграцию MNGL целиком |
 | `MNGL_CUSTOM_AUDIO_INTERFACE` | `OFF` | Отключает фасад и встроенную интеграцию SDL3_mixer |
@@ -238,7 +246,7 @@ MoltenVK для этого не нужен. Для текущего демо в�
 
 ### Linux
 
-Установите CMake, C++23-компилятор и development-пакеты SDL3, SDL3_image и
+Установите CMake, C-компилятор, C++23-компилятор и development-пакеты SDL3, SDL3_image и
 FreeType. CMake должен находить их package-конфигурации; для нестандартного
 префикса используйте `CMAKE_PREFIX_PATH`.
 
@@ -252,9 +260,10 @@ cmake --build build --parallel
 `glslangValidator` можно взять из runtime-пакета выше. Использование SDL GPU
 через Vulkan также требует подходящего Vulkan loader и драйвера GPU.
 
-Runtime workflow собирает Windows и Linux-пакеты, но не запускает demo и не
-проверяет GPU-бэкенды. Для реального запуска нужен подходящий GPU, драйвер и
-Vulkan loader.
+Runtime workflow запускает аудиосмоук-тест с SDL dummy audio и проверяет
+создание SDL GPU device на runner-е. GPU-проверка помечается как пропущенная,
+если на runner-е недоступны video/GPU backend или адаптер; это не заменяет
+тесты рендеринга на физических GPU и драйверах.
 
 ## Shader tools и дополнительные бинарники
 
@@ -300,7 +309,7 @@ DXIL-файлы в `MNGL/shaders/` рассчитаны на Windows; на macOS
 |---|---|---|
 | SDL3 | Окна, события, ввод, SDL GPU | [репозиторий](https://github.com/libsdl-org/SDL), [релизы](https://github.com/libsdl-org/SDL/releases) |
 | SDL3_image | Загрузка изображений | [репозиторий](https://github.com/libsdl-org/SDL_image), [релизы](https://github.com/libsdl-org/SDL_image/releases) |
-| SDL3_mixer | Эффекты и потоковая музыка; заголовки в submodule, бинарники пока подключаются отдельно | [репозиторий](https://github.com/libsdl-org/SDL_mixer), [релизы](https://github.com/libsdl-org/SDL_mixer/releases) |
+| SDL3_mixer | Эффекты, потоковая музыка, пространственное микширование и живые источники; собирается из рекурсивного submodule вместе с декодерами | [репозиторий](https://github.com/libsdl-org/SDL_mixer), [релизы](https://github.com/libsdl-org/SDL_mixer/releases) |
 | GLM | Векторы и математика; заголовки уже в `include/glm/` | [репозиторий](https://github.com/g-truc/glm), [релизы](https://github.com/g-truc/glm/releases) |
 | FreeType | Текущая Windows link-зависимость; `freetype.lib`/`.dll` в `libs/` | [сайт и загрузки](https://freetype.org/download.html), [исходный код](https://gitlab.freedesktop.org/freetype/freetype) |
 | Dear ImGui | UI демо; исходники уже в `MNGL/imgui/` | [репозиторий](https://github.com/ocornut/imgui), [релизы](https://github.com/ocornut/imgui/releases) |
@@ -313,4 +322,4 @@ DXIL-файлы в `MNGL/shaders/` рассчитаны на Windows; на macOS
 При распространении бинарников зафиксируйте версии и SHA-256 вместе с лицензиями
 и notices upstream-зависимостей. Для ручной сборки устанавливайте нужные
 библиотеки и shader tools самостоятельно либо используйте соответствующий
-runtime-пакет. SDL3_mixer пока нужно добавлять отдельно и в этом случае.
+runtime-пакет. SDL3_mixer входит в development- и runtime-пакеты MNGL.

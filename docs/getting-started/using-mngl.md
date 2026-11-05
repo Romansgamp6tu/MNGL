@@ -26,9 +26,10 @@ Workflow `Package MNGL development kits` в репозитории создаё�
 они прикладываются к GitHub Release. Сборка архива не подтверждает работу
 каждого GPU backend на пользовательском оборудовании.
 
-Документация описывает текущий `main`. В частности, Input v2 и `audio.hpp`
-могут отсутствовать в более раннем пакете. Доставка и автоматическая линковка
-бинарников SDL3_mixer ещё ожидают обновления CI/CD; см. [подключение аудио](../core/audio.md#sdl3-mixer).
+Документация описывает текущий `main`. В частности, input v2 и `audio.hpp`
+могут отсутствовать в более раннем пакете. `MNGL::MNGL` автоматически подключает
+SDL3_mixer в пакетах, которые содержат audio v1 или новее; его возможности и
+варианты отключения описаны в [руководстве по аудио](../core/audio.md#sdl3-mixer).
 
 ## Минимальный CMake-проект
 
@@ -68,30 +69,31 @@ include paths target. Единого обязательного umbrella-заг�
 
 int main()
 {
-    if (SDL_Runtime) {
-        std::cerr << std::string(SDL_Runtime) << '\n';
-        return 1;
-    }
-
-    try {
-        mngl::window window("My game", { 800, 600 });
-        while (mngl::Input::continue_work()) {
-            for (const auto& keyboard : mngl::Input::keyboards()) {
-                if (keyboard.pressed(mngl::scancode::escape)) {
-                    mngl::Input::should_work = false;
-                }
-            }
-        }
-    } catch (const std::exception& error) {
-        std::cerr << error.what() << '\n';
-        return 1;
-    }
+	try
+	{
+		mngl::runtime::ensure();
+		mngl::window window("My game", {800, 600});
+		while (mngl::input::continue_work())
+		{
+			for (const auto& keyboard : mngl::input::keyboards())
+			{
+				if (keyboard.pressed(mngl::scancode::escape))
+				{
+					mngl::input::should_work = false;
+				}
+			}
+		}
+	}
+	catch (const std::exception& error)
+	{
+		std::cerr << error.what() << '\n';
+		return 1;
+	}
 }
 ```
 
-SDL запускается автоматически. У глобального `SDL_Runtime` преобразование
-к `bool` означает наличие ошибки; его текст можно получить через
-`std::string(SDL_Runtime)`. После успешного запуска `Input::continue_work()`
+SDL запускается автоматически. `mngl::runtime::ensure()` проверяет запуск и
+бросает `mngl::sdl_error` при ошибке. После успешного запуска `input::continue_work()`
 обрабатывает события и обновляет ввод один раз за итерацию. Проверять
 `pressed()` и `released()` следует после этого вызова. Не добавляйте второй
 цикл `SDL_PollEvent()`, который заберёт события у MNGL.
@@ -196,16 +198,16 @@ Development-пакет содержит заголовки и библиотек
 | `MNGLConfig.cmake` не найден | Нужен development-пакет; укажите его корень в `CMAKE_PREFIX_PATH` или каталог config в `MNGL_DIR` |
 | Не найден `MNGL/*.hpp` | Приложение должно линковаться с `MNGL::MNGL`; пакет должен содержать используемый API |
 | Не найдена DLL или `.so` | Разместите runtime рядом с приложением либо настройте `PATH`/`LD_LIBRARY_PATH` |
-| Не определены символы `MIX_*` | SDL3_mixer пока подключается вручную; проверьте import library и конфигурацию аудио |
+| Не определены символы `MIX_*` | Проверьте, что приложение подключено к `MNGL::MNGL` и использует пакет с SDL3_mixer; при ручной настройке проверьте import library и defines |
 | Не найден SDL3 CMake package на Linux | Установите development-пакеты зависимостей или добавьте их префикс в `CMAKE_PREFIX_PATH` |
 | Окно есть, а 2D не запускается | Проверьте GPU backend, драйвер, `shaders/` и shader tools; простому `mngl::window` они не нужны |
 | Не найден звук, шрифт или изображение | Проверьте рабочий каталог и путь к данным приложения |
-| Предупреждения о `Input::is_key_*` | Перейдите на устройства или `ActionMap` по [руководству по вводу](../core/windows-and-input.md) |
+| Предупреждения о `input::is_key_*` | Перейдите на устройства или `action_map` по [руководству по вводу](../core/windows-and-input.md) |
 
 ## Дальнейшее использование
 
-- [Окна и Input v2](../core/windows-and-input.md): физические устройства, состояния, `ActionMap` и контексты.
-- [Аудио](../core/audio.md): эффекты, потоковая музыка, голоса и громкость.
+- [Окна и input v2](../core/windows-and-input.md): физические устройства, состояния, `action_map` и контексты.
+- [Аудио](../core/audio.md): эффекты, потоковая музыка, захват, живые PCM-источники и позиционирование.
 - [Системные диалоги](../core/dialogs.md): выбор файлов, папок и места сохранения.
 - [Буфер обмена](../core/clipboard.md): текст и произвольные данные с MIME-типами.
 - [Хранилище и файлы](../core/storage.md): ресурсы, пользовательские данные и перечисление каталогов.

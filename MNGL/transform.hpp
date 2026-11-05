@@ -12,15 +12,9 @@ namespace mngl::two_d
 	public:
 		transform() noexcept = default;
 
-		explicit transform(const glm::mat4& value)
-		{
-			matrix(value);
-		}
+		explicit transform(const glm::mat4& value) { matrix(value); }
 
-		[[nodiscard]] const glm::mat4& matrix() const noexcept
-		{
-			return m_matrix;
-		}
+		[[nodiscard]] const glm::mat4& matrix() const noexcept { return m_matrix; }
 
 		transform& matrix(const glm::mat4& value)
 		{
@@ -42,9 +36,7 @@ namespace mngl::two_d
 			return matrix(value);
 		}
 
-		transform& scale(
-			glm::vec2 factors,
-			glm::vec2 origin = glm::vec2(0.0f))
+		transform& scale(glm::vec2 factors, glm::vec2 origin = glm::vec2(0.0f))
 		{
 			glm::mat4 value = glm::translate(m_matrix, glm::vec3(origin, 0.0f));
 			value = glm::scale(value, glm::vec3(factors, 1.0f));
@@ -63,10 +55,7 @@ namespace mngl::two_d
 			return *this;
 		}
 
-		transform& operator*=(const transform& other)
-		{
-			return matrix(m_matrix * other.m_matrix);
-		}
+		transform& operator*=(const transform& other) { return matrix(m_matrix * other.m_matrix); }
 
 		friend transform operator*(transform left, const transform& right)
 		{
@@ -88,19 +77,14 @@ namespace mngl::two_d
 				}
 			}
 
-			if (!nearly_equal(value[0][2], 0.0f) ||
-				!nearly_equal(value[1][2], 0.0f) ||
-				!nearly_equal(value[2][0], 0.0f) ||
-				!nearly_equal(value[2][1], 0.0f) ||
-				!nearly_equal(value[2][2], 1.0f) ||
-				!nearly_equal(value[2][3], 0.0f) ||
-				!nearly_equal(value[3][2], 0.0f) ||
-				!nearly_equal(value[0][3], 0.0f) ||
-				!nearly_equal(value[1][3], 0.0f) ||
-				!nearly_equal(value[3][3], 1.0f))
+			if (!nearly_equal(value[0][2], 0.0f) || !nearly_equal(value[1][2], 0.0f) ||
+			    !nearly_equal(value[2][0], 0.0f) || !nearly_equal(value[2][1], 0.0f) ||
+			    !nearly_equal(value[2][2], 1.0f) || !nearly_equal(value[2][3], 0.0f) ||
+			    !nearly_equal(value[3][2], 0.0f) || !nearly_equal(value[0][3], 0.0f) ||
+			    !nearly_equal(value[1][3], 0.0f) || !nearly_equal(value[3][3], 1.0f))
 			{
 				throw std::invalid_argument(
-					"2D transform matrix must be an affine transform in the XY plane");
+				    "2D transform matrix must be an affine transform in the XY plane");
 			}
 		}
 
@@ -109,6 +93,6 @@ namespace mngl::two_d
 			return std::abs(first - second) <= 1e-6f;
 		}
 
-		glm::mat4 m_matrix{ 1.0f };
+		glm::mat4 m_matrix{1.0f};
 	};
-}
+} // namespace mngl::two_d

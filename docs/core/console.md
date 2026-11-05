@@ -19,25 +19,24 @@ commands.add_command("greet", "Поприветствовать пользова
     .argument<std::string>("name", "Имя пользователя")
     .argument<std::int64_t>("count", "Количество повторений")
     .flag("loud", "Добавить восклицательный знак")
-    .handler([](const std::string& name, std::int64_t count, bool loud)
-    {
-        std::string output;
-        for (std::int64_t i = 0; i < count; ++i)
+    .handler(
+        [](const std::string& name, std::int64_t count, bool loud)
         {
-            output += "Привет, ";
-            output += name;
-            output += loud ? "!\n" : ".\n";
-        }
-        return mngl::console::command_result{ std::move(output), 0 };
-    });
+	        std::string output;
+	        for (std::int64_t i = 0; i < count; ++i)
+	        {
+		        output += "Привет, ";
+		        output += name;
+		        output += loud ? "!\n" : ".\n";
+	        }
+	        return mngl::console::command_result{std::move(output), 0};
+        });
 ```
 
 Хост передаёт в `invoke()` все значения в том же порядке, включая `false` для неуказанного флага, и получает результат команды:
 
 ```cpp
-const std::vector<mngl::console::argument_value> arguments{
-    std::string{"Мир"}, std::int64_t{2}, true
-};
+const std::vector<mngl::console::argument_value> arguments{std::string{"Мир"}, std::int64_t{2}, true};
 const auto result = commands.invoke("greet", arguments);
 std::cout << result.stdout_text;
 ```
@@ -53,18 +52,17 @@ std::cout << result.stdout_text;
 ```cpp
 int run_cli(const mngl::console::registry& commands, int argc, char** argv)
 {
-    mngl::console::dispatcher cli{commands};
+	mngl::console::dispatcher cli{commands};
 
-    // Прямой запуск: app greet Мир 2 --loud
-    const auto result = cli.dispatch(argc, argv);
-    std::cout << result.stdout_text;
-    std::cerr << result.stderr_text;
-    return result.exit_code;
+	// Прямой запуск: app greet Мир 2 --loud
+	const auto result = cli.dispatch(argc, argv);
+	std::cout << result.stdout_text;
+	std::cerr << result.stderr_text;
+	return result.exit_code;
 }
 
 // Тот же разбор для текста из собственного режима --console
-auto console_result = mngl::console::dispatcher{commands}.dispatch(
-    "greet \"Мир с пробелом\" 2 --loud");
+auto console_result = mngl::console::dispatcher{commands}.dispatch("greet \"Мир с пробелом\" 2 --loud");
 ```
 
 Для готового `main()` используйте `run_process()`: он печатает результат и возвращает код завершения. По умолчанию результат человекочитаемый: `stdout_text` идёт в stdout, `stderr_text` — в stderr. Запуск `app greet Мир 2 --loud` выполняет одну команду. Форма `app --console "greet Мир 2 --loud"` также выполняет одну команду, разбирая содержимое строки.
@@ -106,11 +104,11 @@ $exitCode = $LASTEXITCODE
 ```cpp
 int main(int argc, char** argv)
 {
-    mngl::console::registry commands;
-    // Зарегистрировать команды и обработчики, при необходимости захватывающие
-    // состояние приложения.
+	mngl::console::registry commands;
+	// Зарегистрировать команды и обработчики, при необходимости захватывающие
+	// состояние приложения.
 
-    return mngl::console::dispatcher{commands}.run_process(argc, argv);
+	return mngl::console::dispatcher{commands}.run_process(argc, argv);
 }
 ```
 

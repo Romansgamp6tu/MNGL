@@ -14,23 +14,15 @@ auto frame = window.frame();
 auto first = frame.create_recording_context(middle);
 auto second = frame.create_recording_context(sprites.size() - middle);
 
-auto record_range = [&](mngl::two_d::recording_context& context,
-                        std::size_t begin,
-                        std::size_t end)
+auto record_range = [&](mngl::two_d::recording_context& context, std::size_t begin, std::size_t end)
 {
-    for (std::size_t index = begin; index < end; ++index)
-        context.draw(sprites[index]);
-    context.finish();
+	for (std::size_t index = begin; index < end; ++index)
+		context.draw(sprites[index]);
+	context.finish();
 };
 
-auto first_job = std::async(std::launch::async, [&]
-{
-    record_range(first, 0, middle);
-});
-auto second_job = std::async(std::launch::async, [&]
-{
-    record_range(second, middle, sprites.size());
-});
+auto first_job = std::async(std::launch::async, [&] { record_range(first, 0, middle); });
+auto second_job = std::async(std::launch::async, [&] { record_range(second, middle, sprites.size()); });
 first_job.get();
 second_job.get();
 
@@ -39,7 +31,7 @@ frame.merge(std::move(second));
 frame.display();
 ```
 
-`merge()` задаёт порядок отрисовки, а не порядок завершения потоков. Это важно для alpha blending и hit testing. Каждый контекст должен использоваться только одним потоком одновременно; не передавайте worker-ам родительский `Frame2D`. До `merge()` контекст нужно завершить вызовом `finish()`.
+`merge()` задаёт порядок отрисовки, а не порядок завершения потоков. Это важно для alpha blending и hit testing. Каждый контекст должен использоваться только одним потоком одновременно; не передавайте worker-ам родительский `frame_2d`. До `merge()` контекст нужно завершить вызовом `finish()`.
 
 Перед запуском worker-ов подготовьте ресурсы, которые при обычном рисовании создаются лениво. Встроенные shader-спрайты и текст поддерживают `frame.prepare()`:
 
@@ -51,7 +43,7 @@ frame.prepare(title_text);
 // После этого можно создавать recording_context и запускать worker-ы.
 ```
 
-Подготовка shader-спрайта создаёт его automatic material/instance, а подготовка текста растеризует нужные glyph-ы и размещает их в font atlas. Это позволяет worker-ам только читать уже созданные ресурсы. Пользовательский drawable может переопределить protected `prepare(Frame2D&) const` и вызвать `frame.prepare()` для содержащихся в нём объектов; его остальные изменяемые ресурсы тоже нужно подготовить до параллельной записи.
+Подготовка shader-спрайта создаёт его automatic material/instance, а подготовка текста растеризует нужные glyph-ы и размещает их в font atlas. Это позволяет worker-ам только читать уже созданные ресурсы. Пользовательский drawable может переопределить protected `prepare(frame_2d&) const` и вызвать `frame.prepare()` для содержащихся в нём объектов; его остальные изменяемые ресурсы тоже нужно подготовить до параллельной записи.
 
 Пока worker-контексты записывают команды, не изменяйте и не уничтожайте используемые текстуры, шрифты, материалы, drawable-объекты и их данные. Окно, target и renderer должны жить до завершения и объединения всех контекстов. Создание GPU-ресурсов, загрузка glyph-ов, изменение frame view, `merge()` и `display()` выполняются на главном потоке. Незавершённые контексты нельзя объединить или использовать для завершения кадра; если `display()` вызван слишком рано, кадр остаётся активным — сначала завершите и объедините контексты, затем повторите вызов. Если контекст нужно отбросить, уничтожьте его до повторного `display()` — записанные в него команды будут потеряны.
 
@@ -66,29 +58,31 @@ frame.prepare(title_text);
 
 mngl::texture left_target(512, 512);
 mngl::texture right_target(512, 512);
-mngl::sprite left_content(left_source, { 0.0f, 0.0f, 1.0f, 1.0f });
-mngl::sprite right_content(right_source, { 0.0f, 0.0f, 1.0f, 1.0f });
+mngl::sprite left_content(left_source, {0.0f, 0.0f, 1.0f, 1.0f});
+mngl::sprite right_content(right_source, {0.0f, 0.0f, 1.0f, 1.0f});
 
 auto left_frame = left_target.frame();
 auto right_frame = right_target.frame();
 left_frame.prepare(left_content);
 right_frame.prepare(right_content);
 
-auto left_job = std::async(std::launch::async, [&]
-{
-    left_frame.draw(left_content);
-    left_frame.display();
-});
-auto right_job = std::async(std::launch::async, [&]
-{
-    right_frame.draw(right_content);
-    right_frame.display();
-});
+auto left_job = std::async(std::launch::async,
+                           [&]
+                           {
+	                           left_frame.draw(left_content);
+	                           left_frame.display();
+                           });
+auto right_job = std::async(std::launch::async,
+                            [&]
+                            {
+	                            right_frame.draw(right_content);
+	                            right_frame.display();
+                            });
 left_job.get();
 right_job.get();
 
-mngl::sprite left_result(left_target, { 0.0f, 0.0f, 0.5f, 1.0f });
-mngl::sprite right_result(right_target, { 0.5f, 0.0f, 0.5f, 1.0f });
+mngl::sprite left_result(left_target, {0.0f, 0.0f, 0.5f, 1.0f});
+mngl::sprite right_result(right_target, {0.5f, 0.0f, 0.5f, 1.0f});
 auto composite = window.frame();
 composite.draw(left_result);
 composite.draw(right_result);

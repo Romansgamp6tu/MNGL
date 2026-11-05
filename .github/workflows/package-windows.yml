@@ -20,6 +20,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: recursive
 
       - name: Choose package version
         id: version
@@ -46,10 +47,29 @@ jobs:
           "-DMNGL_PACKAGE_BRANCH=$env:MNGL_PACKAGE_BRANCH"
 
       - name: Build ImGui DLL
-        run: cmake --build build --config Release --target mngl_imgui --parallel 4
+        run: |
+          cmake --build build --config Release --target mngl_imgui --parallel 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build build --config Release --target SDL3_mixer-shared --parallel 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Create Windows development ZIP
         run: cpack --config build/CPackConfig.cmake -C Release -G ZIP
+
+      - name: Test installed Windows package from a consumer project
+        shell: pwsh
+        run: |
+          $sdkArchiveRoot = Join-Path (Get-Location) 'build/package-consumer-sdk'
+          Expand-Archive -LiteralPath (Get-ChildItem 'build/packages/*.zip' | Select-Object -First 1).FullName -DestinationPath $sdkArchiveRoot -Force
+          $sdk = Get-ChildItem -LiteralPath $sdkArchiveRoot -Directory | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $sdk) { throw 'The Windows SDK archive did not contain its package directory.' }
+          cmake -S tests/package-consumer -B build/package-consumer -A x64 "-DCMAKE_PREFIX_PATH=$sdk"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build build/package-consumer --config Release --parallel 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:PATH = "$sdk/bin;$env:PATH"
+          ctest --test-dir build/package-consumer -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Save package artifact
         uses: actions/upload-artifact@v4
@@ -68,6 +88,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: recursive
 
       - name: Configure Linux package
         env:
@@ -80,10 +101,26 @@ jobs:
           "-DMNGL_PACKAGE_BRANCH=$MNGL_PACKAGE_BRANCH"
 
       - name: Build ImGui shared library
-        run: cmake --build build-devel-linux --target mngl_imgui --parallel 4
+        run: |
+          cmake --build build-devel-linux --target mngl_imgui --parallel 4
+          cmake --build build-devel-linux --target SDL3_mixer-shared --parallel 4
 
       - name: Create Linux development tarball
         run: cpack --config build-devel-linux/CPackConfig.cmake -G TGZ
+
+      - name: Test installed Linux package from a consumer project
+        shell: bash
+        env:
+          MNGL_PACKAGE_VERSION: ${{ needs.build-package.outputs.version }}
+        run: |
+          sdk="$PWD/build-devel-linux/package-consumer-sdk"
+          mkdir -p "$sdk"
+          tar -xzf "build-devel-linux/packages/mngl-devel-linux-x64-${MNGL_PACKAGE_VERSION}.tar.gz" -C "$sdk"
+          cmake -S tests/package-consumer -B build-devel-linux/package-consumer -GNinja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$sdk"
+          cmake --build build-devel-linux/package-consumer --parallel 4
+          LD_LIBRARY_PATH="$sdk/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            ctest --test-dir build-devel-linux/package-consumer --output-on-failure
 
       - name: Save package artifact
         uses: actions/upload-artifact@v4

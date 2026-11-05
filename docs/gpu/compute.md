@@ -34,32 +34,25 @@ constexpr uint32_t width = 512;
 constexpr uint32_t height = 512;
 auto& device = mngl::gpu::device::global();
 
-mngl::texture output{
-    device,
-    width,
-    height,
-    mngl::gpu::texture_format::r8g8b8a8_unorm,
-    mngl::texture::usage::sampler | mngl::texture::usage::compute_write
-};
+mngl::texture output{device, width, height, mngl::gpu::texture_format::r8g8b8a8_unorm,
+                     mngl::texture::usage::sampler | mngl::texture::usage::compute_write};
 
 auto shader = mngl::gpu::shader_loader::compile_compute("shaders/fill.hlsl");
 shader["output"] = output;
-shader["size"] = glm::uvec2{ width, height };
-shader["color"] = glm::vec4{ 0.1f, 0.4f, 0.9f, 1.0f };
+shader["size"] = glm::uvec2{width, height};
+shader["color"] = glm::vec4{0.1f, 0.4f, 0.9f, 1.0f};
 
-auto pipeline = mngl::gpu::compute_pipeline_builder{}
-    .set_compute_shader(shader)
-    .build(device);
+auto pipeline = mngl::gpu::compute_pipeline_builder{}.set_compute_shader(shader).build(device);
 
 {
-    mngl::gpu::command_buffer commands(device);
-    mngl::gpu::compute_pass pass(commands, pipeline, shader);
-    pass.dispatch_for({ width, height, 1 });
-    pass.end_pass();
-    commands.submit();
+	mngl::gpu::command_buffer commands(device);
+	mngl::gpu::compute_pass pass(commands, pipeline, shader);
+	pass.dispatch_for({width, height, 1});
+	pass.end_pass();
+	commands.submit();
 }
 
-mngl::sprite output_sprite{ output };
+mngl::sprite output_sprite{output};
 window.clear();
 window.draw(output_sprite);
 window.display();
@@ -76,9 +69,7 @@ window.display();
 Для GLSL и precompiled assets количество ресурсов pipeline задаётся в `shader_compile_options::resources`. Compute-специфичные поля — `read_write_storage_textures` и `read_write_storage_buffers`; также доступны `samplers`, `storage_textures`, `storage_buffers` и `uniform_buffers`. Для таких layout используйте slot-based bindings:
 
 ```cpp
-std::array outputs{
-    mngl::gpu::compute_pass::storage_texture_write_binding{ output }
-};
+std::array outputs{mngl::gpu::compute_pass::storage_texture_write_binding{output}};
 
 mngl::gpu::command_buffer commands(device);
 mngl::gpu::compute_pass pass(commands, pipeline, outputs);

@@ -12,10 +12,10 @@ mngl::texture image("assets/background.png");
 
 ```cpp
 mngl::animated_texture animation("assets/animation.gif");
-mngl::sprite image(animation.as_texture(), mngl::rectangle{ 0.0f, 0.0f, 2.0f, 2.0f });
+mngl::sprite image(animation.as_texture(), mngl::rectangle{0.0f, 0.0f, 2.0f, 2.0f});
 ```
 
-`animated_texture` владеет исходной анимацией и автоматически загружает новый кадр в GPU-текстуру после смены кадра в `Input::continue_work()`. `as_texture()` возвращает ссылку: объект `animation` должен жить, пока спрайт рисуется.
+`animated_texture` владеет исходной анимацией и автоматически загружает новый кадр в GPU-текстуру после смены кадра в `input::continue_work()`. `as_texture()` возвращает ссылку: объект `animation` должен жить, пока спрайт рисуется.
 
 Если нужно работать с кадрами напрямую, загрузите файл в `mngl::surface`. Метод `raw()` возвращает указатель на текущий кадр без передачи владения; `animated()` сообщает, содержит ли анимация несколько кадров, а `on_frame_changed` вызывается при переключении кадра. `mngl::texture(surface)` по-прежнему загружает только текущий кадр и не обновляется автоматически.
 
@@ -28,9 +28,9 @@ mngl::sprite image(animation.as_texture(), mngl::rectangle{ 0.0f, 0.0f, 2.0f, 2.
 `mngl::color` хранит RGBA-компоненты в диапазоне `[0, 1]`. При передаче целых чисел компоненты задаются в диапазоне `[0, 255]`:
 
 ```cpp
-mngl::color floating{ 0.2f, 0.6f, 1.0f, 1.0f };
-mngl::color bytes{ 51, 153, 255, 255 };
-mngl::color html{ "#3399FFFF" };
+mngl::color floating{0.2f, 0.6f, 1.0f, 1.0f};
+mngl::color bytes{51, 153, 255, 255};
+mngl::color html{"#3399FFFF"};
 ```
 
 Последний компонент альфа-канала можно опускать: по умолчанию он равен полной непрозрачности. Для интеграции с графическими API есть преобразования в `glm::vec3` / `glm::vec4`, `SDL_Color` и целочисленный RGBA-код.

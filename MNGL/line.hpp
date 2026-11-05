@@ -29,12 +29,11 @@ namespace mngl
 				return false;
 
 			const double projection = px * dx + py * dy;
-			return projection >= -epsilon * length &&
-				projection <= length_squared + epsilon * length;
+			return projection >= -epsilon * length && projection <= length_squared + epsilon * length;
 		}
 
-		inline std::optional<glm::vec2> segment_intersection(
-			glm::vec2 p1, glm::vec2 p2, glm::vec2 p3, glm::vec2 p4, float epsilon)
+		inline std::optional<glm::vec2> segment_intersection(glm::vec2 p1, glm::vec2 p2, glm::vec2 p3,
+		                                                     glm::vec2 p4, float epsilon)
 		{
 			const double tolerance = std::max(0.0, static_cast<double>(epsilon));
 			const double rx = static_cast<double>(p2.x) - p1.x;
@@ -58,16 +57,12 @@ namespace mngl
 						return p1;
 					return std::nullopt;
 				}
-				return point_on_segment(p1, p3, p4, tolerance)
-					? std::optional<glm::vec2>(p1)
-					: std::nullopt;
+				return point_on_segment(p1, p3, p4, tolerance) ? std::optional<glm::vec2>(p1) : std::nullopt;
 			}
 
 			if (s_length <= tolerance)
 			{
-				return point_on_segment(p3, p1, p2, tolerance)
-					? std::optional<glm::vec2>(p3)
-					: std::nullopt;
+				return point_on_segment(p3, p1, p2, tolerance) ? std::optional<glm::vec2>(p3) : std::nullopt;
 			}
 
 			const double denominator = cross(rx, ry, sx, sy);
@@ -90,27 +85,24 @@ namespace mngl
 					return std::nullopt;
 
 				const double t = std::clamp(overlap_start, 0.0, 1.0);
-				return glm::vec2{
-					static_cast<float>(static_cast<double>(p1.x) + t * rx),
-					static_cast<float>(static_cast<double>(p1.y) + t * ry)
-				};
+				return glm::vec2{static_cast<float>(static_cast<double>(p1.x) + t * rx),
+				                 static_cast<float>(static_cast<double>(p1.y) + t * ry)};
 			}
 
 			const double t = cross(qx, qy, sx, sy) / denominator;
 			const double u = cross(qx, qy, rx, ry) / denominator;
-			if (t < -t_tolerance || t > 1.0 + t_tolerance ||
-				u < -tolerance / s_length || u > 1.0 + tolerance / s_length)
+			if (t < -t_tolerance || t > 1.0 + t_tolerance || u < -tolerance / s_length ||
+			    u > 1.0 + tolerance / s_length)
 				return std::nullopt;
 
 			const double clamped_t = std::clamp(t, 0.0, 1.0);
-			return glm::vec2{
-				static_cast<float>(static_cast<double>(p1.x) + clamped_t * rx),
-				static_cast<float>(static_cast<double>(p1.y) + clamped_t * ry)
-			};
+			return glm::vec2{static_cast<float>(static_cast<double>(p1.x) + clamped_t * rx),
+			                 static_cast<float>(static_cast<double>(p1.y) + clamped_t * ry)};
 		}
-	}
+	} // namespace line_detail
 
-	inline bool linesIntersect(glm::vec2 p1, glm::vec2 p2, glm::vec2 p3, glm::vec2 p4, float epsilon = SDL_FLT_EPSILON)
+	inline bool lines_intersect(glm::vec2 p1, glm::vec2 p2, glm::vec2 p3, glm::vec2 p4,
+	                            float epsilon = SDL_FLT_EPSILON)
 	{
 		return line_detail::segment_intersection(p1, p2, p3, p4, epsilon).has_value();
 	}
@@ -123,25 +115,29 @@ namespace mngl
 		line(glm::vec2 s, glm::vec2 e) : start(s), end(e) {}
 		bool intersects(const line& other) const
 		{
-			return linesIntersect(start, end, other.start, other.end);
+			return lines_intersect(start, end, other.start, other.end);
 		}
-		friend bool intersects(const line& a, const line& b)
-		{
-			return a.intersects(b);
-		}
-		float length() const
-		{
-			return glm::length(end - start);
-		}
+		friend bool intersects(const line& a, const line& b) { return a.intersects(b); }
+		float length() const { return glm::length(end - start); }
 
-		glm::vec2 direction() const
-		{
-			return glm::normalize(end - start);
-		}
+		glm::vec2 direction() const { return glm::normalize(end - start); }
 
-		std::optional<glm::vec2> intersectionPoint(const line& other, float epsilon = SDL_FLT_EPSILON) const
+		std::optional<glm::vec2> intersection_point(const line& other, float epsilon = SDL_FLT_EPSILON) const
 		{
 			return line_detail::segment_intersection(start, end, other.start, other.end, epsilon);
 		}
+		[[nodiscard]] std::optional<glm::vec2> intersectionPoint(const line& other,
+		                                                         float epsilon = SDL_FLT_EPSILON) const
+		{
+			return intersection_point(other, epsilon);
+		}
 	};
-}
+} // namespace mngl
+namespace mngl
+{
+	[[nodiscard]] inline bool linesIntersect(glm::vec2 a, glm::vec2 b, glm::vec2 c, glm::vec2 d,
+	                                         float epsilon = SDL_FLT_EPSILON)
+	{
+		return lines_intersect(a, b, c, d, epsilon);
+	}
+} // namespace mngl

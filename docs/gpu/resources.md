@@ -2,7 +2,7 @@
 
 ## Буферы
 
-`mngl::gpu::buffer` — move-only RAII-обёртка над GPU buffer. При создании задаются устройство, размер в байтах и `buffer_usage`. `upload()` копирует данные через transfer buffer; источник должен быть trivially copyable, а command buffer — принадлежать тому же устройству.
+`mngl::gpu::buffer` — move-only RAII-обёртка над GPU buffer. При создании задаются устройство, размер в байтах и `buffer_usage`. Создание и загрузка через overload с `mngl::gpu::device` удерживают общее состояние устройства до освобождения буфера и его transfer buffer. Overload с `SDL_GPUDevice*` заимствует device, поэтому его время жизни должно покрывать время жизни буфера. `upload()` копирует данные через transfer buffer; источник должен быть trivially copyable, а command buffer — принадлежать тому же устройству.
 
 Для vertex-данных используйте `mngl::gpu::vertex_buffer<T>`. Он принимает range элементов `T`, проверяет совместимость типа и упаковывает несмежные ranges перед загрузкой:
 
@@ -17,7 +17,7 @@ commands.submit();
 
 ## Текстуры и форматы
 
-`mngl::gpu::texture` создаётся с размером, `gpu::texture_format` и usage-флагами. Например, `sampler` разрешает чтение через sampler, `color_target` — использование как color attachment, `graphics_read` — чтение как graphics storage resource, `compute_read`/`compute_write`/`compute_rw` — доступ из compute pass. Не каждая комбинация формата и usage поддерживается выбранным GPU; создание неподдерживаемой комбинации завершается ошибкой.
+`mngl::gpu::texture` создаётся с размером, `gpu::texture_format` и usage-флагами и удерживает состояние переданного `gpu::device` до освобождения текстуры. Например, `sampler` разрешает чтение через sampler, `color_target` — использование как color attachment, `graphics_read` — чтение как graphics storage resource, `compute_read`/`compute_write`/`compute_rw` — доступ из compute pass. Не каждая комбинация формата и usage поддерживается выбранным GPU; создание неподдерживаемой комбинации завершается ошибкой.
 
 `mngl::gpu::texture` не загружает файл и не управляет 2D-кадром. Для повседневной работы используйте [высокоуровневую `mngl::texture`](../2d/render-to-texture.md).
 
@@ -32,4 +32,4 @@ commands.submit();
 
 Sampler и текстура, к которой он применяется, должны принадлежать одному GPU device.
 
-`sampler_builder::build` и фабрики готовых sampler-пресетов принимают как `SDL_GPUDevice*`, так и `mngl::gpu::device`.
+`sampler_builder::build` и фабрики готовых sampler-пресетов принимают как `SDL_GPUDevice*`, так и `mngl::gpu::device`. Вариант с `device` удерживает устройство до освобождения sampler; вариант с `SDL_GPUDevice*` требует внешнего управления временем жизни.

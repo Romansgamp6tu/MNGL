@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstdint>
+#include <optional>
+
 #include "device.hpp"
 #include "utilities.hpp"
 #include "graphics_pipeline.hpp" // Для compare_op
@@ -9,19 +12,19 @@
 
 namespace mngl::gpu
 {
-	enum class filter_mode : uint32_t
+	enum class filter_mode : std::uint32_t
 	{
 		nearest = SDL_GPU_FILTER_NEAREST,
 		linear = SDL_GPU_FILTER_LINEAR
 	};
 
-	enum class sampler_mipmap_mode : uint32_t
+	enum class sampler_mipmap_mode : std::uint32_t
 	{
 		nearest = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST,
 		linear = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR
 	};
 
-	enum class sampler_address_mode : uint32_t
+	enum class sampler_address_mode : std::uint32_t
 	{
 		repeat = SDL_GPU_SAMPLERADDRESSMODE_REPEAT,
 		mirrored_repeat = SDL_GPU_SAMPLERADDRESSMODE_MIRRORED_REPEAT,
@@ -34,9 +37,9 @@ namespace mngl::gpu
 	public:
 		sampler() noexcept = default;
 
-		sampler(SDL_GPUDevice* device, SDL_GPUSampler* handle) noexcept
-			: m_device(device), m_handle(handle)
-		{ }
+		sampler(SDL_GPUDevice* device, SDL_GPUSampler* handle) noexcept : m_device(device), m_handle(handle)
+		{
+		}
 
 		~sampler() { destroy(); }
 
@@ -44,15 +47,18 @@ namespace mngl::gpu
 		sampler& operator=(const sampler&) = delete;
 
 		sampler(sampler&& other) noexcept
-			: m_device(std::exchange(other.m_device, nullptr))
-			, m_handle(std::exchange(other.m_handle, nullptr))
-		{ }
+		    : m_device_owner(std::move(other.m_device_owner)),
+		      m_device(std::exchange(other.m_device, nullptr)),
+		      m_handle(std::exchange(other.m_handle, nullptr))
+		{
+		}
 
 		sampler& operator=(sampler&& other) noexcept
 		{
 			if (this != &other)
 			{
 				destroy();
+				m_device_owner = std::move(other.m_device_owner);
 				m_device = std::exchange(other.m_device, nullptr);
 				m_handle = std::exchange(other.m_handle, nullptr);
 			}
@@ -69,11 +75,15 @@ namespace mngl::gpu
 			if (m_device && m_handle)
 			{
 				SDL_ReleaseGPUSampler(m_device, m_handle);
-				m_handle = nullptr;
 			}
+			m_handle = nullptr;
+			m_device = nullptr;
+			m_device_owner.reset();
 		}
 
 	private:
+		friend class sampler_builder;
+		std::optional<device> m_device_owner;
 		SDL_GPUDevice* m_device = nullptr;
 		SDL_GPUSampler* m_handle = nullptr;
 	};
@@ -91,12 +101,10 @@ namespace mngl::gpu
 			return *this;
 		}
 
-		sampler_builder& set_filter(filter_mode filter) noexcept
-		{
-			return set_filters(filter, filter);
-		}
+		sampler_builder& set_filter(filter_mode filter) noexcept { return set_filters(filter, filter); }
 
-		sampler_builder& set_address_mode(sampler_address_mode u, sampler_address_mode v, sampler_address_mode w) noexcept
+		sampler_builder& set_address_mode(sampler_address_mode u, sampler_address_mode v,
+		                                  sampler_address_mode w) noexcept
 		{
 			m_address_u = u;
 			m_address_v = v;
@@ -166,7 +174,9 @@ namespace mngl::gpu
 
 		sampler build(const mngl::gpu::device& device) const
 		{
-			return build(device.raw());
+			auto result = build(device.raw());
+			result.m_device_owner = device;
+			return result;
 		}
 
 		// --- Пресеты ---
@@ -174,55 +184,69 @@ namespace mngl::gpu
 		static sampler create_point_clamp(SDL_GPUDevice* device)
 		{
 			return sampler_builder{}
-				.set_filter(filter_mode::nearest)
-				.set_address_mode(sampler_address_mode::clamp_to_edge)
-				.build(device);
+			    .set_filter(filter_mode::nearest)
+			    .set_address_mode(sampler_address_mode::clamp_to_edge)
+			    .build(device);
 		}
 
 		static sampler create_point_clamp(const mngl::gpu::device& device)
 		{
-			return create_point_clamp(device.raw());
+			return sampler_builder{}
+			    .set_filter(filter_mode::nearest)
+			    .set_address_mode(sampler_address_mode::clamp_to_edge)
+			    .build(device);
 		}
 
 		static sampler create_point_repeat(SDL_GPUDevice* device)
 		{
 			return sampler_builder{}
-				.set_filter(filter_mode::nearest)
-				.set_address_mode(sampler_address_mode::repeat)
-				.build(device);
+			    .set_filter(filter_mode::nearest)
+			    .set_address_mode(sampler_address_mode::repeat)
+			    .build(device);
 		}
 
 		static sampler create_point_repeat(const mngl::gpu::device& device)
 		{
-			return create_point_repeat(device.raw());
+			return sampler_builder{}
+			    .set_filter(filter_mode::nearest)
+			    .set_address_mode(sampler_address_mode::repeat)
+			    .build(device);
 		}
 
 		static sampler create_linear_clamp(SDL_GPUDevice* device)
 		{
 			return sampler_builder{}
-				.set_filter(filter_mode::linear)
-				.set_mipmap_mode(sampler_mipmap_mode::linear)
-				.set_address_mode(sampler_address_mode::clamp_to_edge)
-				.build(device);
+			    .set_filter(filter_mode::linear)
+			    .set_mipmap_mode(sampler_mipmap_mode::linear)
+			    .set_address_mode(sampler_address_mode::clamp_to_edge)
+			    .build(device);
 		}
 
 		static sampler create_linear_clamp(const mngl::gpu::device& device)
 		{
-			return create_linear_clamp(device.raw());
+			return sampler_builder{}
+			    .set_filter(filter_mode::linear)
+			    .set_mipmap_mode(sampler_mipmap_mode::linear)
+			    .set_address_mode(sampler_address_mode::clamp_to_edge)
+			    .build(device);
 		}
 
 		static sampler create_linear_repeat(SDL_GPUDevice* device)
 		{
 			return sampler_builder{}
-				.set_filter(filter_mode::linear)
-				.set_mipmap_mode(sampler_mipmap_mode::linear)
-				.set_address_mode(sampler_address_mode::repeat)
-				.build(device);
+			    .set_filter(filter_mode::linear)
+			    .set_mipmap_mode(sampler_mipmap_mode::linear)
+			    .set_address_mode(sampler_address_mode::repeat)
+			    .build(device);
 		}
 
 		static sampler create_linear_repeat(const mngl::gpu::device& device)
 		{
-			return create_linear_repeat(device.raw());
+			return sampler_builder{}
+			    .set_filter(filter_mode::linear)
+			    .set_mipmap_mode(sampler_mipmap_mode::linear)
+			    .set_address_mode(sampler_address_mode::repeat)
+			    .build(device);
 		}
 
 	private:
@@ -241,4 +265,4 @@ namespace mngl::gpu
 		bool m_enable_compare = false;
 		compare_op m_compare_op = compare_op::never;
 	};
-}
+} // namespace mngl::gpu

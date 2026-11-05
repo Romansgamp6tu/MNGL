@@ -6,6 +6,7 @@
 
 #include <utility>
 #include <stdexcept>
+#include <optional>
 
 namespace mngl::gpu
 {
@@ -21,36 +22,32 @@ namespace mngl::gpu
 		compute_pipeline& operator=(const compute_pipeline&) = delete;
 
 		compute_pipeline(compute_pipeline&& other) noexcept
-			: m_device(std::exchange(other.m_device, nullptr))
-			, m_handle(std::exchange(other.m_handle, nullptr))
-			, m_resources(std::exchange(other.m_resources, shader_resource_layout{}))
-			, m_threadgroup_size(std::exchange(other.m_threadgroup_size, glm::uvec3{ 0, 0, 0 }))
-		{ }
+		    : m_device_owner(std::move(other.m_device_owner)),
+		      m_device(std::exchange(other.m_device, nullptr)),
+		      m_handle(std::exchange(other.m_handle, nullptr)),
+		      m_resources(std::exchange(other.m_resources, shader_resource_layout{})),
+		      m_threadgroup_size(std::exchange(other.m_threadgroup_size, glm::uvec3{0, 0, 0}))
+		{
+		}
 
 		compute_pipeline& operator=(compute_pipeline&& other) noexcept
 		{
 			if (this != &other)
 			{
 				destroy();
+				m_device_owner = std::move(other.m_device_owner);
 				m_device = std::exchange(other.m_device, nullptr);
 				m_handle = std::exchange(other.m_handle, nullptr);
 				m_resources = std::exchange(other.m_resources, shader_resource_layout{});
-				m_threadgroup_size =
-					std::exchange(other.m_threadgroup_size, glm::uvec3{ 0, 0, 0 });
+				m_threadgroup_size = std::exchange(other.m_threadgroup_size, glm::uvec3{0, 0, 0});
 			}
 			return *this;
 		}
 
 		[[nodiscard]] SDL_GPUComputePipeline* raw() const noexcept { return m_handle; }
 		[[nodiscard]] SDL_GPUDevice* device_raw() const noexcept { return m_device; }
-		[[nodiscard]] const shader_resource_layout& resources() const noexcept
-		{
-			return m_resources;
-		}
-		[[nodiscard]] glm::uvec3 threadgroup_size() const noexcept
-		{
-			return m_threadgroup_size;
-		}
+		[[nodiscard]] const shader_resource_layout& resources() const noexcept { return m_resources; }
+		[[nodiscard]] glm::uvec3 threadgroup_size() const noexcept { return m_threadgroup_size; }
 		[[nodiscard]] bool valid() const noexcept { return m_handle != nullptr; }
 		explicit operator bool() const noexcept { return valid(); }
 
@@ -62,29 +59,25 @@ namespace mngl::gpu
 			}
 			m_device = nullptr;
 			m_handle = nullptr;
+			m_device_owner.reset();
 			m_resources = {};
-			m_threadgroup_size = { 0, 0, 0 };
+			m_threadgroup_size = {0, 0, 0};
 		}
 
 	private:
 		friend class compute_pipeline_builder;
 
-		compute_pipeline(
-			SDL_GPUDevice* device,
-			SDL_GPUComputePipeline* handle,
-			shader_resource_layout resources,
-			glm::uvec3 threadgroup_size
-		) noexcept
-			: m_device(device)
-			, m_handle(handle)
-			, m_resources(resources)
-			, m_threadgroup_size(threadgroup_size)
-		{ }
+		compute_pipeline(SDL_GPUDevice* device, SDL_GPUComputePipeline* handle,
+		                 shader_resource_layout resources, glm::uvec3 threadgroup_size) noexcept
+		    : m_device(device), m_handle(handle), m_resources(resources), m_threadgroup_size(threadgroup_size)
+		{
+		}
 
+		std::optional<device> m_device_owner;
 		SDL_GPUDevice* m_device = nullptr;
 		SDL_GPUComputePipeline* m_handle = nullptr;
 		shader_resource_layout m_resources{};
-		glm::uvec3 m_threadgroup_size{ 0, 0, 0 };
+		glm::uvec3 m_threadgroup_size{0, 0, 0};
 	};
 
 	class compute_pipeline_builder
@@ -104,14 +97,14 @@ namespace mngl::gpu
 			}
 			if (!m_shader || !m_shader->valid())
 			{
-				throw std::invalid_argument("Cannot create a compute pipeline without a valid compute shader asset");
+				throw std::invalid_argument(
+				    "Cannot create a compute pipeline without a valid compute shader asset");
 			}
 
 			const auto format = static_cast<SDL_GPUShaderFormat>(m_shader->code.format);
 			if ((SDL_GetGPUShaderFormats(device) & format) == 0)
 			{
-				throw std::invalid_argument(
-					"GPU device does not support the compute shader asset's format");
+				throw std::invalid_argument("GPU device does not support the compute shader asset's format");
 			}
 
 			SDL_GPUComputePipelineCreateInfo info{};
@@ -122,10 +115,8 @@ namespace mngl::gpu
 			info.num_samplers = m_shader->resources.samplers;
 			info.num_readonly_storage_textures = m_shader->resources.storage_textures;
 			info.num_readonly_storage_buffers = m_shader->resources.storage_buffers;
-			info.num_readwrite_storage_textures =
-				m_shader->resources.read_write_storage_textures;
-			info.num_readwrite_storage_buffers =
-				m_shader->resources.read_write_storage_buffers;
+			info.num_readwrite_storage_textures = m_shader->resources.read_write_storage_textures;
+			info.num_readwrite_storage_buffers = m_shader->resources.read_write_storage_buffers;
 			info.num_uniform_buffers = m_shader->resources.uniform_buffers;
 			info.threadcount_x = m_shader->threadgroup_size.x;
 			info.threadcount_y = m_shader->threadgroup_size.y;
@@ -137,20 +128,17 @@ namespace mngl::gpu
 				throw sdl_error("Failed to create GPU compute pipeline: ");
 			}
 
-			return compute_pipeline{
-				device,
-				handle,
-				m_shader->resources,
-				m_shader->threadgroup_size
-			};
+			return compute_pipeline{device, handle, m_shader->resources, m_shader->threadgroup_size};
 		}
 
 		compute_pipeline build(const mngl::gpu::device& device) const
 		{
-			return build(device.raw());
+			auto result = build(device.raw());
+			result.m_device_owner = device;
+			return result;
 		}
 
 	private:
 		const compute_shader_asset* m_shader = nullptr;
 	};
-}
+} // namespace mngl::gpu

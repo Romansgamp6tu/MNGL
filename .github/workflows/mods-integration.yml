@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Configure integration targets
         run: cmake -S . -B build -A x64 -DBUILD_TESTING=ON -DMNGL_BUILD_MOD_EXAMPLE=ON

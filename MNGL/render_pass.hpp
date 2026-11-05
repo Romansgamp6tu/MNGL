@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "utilities.hpp"
 #include "color.hpp"
 #include "command_buffer.hpp"
@@ -16,7 +18,6 @@ namespace mngl::gpu
 	class render_pass
 	{
 	public:
-
 		enum class loader
 		{
 			clear = SDL_GPU_LOADOP_CLEAR,
@@ -42,7 +43,7 @@ namespace mngl::gpu
 		{
 			texture& target;
 			float depth = 1.0f;
-			uint8_t stencil = 0;
+			std::uint8_t stencil = 0;
 			loader load = loader::clear;
 			storer store = storer::store;
 		};
@@ -50,22 +51,16 @@ namespace mngl::gpu
 		render_pass() noexcept = default;
 
 		// Быстрый конструктор для 1 таргета
-		render_pass(
-			command_buffer& cmd,
-			texture& target,
-			const color& col = color(0),
-			loader ld = loader::clear,
-			storer st = storer::store,
-			const depth_attachment* depth = nullptr
-		) : render_pass(cmd, std::array{color_attachment{ target, col, ld, st }}, depth)
-		{ }
+		render_pass(command_buffer& cmd, texture& target, const color& col = color(0),
+		            loader ld = loader::clear, storer st = storer::store,
+		            const depth_attachment* depth = nullptr)
+		    : render_pass(cmd, std::array{color_attachment{target, col, ld, st}}, depth)
+		{
+		}
 
 		// Универсальный конструктор через std::span (принимает и { a, b }, и std::vector, и std::array)
-		render_pass(
-			command_buffer& cmd,
-			std::span<const color_attachment> color_targets,
-			const depth_attachment* depth = nullptr
-		)
+		render_pass(command_buffer& cmd, std::span<const color_attachment> color_targets,
+		            const depth_attachment* depth = nullptr)
 		{
 			if (color_targets.empty() && !depth)
 			{
@@ -77,7 +72,7 @@ namespace mngl::gpu
 			}
 
 			std::array<SDL_GPUColorTargetInfo, 4> sdl_color_targets{};
-			uint32_t color_target_count = 0;
+			std::uint32_t color_target_count = 0;
 
 			for (const auto& attachment : color_targets)
 			{
@@ -88,7 +83,8 @@ namespace mngl::gpu
 
 				SDL_GPUColorTargetInfo info{};
 				info.texture = attachment.target.raw();
-				info.clear_color = SDL_FColor{attachment.col.r, attachment.col.g, attachment.col.b, attachment.col.a};
+				info.clear_color =
+				    SDL_FColor{attachment.col.r, attachment.col.g, attachment.col.b, attachment.col.a};
 				info.load_op = static_cast<SDL_GPULoadOp>(attachment.load);
 				info.store_op = static_cast<SDL_GPUStoreOp>(attachment.store);
 
@@ -103,7 +99,8 @@ namespace mngl::gpu
 				// Исправлено со stencil_target на depth_stencil_target и корректный текст ошибки
 				if (!depth->target.has_usage(texture::usage_flags::stencil_target))
 				{
-					throw std::invalid_argument("Depth target texture must have depth_stencil_target usage flag!");
+					throw std::invalid_argument(
+					    "Depth target texture must have depth_stencil_target usage flag!");
 				}
 
 				sdl_depth_info.texture = depth->target.raw();
@@ -126,18 +123,12 @@ namespace mngl::gpu
 			}
 		}
 
-		~render_pass()
-		{
-			end_pass();
-		}
+		~render_pass() { end_pass(); }
 
 		render_pass(const render_pass&) = delete;
 		render_pass& operator=(const render_pass&) = delete;
 
-		render_pass(render_pass&& o) noexcept
-		{
-			swap(*this, o);
-		}
+		render_pass(render_pass&& o) noexcept { swap(*this, o); }
 
 		render_pass& operator=(render_pass&& o) noexcept
 		{
@@ -168,59 +159,50 @@ namespace mngl::gpu
 
 		void bind_pipeline(const graphics_pipeline& pipeline) const noexcept
 		{
-			SDL_BindGPUGraphicsPipeline(handle, pipeline.handle());
+			SDL_BindGPUGraphicsPipeline(handle, pipeline.raw());
 		}
 
-		void draw_primitives(
-			uint32_t num_vertices,
-			uint32_t num_instances = 1,
-			uint32_t first_vertex = 0,
-			uint32_t first_instance = 0
-		) const noexcept
+		void draw_primitives(std::uint32_t num_vertices, std::uint32_t num_instances = 1,
+		                     std::uint32_t first_vertex = 0, std::uint32_t first_instance = 0) const noexcept
 		{
 			SDL_DrawGPUPrimitives(handle, num_vertices, num_instances, first_vertex, first_instance);
 		}
 
-		void draw_indexed_primitives(
-			uint32_t num_indices,
-			uint32_t num_instances = 1,
-			uint32_t first_index = 0,
-			int32_t vertex_offset = 0,
-			uint32_t first_instance = 0
-		) const noexcept
+		void draw_indexed_primitives(std::uint32_t num_indices, std::uint32_t num_instances = 1,
+		                             std::uint32_t first_index = 0, std::int32_t vertex_offset = 0,
+		                             std::uint32_t first_instance = 0) const noexcept
 		{
-			SDL_DrawGPUIndexedPrimitives(handle, num_indices, num_instances, first_index, vertex_offset, first_instance);
+			SDL_DrawGPUIndexedPrimitives(handle, num_indices, num_instances, first_index, vertex_offset,
+			                             first_instance);
 		}
 
-		template<typename T>
-		void push_vertex_uniform(uint32_t slot, const T& data) const noexcept
+		template <typename T> void push_vertex_uniform(std::uint32_t slot, const T& data) const noexcept
 		{
 			static_assert(std::is_trivially_copyable_v<T>, "Uniform data must be trivially copyable!");
-			SDL_PushGPUVertexUniformData(handle, slot, &data, static_cast<uint32_t>(sizeof(T)));
+			SDL_PushGPUVertexUniformData(handle, slot, &data, static_cast<std::uint32_t>(sizeof(T)));
 		}
 
-		template<typename T>
-		void push_fragment_uniform(uint32_t slot, const T& data) const noexcept
+		template <typename T> void push_fragment_uniform(std::uint32_t slot, const T& data) const noexcept
 		{
 			static_assert(std::is_trivially_copyable_v<T>, "Uniform data must be trivially copyable!");
-			SDL_PushGPUFragmentUniformData(handle, slot, &data, static_cast<uint32_t>(sizeof(T)));
+			SDL_PushGPUFragmentUniformData(handle, slot, &data, static_cast<std::uint32_t>(sizeof(T)));
 		}
 
-		void bind_vertex_buffers(
-			uint32_t first_slot,
-			std::span<const SDL_GPUBufferBinding> bindings
-		) const noexcept
+		void bind_vertex_buffers(std::uint32_t first_slot,
+		                         std::span<const SDL_GPUBufferBinding> bindings) const noexcept
 		{
-			SDL_BindGPUVertexBuffers(handle, first_slot, bindings.data(), static_cast<uint32_t>(bindings.size()));
+			SDL_BindGPUVertexBuffers(handle, first_slot, bindings.data(),
+			                         static_cast<std::uint32_t>(bindings.size()));
 		}
 
-		void bind_vertex_buffer(uint32_t slot, SDL_GPUBuffer* buffer, uint32_t offset = 0) const noexcept
+		void bind_vertex_buffer(std::uint32_t slot, SDL_GPUBuffer* buffer,
+		                        std::uint32_t offset = 0) const noexcept
 		{
 			const SDL_GPUBufferBinding binding{.buffer = buffer, .offset = offset};
 			SDL_BindGPUVertexBuffers(handle, slot, &binding, 1);
 		}
 
-		void bind_vertex_buffer(uint32_t slot, const buffer& buffer, uint32_t offset = 0) const
+		void bind_vertex_buffer(std::uint32_t slot, const buffer& buffer, std::uint32_t offset = 0) const
 		{
 			if (!buffer.valid() || buffer.usage() != buffer_usage::vertex)
 			{
@@ -229,36 +211,31 @@ namespace mngl::gpu
 			bind_vertex_buffer(slot, buffer.raw(), offset);
 		}
 
-		template<typename T>
-		void bind_vertex_buffer(
-			uint32_t slot,
-			const vertex_buffer<T>& buffer,
-			uint32_t offset = 0
-		) const
+		template <typename T>
+		void bind_vertex_buffer(std::uint32_t slot, const vertex_buffer<T>& buffer,
+		                        std::uint32_t offset = 0) const
 		{
 			bind_vertex_buffer(slot, buffer.gpu_buffer(), offset);
 		}
 
 		// Связывание индексного буфера (16-bit или 32-bit)
-		void bind_index_buffer(
-			SDL_GPUBuffer* buffer,
-			SDL_GPUIndexElementSize index_element_size = SDL_GPU_INDEXELEMENTSIZE_16BIT,
-			uint32_t offset = 0
-		) const noexcept
+		void bind_index_buffer(SDL_GPUBuffer* buffer,
+		                       SDL_GPUIndexElementSize index_element_size = SDL_GPU_INDEXELEMENTSIZE_16BIT,
+		                       std::uint32_t offset = 0) const noexcept
 		{
 			const SDL_GPUBufferBinding binding{.buffer = buffer, .offset = offset};
 			SDL_BindGPUIndexBuffer(handle, &binding, index_element_size);
 		}
 
-		void bind_fragment_samplers(
-			uint32_t first_slot,
-			std::span<const SDL_GPUTextureSamplerBinding> bindings
-		) const noexcept
+		void bind_fragment_samplers(std::uint32_t first_slot,
+		                            std::span<const SDL_GPUTextureSamplerBinding> bindings) const noexcept
 		{
-			SDL_BindGPUFragmentSamplers(handle, first_slot, bindings.data(), static_cast<uint32_t>(bindings.size()));
+			SDL_BindGPUFragmentSamplers(handle, first_slot, bindings.data(),
+			                            static_cast<std::uint32_t>(bindings.size()));
 		}
 
-		void bind_fragment_sampler(uint32_t slot, SDL_GPUTexture* texture, SDL_GPUSampler* sampler) const noexcept
+		void bind_fragment_sampler(std::uint32_t slot, SDL_GPUTexture* texture,
+		                           SDL_GPUSampler* sampler) const noexcept
 		{
 			const SDL_GPUTextureSamplerBinding binding{.texture = texture, .sampler = sampler};
 			SDL_BindGPUFragmentSamplers(handle, slot, &binding, 1);
@@ -273,4 +250,4 @@ namespace mngl::gpu
 			swap(l.handle, r.handle);
 		}
 	};
-}
+} // namespace mngl::gpu

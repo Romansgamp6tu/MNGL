@@ -3,17 +3,13 @@
 `mngl::two_d::text` — drawable, который добавляет глифы в существующий 2D-батчер. На каждый видимый глиф создаётся лёгкий quad-instance, но совместимые последовательные глифы группируются в draw calls, а не отправляются на GPU по одному. Шрифт лениво растеризует используемые глифы в текстурный атлас и переиспользует их между кадрами. Пока текст состоит из уже закешированных символов, повторная отрисовка не растеризует их и не загружает атлас заново.
 
 ```cpp
-mngl::two_d::font typeface{
-    mngl::gpu::device::global(),
-    "imgui/misc/fonts/Roboto-Medium.ttf",
-    48.0f
-};
+mngl::two_d::font typeface{mngl::gpu::device::global(), "imgui/misc/fonts/Roboto-Medium.ttf", 48.0f};
 
 mngl::two_d::text_draw_options options;
 options.height = 0.05f;
-options.tint = mngl::color{ 1.0f, 1.0f, 1.0f, 1.0f };
+options.tint = mngl::color{1.0f, 1.0f, 1.0f, 1.0f};
 
-mngl::two_d::text fps{ typeface, "FPS: 60", { 0.05f, 0.95f }, options };
+mngl::two_d::text fps{typeface, "FPS: 60", {0.05f, 0.95f}, options};
 window.clear();
 window.draw(fps);
 window.display();
@@ -37,9 +33,9 @@ log.set_line(1, "Connected");
 
 mngl::two_d::text_draw_options options;
 options.height = 0.025f;
-options.clip_bounds = mngl::rectangle{ 0.05f, 0.1f, 0.9f, 0.8f };
+options.clip_bounds = mngl::rectangle{0.05f, 0.1f, 0.9f, 0.8f};
 
-mngl::two_d::text log_text{ typeface, log, { 0.05f, 0.9f }, options };
+mngl::two_d::text log_text{typeface, log, {0.05f, 0.9f}, options};
 window.draw(log_text);
 ```
 
@@ -52,13 +48,12 @@ window.draw(log_text);
 ```cpp
 for (const scene_label& label : labels)
 {
-    if (!visible_world_bounds.intersects(label.bounds))
-    {
-        continue;
-    }
+	if (!visible_world_bounds.intersects(label.bounds))
+	{
+		continue;
+	}
 
-    frame.draw(mngl::two_d::text{
-        typeface, label.text, label.position, options });
+	frame.draw(mngl::two_d::text{typeface, label.text, label.position, options});
 }
 ```
 

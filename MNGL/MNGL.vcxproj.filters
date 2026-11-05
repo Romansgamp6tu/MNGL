@@ -74,6 +74,24 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="config.hpp">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="error.hpp">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="runtime.hpp">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="file_io.hpp">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="detail\two_d\geometry.hpp">
+      <Filter>Файлы заголовков\2d</Filter>
+    </ClInclude>
+    <ClInclude Include="extras\tree_renderer.hpp">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
     <ClInclude Include="utilities.hpp">
       <Filter>Файлы заголовков\utility</Filter>
     </ClInclude>

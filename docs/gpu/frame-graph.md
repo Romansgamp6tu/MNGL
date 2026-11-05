@@ -18,28 +18,25 @@
 constexpr uint32_t width = 512;
 constexpr uint32_t height = 512;
 auto& device = mngl::gpu::device::global();
-mngl::render_window window("Compute demo", { width, height });
+mngl::render_window window("Compute demo", {width, height});
 
 auto shader = mngl::gpu::shader_loader::compile_compute("shaders/fill.hlsl");
-auto pipeline = mngl::gpu::compute_pipeline_builder{}
-    .set_compute_shader(shader)
-    .build(device);
+auto pipeline = mngl::gpu::compute_pipeline_builder{}.set_compute_shader(shader).build(device);
 
 mngl::gpu::frame_graph graph(device);
-auto output = graph.create_texture(
-    { width, height },
-    mngl::gpu::texture_format::r8g8b8a8_unorm,
-    mngl::texture::usage::sampler | mngl::texture::usage::compute_write);
+auto output = graph.create_texture({width, height}, mngl::gpu::texture_format::r8g8b8a8_unorm,
+                                   mngl::texture::usage::sampler | mngl::texture::usage::compute_write);
 
-auto fill = graph.add_pass("fill", [&](mngl::gpu::frame_graph::pass_context& pass)
-{
-    shader["output"] = pass.texture(output);
-    shader["size"] = glm::uvec2{ width, height };
-    shader["color"] = glm::vec4{ 0.1f, 0.4f, 0.9f, 1.0f };
+auto fill = graph.add_pass("fill",
+                           [&](mngl::gpu::frame_graph::pass_context& pass)
+                           {
+	                           shader["output"] = pass.texture(output);
+	                           shader["size"] = glm::uvec2{width, height};
+	                           shader["color"] = glm::vec4{0.1f, 0.4f, 0.9f, 1.0f};
 
-    mngl::gpu::compute_pass compute(pass.commands(), pipeline, shader);
-    compute.dispatch_for({ width, height, 1 });
-});
+	                           mngl::gpu::compute_pass compute(pass.commands(), pipeline, shader);
+	                           compute.dispatch_for({width, height, 1});
+                           });
 fill.write(output);
 
 graph.execute();

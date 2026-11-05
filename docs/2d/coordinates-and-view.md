@@ -10,7 +10,7 @@
 `mngl::rectangle` задаётся как `{x, y, width, height}`. Например:
 
 ```cpp
-mngl::rectangle bounds{ 0.1f, 0.2f, 0.3f, 0.4f };
+mngl::rectangle bounds{0.1f, 0.2f, 0.3f, 0.4f};
 ```
 
 ## Пользовательский view
@@ -18,7 +18,7 @@ mngl::rectangle bounds{ 0.1f, 0.2f, 0.3f, 0.4f };
 `mngl::view` задаёт прямоугольную область мира:
 
 ```cpp
-mngl::view camera{ mngl::rectangle{ 0.0f, 0.0f, 4.0f / 3.0f, 1.0f } };
+mngl::view camera{mngl::rectangle{0.0f, 0.0f, 4.0f / 3.0f, 1.0f}};
 window.set_view(camera);
 scene_texture.set_view(camera);
 ```
@@ -37,13 +37,11 @@ View окна и каждой текстуры хранится отдельно
 
 ```cpp
 auto layout = mngl::two_d::measure_tree_layout(model, options);
-mngl::two_d::tree_draw_area area{
-    0.0, 0.0, layout.size.x, layout.size.y };
+mngl::two_d::tree_draw_area area{0.0, 0.0, layout.size.x, layout.size.y};
 
 options.coordinate_origin = camera_center;
 options.clip_bounds = visible_world_area;
-mngl::two_d::draw_tree_model_parallel(
-    frame, typeface, model, layout, area, options);
+mngl::two_d::draw_tree_model_parallel(frame, typeface, model, layout, area, options);
 ```
 
 Проекция кадра должна быть настроена относительно того же начала координат камеры. `draw_tree_model_parallel()` использует готовую раскладку; видимые узлы и рёбра можно предварительно вычислить через `tree_draw_culler`.

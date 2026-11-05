@@ -9,16 +9,16 @@
 
 int main()
 {
-    mngl::render_window window("MNGL 2D", { 800, 600 });
-    mngl::texture image("assets/image.png");
-    mngl::sprite image_sprite{ image, mngl::rectangle{ 0.1f, 0.1f, 0.5f, 0.5f } };
+	mngl::render_window window("MNGL 2D", {800, 600});
+	mngl::texture image("assets/image.png");
+	mngl::sprite image_sprite{image, mngl::rectangle{0.1f, 0.1f, 0.5f, 0.5f}};
 
-    while (mngl::Input::continue_work())
-    {
-        auto frame = window.frame();
-        frame.draw(image_sprite);
-        frame.display();
-    }
+	while (mngl::input::continue_work())
+	{
+		auto frame = window.frame();
+		frame.draw(image_sprite);
+		frame.display();
+	}
 }
 ```
 

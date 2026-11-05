@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "utilities.hpp"
 #include "device.hpp"
 #include "command_buffer.hpp"
@@ -7,6 +9,7 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -16,7 +19,7 @@
 
 namespace mngl::gpu
 {
-	enum class buffer_usage : uint8_t
+	enum class buffer_usage : std::uint8_t
 	{
 		vertex = SDL_GPU_BUFFERUSAGE_VERTEX,
 		index = SDL_GPU_BUFFERUSAGE_INDEX,
@@ -30,11 +33,12 @@ namespace mngl::gpu
 	{
 	public:
 		buffer() noexcept = default;
-		
-		buffer(SDL_GPUDevice* dev, uint32_t size, buffer_usage usage)
-			: m_device(dev), m_size(size), m_usage(usage)
+
+		buffer(SDL_GPUDevice* dev, std::uint32_t size, buffer_usage usage)
+		    : m_device(dev), m_size(size), m_usage(usage)
 		{
-			if (!m_size) return;
+			if (!m_size)
+				return;
 			if (!m_device)
 			{
 				throw std::invalid_argument("Cannot create a GPU buffer with a null device");
@@ -43,9 +47,15 @@ namespace mngl::gpu
 			SDL_GPUBufferCreateInfo info{};
 			info.usage = static_cast<SDL_GPUBufferUsageFlags>(m_usage);
 			info.size = m_size;
-			
+
 			m_handle = SDL_CreateGPUBuffer(m_device, &info);
-			if (!m_handle) throw sdl_error("Failed to create GPU buffer: ");
+			if (!m_handle)
+				throw sdl_error("Failed to create GPU buffer: ");
+		}
+
+		buffer(const device& dev, std::uint32_t size, buffer_usage usage) : buffer(dev.raw(), size, usage)
+		{
+			m_device_owner = dev;
 		}
 
 		~buffer() { destroy(); }
@@ -54,19 +64,21 @@ namespace mngl::gpu
 		buffer& operator=(const buffer&) = delete;
 
 		buffer(buffer&& other) noexcept
-			: m_device(std::exchange(other.m_device, nullptr))
-			, m_handle(std::exchange(other.m_handle, nullptr))
-			, m_transfer_buffer(std::exchange(other.m_transfer_buffer, nullptr))
-			, m_size(std::exchange(other.m_size, 0))
-			, m_transfer_capacity(std::exchange(other.m_transfer_capacity, 0))
-			, m_usage(other.m_usage)
-		{ }
+		    : m_device_owner(std::move(other.m_device_owner)),
+		      m_device(std::exchange(other.m_device, nullptr)),
+		      m_handle(std::exchange(other.m_handle, nullptr)),
+		      m_transfer_buffer(std::exchange(other.m_transfer_buffer, nullptr)),
+		      m_size(std::exchange(other.m_size, 0)),
+		      m_transfer_capacity(std::exchange(other.m_transfer_capacity, 0)), m_usage(other.m_usage)
+		{
+		}
 
 		buffer& operator=(buffer&& other) noexcept
 		{
 			if (this != &other)
 			{
 				destroy();
+				m_device_owner = std::move(other.m_device_owner);
 				m_device = std::exchange(other.m_device, nullptr);
 				m_handle = std::exchange(other.m_handle, nullptr);
 				m_transfer_buffer = std::exchange(other.m_transfer_buffer, nullptr);
@@ -79,27 +91,45 @@ namespace mngl::gpu
 
 		[[nodiscard]] SDL_GPUBuffer* raw() const noexcept { return m_handle; }
 		[[nodiscard]] SDL_GPUDevice* device_raw() const noexcept { return m_device; }
-		[[nodiscard]] uint32_t size() const noexcept { return m_size; }
+		[[nodiscard]] std::uint32_t size() const noexcept { return m_size; }
 		[[nodiscard]] buffer_usage usage() const noexcept { return m_usage; }
 		[[nodiscard]] bool valid() const noexcept { return m_handle != nullptr; }
 		explicit operator bool() const noexcept { return valid(); }
 
 		void destroy() noexcept
 		{
-			if (m_device && m_handle) SDL_ReleaseGPUBuffer(m_device, m_handle);
+			if (m_device && m_handle)
+				SDL_ReleaseGPUBuffer(m_device, m_handle);
 			m_handle = nullptr;
 			release_transfer_buffer();
 			m_device = nullptr;
+			m_device_owner.reset();
 			m_size = 0;
 		}
 
-		template<typename T>
+		template <typename T>
+		void upload(const device& dev, command_buffer& cmd, std::span<const T> data, bool cycle = false)
+		{
+			if (m_device && m_device != dev.raw())
+			{
+				throw std::invalid_argument("GPU buffer cannot be uploaded using a different device");
+			}
+			if (m_device_owner && m_device_owner->raw() != dev.raw())
+			{
+				throw std::invalid_argument("GPU buffer cannot be uploaded using a different device");
+			}
+			m_device_owner = dev;
+			upload(dev.raw(), cmd, data, cycle);
+		}
+
+		template <typename T>
 		void upload(SDL_GPUDevice* device, command_buffer& cmd, std::span<const T> data, bool cycle = false)
 		{
 			static_assert(std::is_trivially_copyable_v<T>, "Data must be trivially copyable!");
 
-			const uint32_t upload_size = checked_size(data.size_bytes());
-			if (upload_size == 0) return;
+			const std::uint32_t upload_size = checked_size(data.size_bytes());
+			if (upload_size == 0)
+				return;
 			if (!device)
 			{
 				throw std::invalid_argument("Cannot upload GPU buffer data with a null device");
@@ -121,7 +151,7 @@ namespace mngl::gpu
 			// Grow geometrically so a changing workload does not recreate the GPU buffer every frame.
 			if (upload_size > m_size || !m_handle)
 			{
-				const uint32_t capacity = grow_capacity(m_size, upload_size);
+				const std::uint32_t capacity = grow_capacity(m_size, upload_size);
 				SDL_GPUBufferCreateInfo info{};
 				info.usage = static_cast<SDL_GPUBufferUsageFlags>(m_usage);
 				info.size = capacity;
@@ -132,7 +162,8 @@ namespace mngl::gpu
 					throw sdl_error("Failed to allocate GPU buffer: ");
 				}
 
-				if (m_handle) SDL_ReleaseGPUBuffer(m_device, m_handle);
+				if (m_handle)
+					SDL_ReleaseGPUBuffer(m_device, m_handle);
 				m_device = device;
 				m_handle = new_handle;
 				m_size = capacity;
@@ -140,7 +171,7 @@ namespace mngl::gpu
 
 			if (!m_transfer_buffer || upload_size > m_transfer_capacity)
 			{
-				const uint32_t capacity = grow_capacity(m_transfer_capacity, upload_size);
+				const std::uint32_t capacity = grow_capacity(m_transfer_capacity, upload_size);
 				SDL_GPUTransferBufferCreateInfo transfer_info{};
 				transfer_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 				transfer_info.size = capacity;
@@ -171,28 +202,27 @@ namespace mngl::gpu
 				throw sdl_error("Failed to begin GPU copy pass: ");
 			}
 
-			SDL_GPUTransferBufferLocation src_location{
-				.transfer_buffer = m_transfer_buffer,
-				.offset = 0
-			};
+			SDL_GPUTransferBufferLocation src_location{.transfer_buffer = m_transfer_buffer, .offset = 0};
 
-			SDL_GPUBufferRegion dst_region{
-				.buffer = m_handle,
-				.offset = 0,
-				.size = upload_size
-			};
+			SDL_GPUBufferRegion dst_region{.buffer = m_handle, .offset = 0, .size = upload_size};
 
 			SDL_UploadToGPUBuffer(copy_pass, &src_location, &dst_region, cycle);
 			SDL_EndGPUCopyPass(copy_pass);
 		}
 
-		template<typename T>
-		static buffer create_with_data(
-			SDL_GPUDevice* device,
-			command_buffer& cmd,
-			std::span<const T> data,
-			buffer_usage usage
-		)
+		template <typename T>
+		static buffer create_with_data(SDL_GPUDevice* device, command_buffer& cmd, std::span<const T> data,
+		                               buffer_usage usage)
+		{
+			buffer buf(device, checked_size(data.size_bytes()), usage);
+			buf.upload(device, cmd, data);
+			buf.release_transfer_buffer();
+			return buf;
+		}
+
+		template <typename T>
+		static buffer create_with_data(const device& device, command_buffer& cmd, std::span<const T> data,
+		                               buffer_usage usage)
 		{
 			buffer buf(device, checked_size(data.size_bytes()), usage);
 			buf.upload(device, cmd, data);
@@ -201,24 +231,24 @@ namespace mngl::gpu
 		}
 
 	private:
-		static uint32_t grow_capacity(uint32_t current, uint32_t required)
+		static std::uint32_t grow_capacity(std::uint32_t current, std::uint32_t required)
 		{
-			const uint64_t maximum = std::numeric_limits<uint32_t>::max();
-			uint64_t capacity = current ? current : 1;
+			const std::uint64_t maximum = std::numeric_limits<std::uint32_t>::max();
+			std::uint64_t capacity = current ? current : 1;
 			while (capacity < required)
 			{
 				capacity = std::min(capacity * 2, maximum);
 			}
-			return static_cast<uint32_t>(capacity);
+			return static_cast<std::uint32_t>(capacity);
 		}
 
-		static uint32_t checked_size(std::size_t size)
+		static std::uint32_t checked_size(std::size_t size)
 		{
-			if (size > std::numeric_limits<uint32_t>::max())
+			if (size > std::numeric_limits<std::uint32_t>::max())
 			{
 				throw std::length_error("GPU buffer data exceeds SDL's 32-bit size limit");
 			}
-			return static_cast<uint32_t>(size);
+			return static_cast<std::uint32_t>(size);
 		}
 
 		void release_transfer_buffer() noexcept
@@ -231,24 +261,24 @@ namespace mngl::gpu
 			m_transfer_capacity = 0;
 		}
 
+		std::optional<device> m_device_owner;
 		SDL_GPUDevice* m_device = nullptr;
 		SDL_GPUBuffer* m_handle = nullptr;
 		SDL_GPUTransferBuffer* m_transfer_buffer = nullptr;
-		uint32_t m_size = 0;
-		uint32_t m_transfer_capacity = 0;
+		std::uint32_t m_size = 0;
+		std::uint32_t m_transfer_capacity = 0;
 		buffer_usage m_usage = buffer_usage::vertex;
 	};
 
-	template<typename T>
-	class vertex_buffer
+	template <typename T> class vertex_buffer
 	{
 	public:
 		vertex_buffer() = default;
 
-		template<typename Range>
-			requires std::ranges::input_range<const Range>
+		template <typename Range>
+		    requires std::ranges::input_range<const Range>
 		vertex_buffer(const device& device, command_buffer& cmd, const Range& vertices)
-			: m_buffer(device.raw(), 0, buffer_usage::vertex)
+		    : m_buffer(device, 0, buffer_usage::vertex)
 		{
 			upload(device, cmd, vertices);
 		}
@@ -258,23 +288,22 @@ namespace mngl::gpu
 		vertex_buffer(vertex_buffer&&) noexcept = default;
 		vertex_buffer& operator=(vertex_buffer&&) noexcept = default;
 
-		template<typename Range>
-			requires std::ranges::input_range<const Range>
+		template <typename Range>
+		    requires std::ranges::input_range<const Range>
 		void upload(const device& device, command_buffer& cmd, const Range& vertices, bool cycle = false)
 		{
 			using element_type = std::remove_cv_t<std::ranges::range_value_t<const Range>>;
-			static_assert(std::is_same_v<element_type, T>, "Vertex range element type must match vertex_buffer<T>");
+			static_assert(std::is_same_v<element_type, T>,
+			              "Vertex range element type must match vertex_buffer<T>");
 			static_assert(std::is_trivially_copyable_v<T>, "Vertex data must be trivially copyable");
 
-			if constexpr (
-				std::ranges::contiguous_range<const Range> &&
-				std::ranges::sized_range<const Range>)
+			if constexpr (std::ranges::contiguous_range<const Range> && std::ranges::sized_range<const Range>)
 			{
 				const std::size_t count = std::ranges::size(vertices);
 				validate_count(count);
 				const std::span<const T> data(std::ranges::data(vertices), count);
-				m_buffer.upload(device.raw(), cmd, data, cycle);
-				m_count = static_cast<uint32_t>(count);
+				m_buffer.upload(device, cmd, data, cycle);
+				m_count = static_cast<std::uint32_t>(count);
 			}
 			else
 			{
@@ -288,14 +317,14 @@ namespace mngl::gpu
 					packed.push_back(vertex);
 				}
 				validate_count(packed.size());
-				m_buffer.upload(device.raw(), cmd, std::span<const T>(packed), cycle);
-				m_count = static_cast<uint32_t>(packed.size());
+				m_buffer.upload(device, cmd, std::span<const T>(packed), cycle);
+				m_count = static_cast<std::uint32_t>(packed.size());
 			}
 		}
 
 		[[nodiscard]] const buffer& gpu_buffer() const noexcept { return m_buffer; }
 		[[nodiscard]] buffer& gpu_buffer() noexcept { return m_buffer; }
-		[[nodiscard]] uint32_t size() const noexcept { return m_count; }
+		[[nodiscard]] std::uint32_t size() const noexcept { return m_count; }
 		[[nodiscard]] bool empty() const noexcept { return m_count == 0; }
 
 	private:
@@ -305,13 +334,13 @@ namespace mngl::gpu
 			{
 				throw std::invalid_argument("A vertex buffer cannot be uploaded from an empty range");
 			}
-			if (count > std::numeric_limits<uint32_t>::max())
+			if (count > std::numeric_limits<std::uint32_t>::max())
 			{
 				throw std::length_error("Vertex count exceeds SDL's 32-bit limit");
 			}
 		}
 
 		buffer m_buffer;
-		uint32_t m_count = 0;
+		std::uint32_t m_count = 0;
 	};
-}
+} // namespace mngl::gpu

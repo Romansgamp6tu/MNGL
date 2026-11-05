@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstdint>
+#include <optional>
+
 #include "utilities.hpp"
 #include "graphics_shader.hpp"
 #include "vertex_layout.hpp"
@@ -8,7 +11,7 @@
 
 namespace mngl::gpu
 {
-	enum class primitive_type : uint8_t
+	enum class primitive_type : std::uint8_t
 	{
 		triangle_list = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
 		triangle_strip = SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP,
@@ -17,26 +20,26 @@ namespace mngl::gpu
 		point_list = SDL_GPU_PRIMITIVETYPE_POINTLIST
 	};
 
-	enum class cull_mode : uint8_t
+	enum class cull_mode : std::uint8_t
 	{
 		none = SDL_GPU_CULLMODE_NONE,
 		front = SDL_GPU_CULLMODE_FRONT,
 		back = SDL_GPU_CULLMODE_BACK
 	};
 
-	enum class front_face : uint8_t
+	enum class front_face : std::uint8_t
 	{
 		clockwise = SDL_GPU_FRONTFACE_CLOCKWISE,
 		counter_clockwise = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE
 	};
 
-	enum class fill_mode : uint8_t
+	enum class fill_mode : std::uint8_t
 	{
 		fill = SDL_GPU_FILLMODE_FILL,
 		line = SDL_GPU_FILLMODE_LINE
 	};
 
-	enum class compare_op : uint8_t
+	enum class compare_op : std::uint8_t
 	{
 		never = SDL_GPU_COMPAREOP_NEVER,
 		less = SDL_GPU_COMPAREOP_LESS,
@@ -53,8 +56,9 @@ namespace mngl::gpu
 	public:
 		graphics_pipeline() noexcept = default;
 		graphics_pipeline(SDL_GPUDevice* dev, SDL_GPUGraphicsPipeline* handle) noexcept
-			: m_device(dev), m_handle(handle)
-		{ }
+		    : m_device(dev), m_handle(handle)
+		{
+		}
 
 		~graphics_pipeline() { destroy(); }
 
@@ -62,22 +66,26 @@ namespace mngl::gpu
 		graphics_pipeline& operator=(const graphics_pipeline&) = delete;
 
 		graphics_pipeline(graphics_pipeline&& other) noexcept
-			: m_device(std::exchange(other.m_device, nullptr))
-			, m_handle(std::exchange(other.m_handle, nullptr))
-		{ }
+		    : m_device_owner(std::move(other.m_device_owner)),
+		      m_device(std::exchange(other.m_device, nullptr)),
+		      m_handle(std::exchange(other.m_handle, nullptr))
+		{
+		}
 
 		graphics_pipeline& operator=(graphics_pipeline&& other) noexcept
 		{
 			if (this != &other)
 			{
 				destroy();
+				m_device_owner = std::move(other.m_device_owner);
 				m_device = std::exchange(other.m_device, nullptr);
 				m_handle = std::exchange(other.m_handle, nullptr);
 			}
 			return *this;
 		}
 
-		[[nodiscard]] SDL_GPUGraphicsPipeline* handle() const noexcept { return m_handle; }
+		[[nodiscard]] SDL_GPUGraphicsPipeline* raw() const noexcept { return m_handle; }
+		[[nodiscard]] SDL_GPUGraphicsPipeline* handle() const noexcept { return raw(); }
 		[[nodiscard]] bool valid() const noexcept { return m_handle != nullptr; }
 		explicit operator bool() const noexcept { return valid(); }
 
@@ -86,11 +94,15 @@ namespace mngl::gpu
 			if (m_device && m_handle)
 			{
 				SDL_ReleaseGPUGraphicsPipeline(m_device, m_handle);
-				m_handle = nullptr;
 			}
+			m_device = nullptr;
+			m_handle = nullptr;
+			m_device_owner.reset();
 		}
 
 	private:
+		friend class graphics_pipeline_builder;
+		std::optional<device> m_device_owner;
 		SDL_GPUDevice* m_device = nullptr;
 		SDL_GPUGraphicsPipeline* m_handle = nullptr;
 	};
@@ -98,7 +110,6 @@ namespace mngl::gpu
 	class graphics_pipeline_builder
 	{
 	public:
-
 		graphics_pipeline_builder() = default;
 
 		graphics_pipeline_builder& set_vertex_shader(SDL_GPUShader* shader) noexcept
@@ -109,7 +120,7 @@ namespace mngl::gpu
 
 		graphics_pipeline_builder& set_vertex_shader(const graphics_shader& shader) noexcept
 		{
-			return set_vertex_shader(shader.handle());
+			return set_vertex_shader(shader.raw());
 		}
 
 		graphics_pipeline_builder& set_fragment_shader(SDL_GPUShader* shader) noexcept
@@ -120,7 +131,7 @@ namespace mngl::gpu
 
 		graphics_pipeline_builder& set_fragment_shader(const graphics_shader& shader) noexcept
 		{
-			return set_fragment_shader(shader.handle());
+			return set_fragment_shader(shader.raw());
 		}
 
 		graphics_pipeline_builder& set_vertex_layout(const vertex_layout& layout)
@@ -153,10 +164,8 @@ namespace mngl::gpu
 			return *this;
 		}
 
-		graphics_pipeline_builder& enable_depth_test(
-			compare_op op = compare_op::less_or_equal,
-			bool write_enable = true
-		) noexcept
+		graphics_pipeline_builder& enable_depth_test(compare_op op = compare_op::less_or_equal,
+		                                             bool write_enable = true) noexcept
 		{
 			m_enable_depth_test = true;
 			m_enable_depth_write = write_enable;
@@ -171,22 +180,16 @@ namespace mngl::gpu
 			return *this;
 		}
 
-		graphics_pipeline_builder& add_color_target(
-			SDL_GPUTextureFormat format,
-			SDL_GPUColorTargetBlendState blend_state = {}
-		)
+		graphics_pipeline_builder& add_color_target(SDL_GPUTextureFormat format,
+		                                            SDL_GPUColorTargetBlendState blend_state = {})
 		{
-			m_color_targets.push_back(SDL_GPUColorTargetDescription{
-				.format = format,
-				.blend_state = blend_state
-									  });
+			m_color_targets.push_back(
+			    SDL_GPUColorTargetDescription{.format = format, .blend_state = blend_state});
 			return *this;
 		}
 
-		graphics_pipeline_builder& add_color_target(
-			texture_format format,
-			SDL_GPUColorTargetBlendState blend_state = {}
-		)
+		graphics_pipeline_builder& add_color_target(texture_format format,
+		                                            SDL_GPUColorTargetBlendState blend_state = {})
 		{
 			return add_color_target(static_cast<SDL_GPUTextureFormat>(format), blend_state);
 		}
@@ -254,32 +257,28 @@ namespace mngl::gpu
 			info.fragment_shader = m_frag_shader;
 
 			info.vertex_input_state = SDL_GPUVertexInputState{
-				.vertex_buffer_descriptions = sdl_buffers.data(),
-				.num_vertex_buffers = static_cast<uint32_t>(sdl_buffers.size()),
-				.vertex_attributes = sdl_attrs.data(),
-				.num_vertex_attributes = static_cast<uint32_t>(sdl_attrs.size())
-			};
+			    .vertex_buffer_descriptions = sdl_buffers.data(),
+			    .num_vertex_buffers = static_cast<std::uint32_t>(sdl_buffers.size()),
+			    .vertex_attributes = sdl_attrs.data(),
+			    .num_vertex_attributes = static_cast<std::uint32_t>(sdl_attrs.size())};
 
 			info.primitive_type = static_cast<SDL_GPUPrimitiveType>(m_primitive_type);
 
-			info.rasterizer_state = SDL_GPURasterizerState{
-				.fill_mode = static_cast<SDL_GPUFillMode>(m_fill_mode),
-				.cull_mode = static_cast<SDL_GPUCullMode>(m_cull_mode),
-				.front_face = static_cast<SDL_GPUFrontFace>(m_front_face)
-			};
+			info.rasterizer_state =
+			    SDL_GPURasterizerState{.fill_mode = static_cast<SDL_GPUFillMode>(m_fill_mode),
+				                       .cull_mode = static_cast<SDL_GPUCullMode>(m_cull_mode),
+				                       .front_face = static_cast<SDL_GPUFrontFace>(m_front_face)};
 
-			info.depth_stencil_state = SDL_GPUDepthStencilState{
-				.compare_op = static_cast<SDL_GPUCompareOp>(m_depth_compare_op),
-				.enable_depth_test = m_enable_depth_test,
-				.enable_depth_write = m_enable_depth_write
-			};
+			info.depth_stencil_state =
+			    SDL_GPUDepthStencilState{.compare_op = static_cast<SDL_GPUCompareOp>(m_depth_compare_op),
+				                         .enable_depth_test = m_enable_depth_test,
+				                         .enable_depth_write = m_enable_depth_write};
 
 			info.target_info = SDL_GPUGraphicsPipelineTargetInfo{
-				.color_target_descriptions = m_color_targets.data(),
-				.num_color_targets = static_cast<uint32_t>(m_color_targets.size()),
-				.depth_stencil_format = m_depth_stencil_format,
-				.has_depth_stencil_target = m_has_depth_target
-			};
+			    .color_target_descriptions = m_color_targets.data(),
+			    .num_color_targets = static_cast<std::uint32_t>(m_color_targets.size()),
+			    .depth_stencil_format = m_depth_stencil_format,
+			    .has_depth_stencil_target = m_has_depth_target};
 
 			SDL_GPUGraphicsPipeline* handle = SDL_CreateGPUGraphicsPipeline(device, &info);
 			if (!handle)
@@ -292,7 +291,9 @@ namespace mngl::gpu
 
 		graphics_pipeline build(const mngl::gpu::device& dev) const
 		{
-			return build(dev.raw());
+			auto result = build(dev.raw());
+			result.m_device_owner = dev;
+			return result;
 		}
 
 	private:
@@ -313,4 +314,4 @@ namespace mngl::gpu
 		SDL_GPUTextureFormat m_depth_stencil_format = SDL_GPU_TEXTUREFORMAT_INVALID;
 		bool m_has_depth_target = false;
 	};
-}
+} // namespace mngl::gpu

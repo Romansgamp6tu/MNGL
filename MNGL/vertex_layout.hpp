@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 
 #include "utilities.hpp"
 #include "device.hpp"
@@ -9,7 +10,7 @@
 
 namespace mngl::gpu
 {
-	enum class vertex_elemetn_fmt : uint8_t
+	enum class vertex_elemetn_fmt : std::uint8_t
 	{
 		invalid = 0,
 
@@ -32,7 +33,7 @@ namespace mngl::gpu
 		ubyte4_norm = SDL_GPU_VERTEXELEMENTFORMAT_UBYTE4_NORM
 	};
 
-	enum class vertex_input_rate : uint8_t
+	enum class vertex_input_rate : std::uint8_t
 	{
 		vertex = SDL_GPU_VERTEXINPUTRATE_VERTEX,
 		instance = SDL_GPU_VERTEXINPUTRATE_INSTANCE
@@ -40,11 +41,11 @@ namespace mngl::gpu
 
 	struct vertex_attribute
 	{
-		uint32_t location = 0;
-		uint32_t buffer_slot = 0;
+		std::uint32_t location = 0;
+		std::uint32_t buffer_slot = 0;
 		vertex_elemetn_fmt format = vertex_elemetn_fmt::invalid;
-		uint32_t offset = 0;
-		
+		std::uint32_t offset = 0;
+
 		SDL_GPUVertexAttribute to_sdl() const noexcept
 		{
 			SDL_GPUVertexAttribute attr{};
@@ -58,10 +59,10 @@ namespace mngl::gpu
 
 	struct vertex_buffer_description
 	{
-		uint32_t slot = 0;
-		uint32_t pitch = 0;
+		std::uint32_t slot = 0;
+		std::uint32_t pitch = 0;
 		vertex_input_rate input_rate = vertex_input_rate::vertex;
-		uint32_t instance_step_rate = 0;
+		std::uint32_t instance_step_rate = 0;
 
 		SDL_GPUVertexBufferDescription to_sdl() const noexcept
 		{
@@ -79,55 +80,43 @@ namespace mngl::gpu
 	public:
 		vertex_layout() = default;
 
-		vertex_layout& add_buffer(
-			uint32_t slot,
-			uint32_t pitch,
-			vertex_input_rate input_rate = vertex_input_rate::vertex,
-			uint32_t instance_step_rate = 0
-		)
+		vertex_layout& add_buffer(std::uint32_t slot, std::uint32_t pitch,
+		                          vertex_input_rate input_rate = vertex_input_rate::vertex,
+		                          std::uint32_t instance_step_rate = 0)
 		{
 			m_buffers.push_back({slot, pitch, input_rate, instance_step_rate});
 			return *this;
 		}
 
-		template<typename Vertex>
-		vertex_layout& add_buffer(
-			uint32_t slot,
-			vertex_input_rate input_rate = vertex_input_rate::vertex,
-			uint32_t instance_step_rate = 0
-		)
+		template <typename Vertex>
+		vertex_layout& add_buffer(std::uint32_t slot,
+		                          vertex_input_rate input_rate = vertex_input_rate::vertex,
+		                          std::uint32_t instance_step_rate = 0)
 		{
 			static_assert(std::is_trivially_copyable_v<Vertex>, "Vertex type must be trivially copyable");
-			static_assert(sizeof(Vertex) <= std::numeric_limits<uint32_t>::max(), "Vertex type is too large");
-			return add_buffer(
-				slot,
-				static_cast<uint32_t>(sizeof(Vertex)),
-				input_rate,
-				instance_step_rate);
+			static_assert(sizeof(Vertex) <= std::numeric_limits<std::uint32_t>::max(),
+			              "Vertex type is too large");
+			return add_buffer(slot, static_cast<std::uint32_t>(sizeof(Vertex)), input_rate,
+			                  instance_step_rate);
 		}
 
-		vertex_layout& add_attribute(
-			uint32_t location,
-			uint32_t buffer_slot,
-			vertex_elemetn_fmt format,
-			uint32_t offset
-		)
+		vertex_layout& add_attribute(std::uint32_t location, std::uint32_t buffer_slot,
+		                             vertex_elemetn_fmt format, std::uint32_t offset)
 		{
 			m_attributes.push_back({location, buffer_slot, format, offset});
 			return *this;
 		}
 
-		vertex_layout& add_attribute(
-			uint32_t location,
-			vertex_elemetn_fmt format,
-			uint32_t offset
-		)
+		vertex_layout& add_attribute(std::uint32_t location, vertex_elemetn_fmt format, std::uint32_t offset)
 		{
 			m_attributes.push_back({location, 0, format, offset});
 			return *this;
 		}
 
-		[[nodiscard]] std::span<const vertex_buffer_description> buffers() const noexcept { return m_buffers; }
+		[[nodiscard]] std::span<const vertex_buffer_description> buffers() const noexcept
+		{
+			return m_buffers;
+		}
 		[[nodiscard]] std::span<const vertex_attribute> attributes() const noexcept { return m_attributes; }
 
 		[[nodiscard]] bool empty() const noexcept { return m_buffers.empty() && m_attributes.empty(); }
@@ -142,4 +131,4 @@ namespace mngl::gpu
 		std::vector<vertex_buffer_description> m_buffers;
 		std::vector<vertex_attribute> m_attributes;
 	};
-}
+} // namespace mngl::gpu

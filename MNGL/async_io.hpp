@@ -1,6 +1,6 @@
 #pragma once
 
-#include "utilities.hpp"
+#include "runtime.hpp"
 
 #include <SDL3/SDL_asyncio.h>
 
@@ -13,6 +13,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <expected>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -46,17 +47,44 @@ namespace mngl::async_io
 		std::uint64_t bytes_transferred = 0;
 		std::string error;
 
-		[[nodiscard]] bool ready() const noexcept
-		{
-			return status != request_status::pending;
-		}
+		[[nodiscard]] bool ready() const noexcept { return status != request_status::pending; }
 	};
+
+	enum class request_error_code
+	{
+		operation_failed,
+		cancelled,
+		invalid_request,
+		wrong_queue,
+		result_already_taken,
+		not_tracked
+	};
+
+	struct request_value
+	{
+		request_result info;
+		std::vector<std::byte> data;
+	};
+
+	struct request_error
+	{
+		request_error_code code = request_error_code::operation_failed;
+		request_result info;
+		std::string message;
+	};
+
+	using request_outcome = std::expected<request_value, request_error>;
 
 	namespace detail
 	{
+		struct queue_identity
+		{
+		};
+
 		struct request_state
 		{
 			mutable std::mutex mutex;
+			std::weak_ptr<queue_identity> owner_queue;
 			SDL_AsyncIO* file = nullptr;
 			operation type = operation::read;
 			request_status status = request_status::pending;
@@ -84,9 +112,7 @@ namespace mngl::async_io
 			}
 
 			const auto encoded = path.u8string();
-			std::string result(
-				reinterpret_cast<const char*>(encoded.data()),
-				encoded.size());
+			std::string result(reinterpret_cast<const char*>(encoded.data()), encoded.size());
 			if (result.find('\0') != std::string::npos)
 			{
 				throw std::invalid_argument("async I/O path cannot contain a null character");
@@ -117,36 +143,37 @@ namespace mngl::async_io
 				}
 			}
 
-			void release() noexcept
-			{
-				file = nullptr;
-			}
+			void release() noexcept { file = nullptr; }
 		};
-	}
+	} // namespace detail
 
-	class Request
+	class request
 	{
 	public:
-		Request(const Request&) noexcept = default;
-		Request& operator=(const Request&) noexcept = default;
-		Request(Request&&) noexcept = default;
-		Request& operator=(Request&&) noexcept = default;
+		request(const request&) noexcept = default;
+		request& operator=(const request&) noexcept = default;
+		request(request&&) noexcept = default;
+		request& operator=(request&&) noexcept = default;
+		[[nodiscard]] bool valid() const noexcept { return static_cast<bool>(m_state); }
+		explicit operator bool() const noexcept { return valid(); }
 
 		[[nodiscard]] request_result result() const
 		{
+			if (!m_state)
+				return {request_status::failed, operation::read, 0, 0, 0, "async request is empty"};
 			std::lock_guard lock(m_state->mutex);
-			return {
-				m_state->status,
-				m_state->type,
-				m_state->offset,
-				m_state->bytes_requested,
-				m_state->bytes_transferred,
-				m_state->error
-			};
+			return {m_state->status,
+			        m_state->type,
+			        m_state->offset,
+			        m_state->bytes_requested,
+			        m_state->bytes_transferred,
+			        m_state->error};
 		}
 
 		[[nodiscard]] bool ready() const
 		{
+			if (!m_state)
+				return true; // An empty request has a terminal failure result.
 			std::lock_guard lock(m_state->mutex);
 			return m_state->status != request_status::pending;
 		}
@@ -155,6 +182,8 @@ namespace mngl::async_io
 		// is pending, the queue retains the request state and its buffer.
 		[[nodiscard]] std::vector<std::byte> take_data()
 		{
+			if (!m_state)
+				throw std::logic_error("async request is empty");
 			std::lock_guard lock(m_state->mutex);
 			if (m_state->type != operation::read)
 			{
@@ -166,8 +195,8 @@ namespace mngl::async_io
 			}
 			if (m_state->status != request_status::completed)
 			{
-				throw std::runtime_error(
-					m_state->error.empty() ? "async read did not complete successfully" : m_state->error);
+				throw std::runtime_error(m_state->error.empty() ? "async read did not complete successfully"
+				                                                : m_state->error);
 			}
 			if (m_state->data_taken)
 			{
@@ -190,23 +219,72 @@ namespace mngl::async_io
 		}
 
 	private:
-		explicit Request(std::shared_ptr<detail::request_state> state)
-			: m_state(std::move(state))
+		[[nodiscard]] request_outcome take_outcome() const
 		{
+			if (!m_state)
+			{
+				request_result info{request_status::failed,  operation::read, 0, 0, 0,
+				                    "async request is empty"};
+				return std::unexpected(request_error{request_error_code::invalid_request, info, info.error});
+			}
+
+			std::lock_guard lock(m_state->mutex);
+			request_result info{m_state->status,
+			                    m_state->type,
+			                    m_state->offset,
+			                    m_state->bytes_requested,
+			                    m_state->bytes_transferred,
+			                    m_state->error};
+			if (m_state->status == request_status::pending)
+			{
+				info.error = "async request has not completed";
+				return std::unexpected(request_error{request_error_code::not_tracked, info, info.error});
+			}
+			if (m_state->status != request_status::completed)
+			{
+				const auto code = m_state->status == request_status::cancelled
+				                      ? request_error_code::cancelled
+				                      : request_error_code::operation_failed;
+				if (info.error.empty())
+				{
+					info.error = m_state->status == request_status::cancelled ? "async request was cancelled"
+					                                                          : "async request failed";
+				}
+				return std::unexpected(request_error{code, info, info.error});
+			}
+			if (m_state->data_taken)
+			{
+				info.error = "async request result has already been taken";
+				return std::unexpected(
+				    request_error{request_error_code::result_already_taken, info, info.error});
+			}
+
+			m_state->data_taken = true;
+			std::vector<std::byte> data;
+			if (m_state->type == operation::read)
+			{
+				data = std::move(m_state->buffer);
+			}
+			else
+			{
+				std::vector<std::byte>().swap(m_state->buffer);
+			}
+			return request_value{std::move(info), std::move(data)};
 		}
+
+		explicit request(std::shared_ptr<detail::request_state> state) : m_state(std::move(state)) {}
 
 		std::shared_ptr<detail::request_state> m_state;
 
-		friend class Queue;
+		friend class queue;
 	};
 
 	// Owns an SDL async I/O queue. File open and size queries are synchronous;
 	// reads, writes and file closes are processed asynchronously.
-	class Queue
+	class queue
 	{
 	public:
-		Queue()
-			: m_queue(SDL_CreateAsyncIOQueue())
+		queue() : m_identity(std::make_shared<detail::queue_identity>()), m_queue(SDL_CreateAsyncIOQueue())
 		{
 			if (!m_queue)
 			{
@@ -214,17 +292,14 @@ namespace mngl::async_io
 			}
 		}
 
-		Queue(const Queue&) = delete;
-		Queue& operator=(const Queue&) = delete;
-		Queue(Queue&&) = delete;
-		Queue& operator=(Queue&&) = delete;
+		queue(const queue&) = delete;
+		queue& operator=(const queue&) = delete;
+		queue(queue&&) = delete;
+		queue& operator=(queue&&) = delete;
 
-		~Queue() noexcept
-		{
-			shutdown();
-		}
+		~queue() noexcept { shutdown(); }
 
-		[[nodiscard]] Request read_file(const std::filesystem::path& path)
+		[[nodiscard]] request read_file(const std::filesystem::path& path)
 		{
 			std::lock_guard queue_lock(m_mutex);
 			ensure_open();
@@ -235,26 +310,20 @@ namespace mngl::async_io
 			{
 				throw sdl_error("failed to open file for async reading: ");
 			}
-			detail::async_file_guard file_guard{ file, m_queue };
+			detail::async_file_guard file_guard{file, m_queue};
 
 			const auto file_size = SDL_GetAsyncIOSize(file);
 			if (file_size < 0)
 			{
 				throw sdl_error("failed to get file size for async reading: ");
 			}
-			return start_read(
-				file,
-				0,
-				static_cast<std::uint64_t>(file_size),
-				file_guard);
+			return start_read(file, 0, static_cast<std::uint64_t>(file_size), file_guard);
 		}
 
 		// Reads up to size bytes beginning at offset. Reading past end-of-file is
 		// allowed; inspect bytes_transferred for the actual amount returned.
-		[[nodiscard]] Request read_range(
-			const std::filesystem::path& path,
-			std::uint64_t offset,
-			std::uint64_t size)
+		[[nodiscard]] request read_range(const std::filesystem::path& path, std::uint64_t offset,
+		                                 std::uint64_t size)
 		{
 			std::lock_guard queue_lock(m_mutex);
 			ensure_open();
@@ -266,14 +335,12 @@ namespace mngl::async_io
 			{
 				throw sdl_error("failed to open file for async reading: ");
 			}
-			detail::async_file_guard file_guard{ file, m_queue };
+			detail::async_file_guard file_guard{file, m_queue};
 			return start_read(file, offset, size, file_guard);
 		}
 
-		[[nodiscard]] Request write_file(
-			const std::filesystem::path& path,
-			std::vector<std::byte> contents,
-			bool flush_on_close = false)
+		[[nodiscard]] request write_file(const std::filesystem::path& path, std::vector<std::byte> contents,
+		                                 bool flush_on_close = false)
 		{
 			std::lock_guard queue_lock(m_mutex);
 			ensure_open();
@@ -284,17 +351,14 @@ namespace mngl::async_io
 			{
 				throw sdl_error("failed to open file for async writing: ");
 			}
-			detail::async_file_guard file_guard{ file, m_queue };
+			detail::async_file_guard file_guard{file, m_queue};
 			return start_write(file, 0, std::move(contents), flush_on_close, file_guard);
 		}
 
 		// Writes at offset without truncating the existing file. The file must
 		// already exist; creating a new file is provided by write_file().
-		[[nodiscard]] Request write_range(
-			const std::filesystem::path& path,
-			std::uint64_t offset,
-			std::vector<std::byte> contents,
-			bool flush_on_close = false)
+		[[nodiscard]] request write_range(const std::filesystem::path& path, std::uint64_t offset,
+		                                  std::vector<std::byte> contents, bool flush_on_close = false)
 		{
 			std::lock_guard queue_lock(m_mutex);
 			ensure_open();
@@ -306,48 +370,32 @@ namespace mngl::async_io
 			{
 				throw sdl_error("failed to open existing file for async range writing: ");
 			}
-			detail::async_file_guard file_guard{ file, m_queue };
+			detail::async_file_guard file_guard{file, m_queue};
 			return start_write(file, offset, std::move(contents), flush_on_close, file_guard);
 		}
 
-		[[nodiscard]] Request write_file(
-			const std::filesystem::path& path,
-			std::span<const std::byte> contents,
-			bool flush_on_close = false)
+		[[nodiscard]] request write_file(const std::filesystem::path& path,
+		                                 std::span<const std::byte> contents, bool flush_on_close = false)
 		{
-			return write_file(
-				path,
-				std::vector<std::byte>(contents.begin(), contents.end()),
-				flush_on_close);
+			return write_file(path, std::vector<std::byte>(contents.begin(), contents.end()), flush_on_close);
 		}
 
-		[[nodiscard]] Request write_range(
-			const std::filesystem::path& path,
-			std::uint64_t offset,
-			std::span<const std::byte> contents,
-			bool flush_on_close = false)
+		[[nodiscard]] request write_range(const std::filesystem::path& path, std::uint64_t offset,
+		                                  std::span<const std::byte> contents, bool flush_on_close = false)
 		{
-			return write_range(
-				path,
-				offset,
-				std::vector<std::byte>(contents.begin(), contents.end()),
-				flush_on_close);
+			return write_range(path, offset, std::vector<std::byte>(contents.begin(), contents.end()),
+			                   flush_on_close);
 		}
 
-		[[nodiscard]] Request write_text_file(
-			const std::filesystem::path& path,
-			std::string_view contents,
-			bool flush_on_close = false)
+		[[nodiscard]] request write_text_file(const std::filesystem::path& path, std::string_view contents,
+		                                      bool flush_on_close = false)
 		{
 			const auto bytes = std::as_bytes(std::span(contents.data(), contents.size()));
 			return write_file(path, bytes, flush_on_close);
 		}
 
-		[[nodiscard]] Request write_text_range(
-			const std::filesystem::path& path,
-			std::uint64_t offset,
-			std::string_view contents,
-			bool flush_on_close = false)
+		[[nodiscard]] request write_text_range(const std::filesystem::path& path, std::uint64_t offset,
+		                                       std::string_view contents, bool flush_on_close = false)
 		{
 			const auto bytes = std::as_bytes(std::span(contents.data(), contents.size()));
 			return write_range(path, offset, bytes, flush_on_close);
@@ -389,8 +437,7 @@ namespace mngl::async_io
 			retry_closes();
 
 			const auto max_timeout = static_cast<std::int64_t>(std::numeric_limits<Sint32>::max());
-			const auto timeout_ms = static_cast<Sint32>(
-				std::min<std::int64_t>(timeout.count(), max_timeout));
+			const auto timeout_ms = static_cast<Sint32>(std::min<std::int64_t>(timeout.count(), max_timeout));
 			SDL_AsyncIOOutcome outcome{};
 			std::size_t completed_requests = 0;
 			if (SDL_WaitAsyncIOResult(m_queue, &outcome, timeout_ms))
@@ -404,6 +451,37 @@ namespace mngl::async_io
 
 			retry_closes();
 			return completed_requests;
+		}
+
+		// Waits until this request completes, servicing other requests on the same queue as well.
+		// A successful read transfers its buffer into the returned value.
+		[[nodiscard]] request_outcome wait(const request& target)
+		{
+			if (!target.m_state)
+			{
+				return target.take_outcome();
+			}
+
+			if (target.m_state->owner_queue.lock() != m_identity)
+			{
+				auto info = target.result();
+				info.error = "async request belongs to a different queue";
+				return std::unexpected(request_error{request_error_code::wrong_queue, info, info.error});
+			}
+
+			constexpr auto max_wait = std::chrono::milliseconds{std::numeric_limits<Sint32>::max()};
+			while (!target.ready())
+			{
+				if (pending_count() == 0 && !target.ready())
+				{
+					auto info = target.result();
+					info.error = "async I/O queue no longer tracks this request";
+					return std::unexpected(request_error{request_error_code::not_tracked, info, info.error});
+				}
+				(void)wait(max_wait);
+			}
+
+			return target.take_outcome();
 		}
 
 		[[nodiscard]] std::size_t pending_count() const
@@ -433,14 +511,12 @@ namespace mngl::async_io
 			}
 		}
 
-		Request start_read(
-			SDL_AsyncIO* file,
-			std::uint64_t offset,
-			std::uint64_t size,
-			detail::async_file_guard& file_guard)
+		request start_read(SDL_AsyncIO* file, std::uint64_t offset, std::uint64_t size,
+		                   detail::async_file_guard& file_guard)
 		{
 			validate_range(offset, size);
 			auto state = std::make_shared<detail::request_state>();
+			state->owner_queue = m_identity;
 			state->file = file;
 			state->type = operation::read;
 			state->offset = offset;
@@ -462,19 +538,16 @@ namespace mngl::async_io
 			}
 
 			try_queue_close(state);
-			return Request(std::move(state));
+			return request(std::move(state));
 		}
 
-		Request start_write(
-			SDL_AsyncIO* file,
-			std::uint64_t offset,
-			std::vector<std::byte> contents,
-			bool flush_on_close,
-			detail::async_file_guard& file_guard)
+		request start_write(SDL_AsyncIO* file, std::uint64_t offset, std::vector<std::byte> contents,
+		                    bool flush_on_close, detail::async_file_guard& file_guard)
 		{
 			const auto size = static_cast<std::uint64_t>(contents.size());
 			validate_range(offset, size);
 			auto state = std::make_shared<detail::request_state>();
+			state->owner_queue = m_identity;
 			state->file = file;
 			state->type = operation::write;
 			state->offset = offset;
@@ -489,13 +562,7 @@ namespace mngl::async_io
 				state->io_done = true;
 				state->io_succeeded = true;
 			}
-			else if (!SDL_WriteAsyncIO(
-				file,
-				state->buffer.data(),
-				offset,
-				size,
-				m_queue,
-				state.get()))
+			else if (!SDL_WriteAsyncIO(file, state->buffer.data(), offset, size, m_queue, state.get()))
 			{
 				state->io_done = true;
 				state->io_succeeded = false;
@@ -503,7 +570,7 @@ namespace mngl::async_io
 			}
 
 			try_queue_close(state);
-			return Request(std::move(state));
+			return request(std::move(state));
 		}
 
 		void retry_closes() noexcept
@@ -555,16 +622,14 @@ namespace mngl::async_io
 					state->bytes_transferred = outcome.bytes_transferred;
 					state->io_succeeded = outcome.result == SDL_ASYNCIO_COMPLETE;
 					state->io_cancelled = outcome.result == SDL_ASYNCIO_CANCELED;
-					if (state->type == operation::read &&
-						outcome.bytes_transferred <= state->buffer.size())
+					if (state->type == operation::read && outcome.bytes_transferred <= state->buffer.size())
 					{
 						state->buffer.resize(static_cast<std::size_t>(outcome.bytes_transferred));
 					}
 					if (!state->io_succeeded && state->error.empty())
 					{
-						state->error = state->io_cancelled
-							? "async file operation was cancelled"
-							: "async file operation failed";
+						state->error = state->io_cancelled ? "async file operation was cancelled"
+						                                   : "async file operation failed";
 					}
 				}
 				else if (outcome.type == SDL_ASYNCIO_TASK_CLOSE)
@@ -574,9 +639,8 @@ namespace mngl::async_io
 					state->close_cancelled = outcome.result == SDL_ASYNCIO_CANCELED;
 					if (!state->close_succeeded && state->error.empty())
 					{
-						state->error = state->close_cancelled
-							? "async file close was cancelled"
-							: "async file close failed";
+						state->error = state->close_cancelled ? "async file close was cancelled"
+						                                      : "async file close failed";
 					}
 				}
 			}
@@ -646,8 +710,16 @@ namespace mngl::async_io
 			m_requests.clear();
 		}
 
+		std::shared_ptr<detail::queue_identity> m_identity;
 		SDL_AsyncIOQueue* m_queue = nullptr;
 		mutable std::mutex m_mutex;
 		std::unordered_map<void*, std::shared_ptr<detail::request_state>> m_requests;
 	};
-}
+} // namespace mngl::async_io
+
+// Compatibility names; new code uses snake_case.
+namespace mngl::async_io
+{
+	using Request = request;
+	using Queue = queue;
+} // namespace mngl::async_io

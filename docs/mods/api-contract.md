@@ -57,17 +57,15 @@
 ```cpp
 #include <mngl/mod_loader.hpp>
 
-extern "C" MNGL_MOD_EXPORT bool MNGL_MOD_CALL
-mngl_mod_load_v1(mngl::mods::mod_context& context)
+extern "C" MNGL_MOD_EXPORT bool MNGL_MOD_CALL mngl_mod_load_v1(mngl::mods::mod_context& context)
 {
-    context.replace_function<bool(tree_base&, key_type)>(
-        "mngl.demo.tree.insert", &fast_insert);
-    return true;
+	context.replace_function<bool(tree_base&, key_type)>("mngl.demo.tree.insert", &fast_insert);
+	return true;
 }
 
 extern "C" MNGL_MOD_EXPORT void MNGL_MOD_CALL mngl_mod_unload_v1()
 {
-    // Остановить и присоединить потоки, созданные модом.
+	// Остановить и присоединить потоки, созданные модом.
 }
 ```
 
@@ -106,15 +104,14 @@ Host загружает сохранённые значения после `load
 
 ```cpp
 for (const auto& issue : mods.load_settings("config/mod-settings.ini"))
-    std::cerr << issue.message << '\n';
+	std::cerr << issue.message << '\n';
 
 for (const auto& setting : mods.settings())
-    std::cout << setting.mod_id << ' ' << setting.property_id
-              << " = " << setting.value << '\n';
+	std::cout << setting.mod_id << ' ' << setting.property_id << " = " << setting.value << '\n';
 
 std::string error;
 if (!mods.set_setting("example.tree-tools", "demo.tree.node-gap", "36.5", &error))
-    std::cerr << error << '\n';
+	std::cerr << error << '\n';
 mods.save_settings("config/mod-settings.ini");
 ```
 
@@ -141,19 +138,17 @@ mods.save_settings("config/mod-settings.ini");
 В `MNGL/mods.hpp` есть декларативные макросы для host. Их вызывают на уровне namespace в `.cpp` файлах после объявления типов; при старте host применяет собранные декларации к своему реестру. Идентификаторы передаются явно строковыми литералами. Дубли одинаковой декларации из нескольких translation unit сворачиваются; конфликтующие декларации с одним ID целиком пропускаются и попадают в диагностику.
 
 ```cpp
-struct tree_base : mngl::mods::modable {
-    virtual bool insert_impl(key_type key) = 0;
-    virtual ~tree_base() = default;
+struct tree_base : mngl::mods::modable
+{
+	virtual bool insert_impl(key_type key) = 0;
+	virtual ~tree_base() = default;
 };
 
 REGISTER_MODDABLE_CLASS(tree_base, "mngl.demo.tree");
-REGISTER_MODDABLE_FUNCTION(
-    tree_base, "mngl.demo.tree.insert", &tree_base::insert_impl);
-REGISTER_MODDABLE_VALUE_PROPERTY(
-    tree_base, float, "mngl.demo.tree.node-gap",
-    mngl::mods::property_scope::global, 24.0f);
-REGISTER_MODDABLE_FACTORY(
-    tree_base, "mngl.demo.tree", "mngl.demo.tree.bst", make_bst_tree);
+REGISTER_MODDABLE_FUNCTION(tree_base, "mngl.demo.tree.insert", &tree_base::insert_impl);
+REGISTER_MODDABLE_VALUE_PROPERTY(tree_base, float, "mngl.demo.tree.node-gap",
+                                 mngl::mods::property_scope::global, 24.0f);
+REGISTER_MODDABLE_FACTORY(tree_base, "mngl.demo.tree", "mngl.demo.tree.bst", make_bst_tree);
 ```
 
 `REGISTER_MODDABLE_FUNCTION` выводит сигнатуру из обычного function pointer, member function pointer или лямбды с однозначным `operator()`. Для перегруженной или generic-функции есть вариант `REGISTER_MODDABLE_FUNCTION_AS(Type, Signature, Id, Fallback)`. Свойство с host getter/setter объявляется через `REGISTER_MODDABLE_PROPERTY`; валидатор можно добавить через `REGISTER_MODDABLE_VALIDATED_PROPERTY`.
@@ -179,16 +174,13 @@ Host передаёт моду контекст с его постоянным I
 auto context = mods.for_mod("example.fast-tree");
 context.replace_function<insert_signature>("mngl.demo.tree.insert", &fast_insert);
 context.around_function<insert_signature>("mngl.demo.tree.insert", 10,
-    [](auto next, tree_base& tree, key_type key) {
-        return next(tree, key);
-    });
+                                          [](auto next, tree_base& tree, key_type key)
+                                          { return next(tree, key); });
 context.set_property<float>("mngl.demo.tree.node-gap", 32.0f);
-context.add_implementation<tree_base>("mngl.demo.tree", "mngl.demo.tree.fast", [] {
-    return std::make_unique<fast_tree>();
-});
-context.replace_factory<tree_base>("mngl.demo.tree", "mngl.demo.tree.bst", [] {
-    return std::make_unique<instrumented_bst>();
-});
+context.add_implementation<tree_base>("mngl.demo.tree", "mngl.demo.tree.fast",
+                                      [] { return std::make_unique<fast_tree>(); });
+context.replace_factory<tree_base>("mngl.demo.tree", "mngl.demo.tree.bst",
+                                   [] { return std::make_unique<instrumented_bst>(); });
 ```
 
 `REGISTER_MODDABLE_*` — макросы host-деклараций, а не регистрации внутри DLL мода. `registry.remove_mod(id)` снимает runtime-регистрации и overrides указанного мода, но самостоятельно не управляет DLL. Для нативной загрузки host подключает `mngl/mod_loader.hpp`, создаёт `mod_loader` после `registry` и вызывает `load_package` или `load_all`. API header-only; host и мод должны использовать совместимый C++ ABI, совпадающий с `binary_abi`.
@@ -199,8 +191,8 @@ mods.apply_declarations();
 
 mngl::mods::mod_loader loader(mods);
 for (const auto& result : loader.load_all("mods"))
-    if (!result)
-        std::cerr << result.mod_id << ": " << result.message << '\n';
+	if (!result)
+		std::cerr << result.mod_id << ": " << result.message << '\n';
 
 // Отключение снимает регистрации; живые экземпляры могут отложить бинарную выгрузку.
 const auto result = loader.unload("example.fast-tree");

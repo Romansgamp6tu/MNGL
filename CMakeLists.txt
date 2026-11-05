@@ -1,8 +1,9 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(MNGL LANGUAGES CXX)
+project(MNGL LANGUAGES C CXX)
 
 include(CTest)
+include(GNUInstallDirs)
 
 option(MNGL_CUSTOM_AUDIO_BACKEND
 	"Disable all MNGL audio integration" OFF)
@@ -101,6 +102,83 @@ else()
 	)
 endif()
 
+set(MNGL_HAS_SDL3_MIXER FALSE)
+if(NOT MNGL_CUSTOM_AUDIO_BACKEND AND NOT MNGL_CUSTOM_AUDIO_INTERFACE)
+	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL_mixer/CMakeLists.txt")
+		message(FATAL_ERROR
+			"SDL3_mixer submodule is missing. Clone MNGL with --recurse-submodules or run git submodule update --init --recursive.")
+	endif()
+
+	if(MSVC)
+		if(NOT TARGET SDL3::Headers)
+			add_library(SDL3::Headers INTERFACE IMPORTED GLOBAL)
+			set_target_properties(SDL3::Headers PROPERTIES
+				INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/include")
+		endif()
+		if(NOT TARGET SDL3::SDL3-shared)
+			add_library(SDL3::SDL3-shared SHARED IMPORTED GLOBAL)
+			set_target_properties(SDL3::SDL3-shared PROPERTIES
+				IMPORTED_IMPLIB "${MNGL_LIBRARY_DIRECTORY}/SDL3.lib"
+				IMPORTED_LOCATION "${MNGL_LIBRARY_DIRECTORY}/SDL3.dll"
+				INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/include")
+		endif()
+	endif()
+
+	if(NOT DEFINED SDLMIXER_VENDORED)
+		set(SDLMIXER_VENDORED ON)
+	endif()
+	if(NOT DEFINED SDLMIXER_DEPS_SHARED)
+		set(SDLMIXER_DEPS_SHARED OFF)
+	endif()
+	if(NOT DEFINED SDLMIXER_INSTALL)
+		set(SDLMIXER_INSTALL ON)
+	endif()
+	if(NOT DEFINED SDLMIXER_OPUS)
+		set(SDLMIXER_OPUS OFF)
+	endif()
+	if(NOT DEFINED SDLMIXER_FLAC_LIBFLAC)
+		set(SDLMIXER_FLAC_LIBFLAC OFF)
+	endif()
+	if(NOT DEFINED SDLMIXER_MP3_MPG123)
+		set(SDLMIXER_MP3_MPG123 OFF)
+	endif()
+	if(NOT DEFINED SDLMIXER_VORBIS_VORBISFILE)
+		set(SDLMIXER_VORBIS_VORBISFILE OFF)
+	endif()
+	if(NOT DEFINED SDLMIXER_GME)
+		set(SDLMIXER_GME OFF)
+	endif()
+	if(NOT DEFINED SDLMIXER_MOD)
+		set(SDLMIXER_MOD OFF)
+	endif()
+	if(NOT DEFINED SDLMIXER_MIDI)
+		set(SDLMIXER_MIDI OFF)
+	endif()
+	if(NOT DEFINED SDLMIXER_WAVPACK)
+		set(SDLMIXER_WAVPACK OFF)
+	endif()
+	if(NOT DEFINED SDLMIXER_TESTS)
+		set(SDLMIXER_TESTS OFF)
+	endif()
+	if(NOT DEFINED SDLMIXER_EXAMPLES)
+		set(SDLMIXER_EXAMPLES OFF)
+	endif()
+
+	if(DEFINED BUILD_SHARED_LIBS)
+		set(MNGL_RESTORE_BUILD_SHARED_LIBS TRUE)
+		set(MNGL_SAVED_BUILD_SHARED_LIBS "${BUILD_SHARED_LIBS}")
+	endif()
+	set(BUILD_SHARED_LIBS ON)
+	# Keep SDL3_mixer's install rules in the root runtime/development packages.
+	add_subdirectory(third_party/SDL_mixer)
+	if(MNGL_RESTORE_BUILD_SHARED_LIBS)
+		set(BUILD_SHARED_LIBS "${MNGL_SAVED_BUILD_SHARED_LIBS}")
+	else()
+		unset(BUILD_SHARED_LIBS)
+	endif()
+	set(MNGL_HAS_SDL3_MIXER TRUE)
+endif()
+
 add_library(MNGL::ImGui ALIAS mngl_imgui)
 set_target_properties(mngl_imgui PROPERTIES EXPORT_NAME ImGui)
 target_compile_features(mngl_imgui PUBLIC cxx_std_23)
@@ -142,9 +220,84 @@ else()
 	target_link_libraries(mngl INTERFACE
 		mngl_imgui SDL3_image::SDL3_image Freetype::Freetype)
 endif()
+if(MNGL_HAS_SDL3_MIXER)
+	target_link_libraries(mngl INTERFACE SDL3_mixer::SDL3_mixer)
+	install(FILES
+		"${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL_mixer/src/dr_libs/LICENSE"
+		DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/SDL3_mixer/optional"
+		RENAME "LICENSE.dr_libs.txt"
+		COMPONENT library
+	)
+	install(FILES
+		"${CMAKE_CURRENT_SOURCE_DIR}/cmake/licenses/stb_vorbis.txt"
+		DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/SDL3_mixer/optional"
+		RENAME "LICENSE.stb_vorbis.txt"
+		COMPONENT library
+	)
+endif()
 target_link_libraries(mngl_demo PRIVATE mngl)
 
 if(BUILD_TESTING)
+	find_package(Threads REQUIRED)
+	include(cmake/MNGLHeaderChecks.cmake)
+	add_library(mngl_public_headers OBJECT tests/public_headers.cpp)
+	target_link_libraries(mngl_public_headers PRIVATE mngl)
+	add_library(mngl_public_headers_no_audio OBJECT tests/public_headers.cpp)
+	target_link_libraries(mngl_public_headers_no_audio PRIVATE mngl)
+	target_compile_definitions(mngl_public_headers_no_audio PRIVATE MNGL_CUSTOM_AUDIO_BACKEND)
+	add_executable(mngl_core_api_test tests/core_api_test.cpp)
+	target_link_libraries(mngl_core_api_test PRIVATE mngl Threads::Threads)
+	add_test(NAME mngl_core_api_test COMMAND mngl_core_api_test)
+	set_tests_properties(mngl_core_api_test PROPERTIES
+		TIMEOUT 20
+		ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+	if(MNGL_HAS_SDL3_MIXER)
+		add_executable(mngl_audio_runtime_smoke tests/audio_runtime_smoke.cpp)
+		target_link_libraries(mngl_audio_runtime_smoke PRIVATE mngl)
+		add_test(NAME mngl_audio_runtime_smoke COMMAND mngl_audio_runtime_smoke)
+		set_tests_properties(mngl_audio_runtime_smoke PROPERTIES
+			TIMEOUT 20
+			ENVIRONMENT "SDL_AUDIODRIVER=dummy")
+	endif()
+	add_executable(mngl_gpu_runtime_smoke tests/gpu_runtime_smoke.cpp)
+	target_link_libraries(mngl_gpu_runtime_smoke PRIVATE mngl)
+	add_test(NAME mngl_gpu_runtime_smoke COMMAND mngl_gpu_runtime_smoke)
+	set_tests_properties(mngl_gpu_runtime_smoke PROPERTIES
+		TIMEOUT 30
+		SKIP_RETURN_CODE 77)
+	if(MSVC)
+		target_compile_options(mngl_public_headers PRIVATE /utf-8)
+		target_compile_options(mngl_public_headers_no_audio PRIVATE /utf-8)
+		target_compile_options(mngl_core_api_test PRIVATE /utf-8)
+		add_custom_command(TARGET mngl_core_api_test POST_BUILD
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+				"$<TARGET_FILE:mngl_imgui>" "${MNGL_LIBRARY_DIRECTORY}/SDL3.dll"
+				"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.dll" "${MNGL_LIBRARY_DIRECTORY}/freetype.dll"
+				"$<TARGET_FILE_DIR:mngl_core_api_test>"
+			VERBATIM)
+		if(MNGL_HAS_SDL3_MIXER)
+			add_custom_command(TARGET mngl_core_api_test POST_BUILD
+				COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+					"$<TARGET_FILE:SDL3_mixer-shared>" "$<TARGET_FILE_DIR:mngl_core_api_test>"
+				VERBATIM)
+			add_custom_command(TARGET mngl_audio_runtime_smoke POST_BUILD
+				COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+					"$<TARGET_FILE:mngl_imgui>" "${MNGL_LIBRARY_DIRECTORY}/SDL3.dll"
+					"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.dll" "${MNGL_LIBRARY_DIRECTORY}/freetype.dll"
+					"$<TARGET_FILE:SDL3_mixer-shared>" "$<TARGET_FILE_DIR:mngl_audio_runtime_smoke>"
+				VERBATIM)
+			add_custom_command(TARGET mngl_gpu_runtime_smoke POST_BUILD
+				COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+					"$<TARGET_FILE:SDL3_mixer-shared>" "$<TARGET_FILE_DIR:mngl_gpu_runtime_smoke>"
+				VERBATIM)
+		endif()
+		add_custom_command(TARGET mngl_gpu_runtime_smoke POST_BUILD
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+				"$<TARGET_FILE:mngl_imgui>" "${MNGL_LIBRARY_DIRECTORY}/SDL3.dll"
+				"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.dll" "${MNGL_LIBRARY_DIRECTORY}/freetype.dll"
+				"$<TARGET_FILE_DIR:mngl_gpu_runtime_smoke>"
+			VERBATIM)
+	endif()
 	add_executable(mngl_input_compat_test tests/input_compat_test.cpp)
 	target_compile_features(mngl_input_compat_test PRIVATE cxx_std_23)
 	target_link_libraries(mngl_input_compat_test PRIVATE mngl)
@@ -202,6 +355,12 @@ if(WIN32)
 			"$<TARGET_FILE_DIR:mngl_demo>"
 		VERBATIM
 	)
+	if(MNGL_HAS_SDL3_MIXER)
+		add_custom_command(TARGET mngl_demo POST_BUILD
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+				"$<TARGET_FILE:SDL3_mixer-shared>" "$<TARGET_FILE_DIR:mngl_demo>"
+			VERBATIM)
+	endif()
 endif()
 
 option(MNGL_BUILD_WINDOWS_DEVEL_PACKAGE "Create a Windows x64 MNGL development ZIP" OFF)
@@ -211,7 +370,6 @@ if(MNGL_BUILD_WINDOWS_DEVEL_PACKAGE AND MNGL_BUILD_LINUX_DEVEL_PACKAGE)
 endif()
 
 if(MNGL_BUILD_WINDOWS_DEVEL_PACKAGE OR MNGL_BUILD_LINUX_DEVEL_PACKAGE)
-	include(GNUInstallDirs)
 	include(CMakePackageConfigHelpers)
 	set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY TRUE)
 	set(MNGL_PACKAGE_VERSION "0.0.0" CACHE STRING "Version used for the MNGL development package")
@@ -227,6 +385,21 @@ if(MNGL_BUILD_WINDOWS_DEVEL_PACKAGE OR MNGL_BUILD_LINUX_DEVEL_PACKAGE)
 		endif()
 		set(MNGL_DEVEL_PACKAGE_NAME "mngl-devel-windows-x64")
 		set(MNGL_DEVEL_PACKAGE_GENERATOR "ZIP")
+		if(MNGL_HAS_SDL3_MIXER)
+			set(MNGL_CONFIG_FIND_DEPENDENCIES [=[include(CMakeFindDependencyMacro)
+if(NOT TARGET SDL3::Headers)
+	add_library(SDL3::Headers INTERFACE IMPORTED)
+	set_property(TARGET SDL3::Headers PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/include")
+endif()
+if(NOT TARGET SDL3::SDL3-shared)
+	add_library(SDL3::SDL3-shared SHARED IMPORTED)
+	set_target_properties(SDL3::SDL3-shared PROPERTIES
+		IMPORTED_IMPLIB "${PACKAGE_PREFIX_DIR}/lib/SDL3.lib"
+		IMPORTED_LOCATION "${PACKAGE_PREFIX_DIR}/bin/SDL3.dll"
+		INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/include")
+endif()
+find_dependency(SDL3_mixer CONFIG REQUIRED)]=])
+		endif()
 	else()
 		if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
 			message(FATAL_ERROR "MNGL_BUILD_LINUX_DEVEL_PACKAGE requires 64-bit Linux")
@@ -238,6 +411,9 @@ if(MNGL_BUILD_WINDOWS_DEVEL_PACKAGE OR MNGL_BUILD_LINUX_DEVEL_PACKAGE)
 find_dependency(SDL3 CONFIG REQUIRED)
 find_dependency(SDL3_image CONFIG REQUIRED)
 find_dependency(Freetype REQUIRED)]=])
+		if(MNGL_HAS_SDL3_MIXER)
+			string(APPEND MNGL_CONFIG_FIND_DEPENDENCIES "\nfind_dependency(SDL3_mixer CONFIG REQUIRED)")
+		endif()
 	endif()
 
 	install(TARGETS mngl EXPORT MNGLTargets)
@@ -270,7 +446,7 @@ find_dependency(Freetype REQUIRED)]=])
 		string(REPLACE "\n" ";" MNGL_BRANCH_ADDED_PATHS "${MNGL_BRANCH_ADDED_PATHS}")
 		foreach(MNGL_ADDED_PATH IN LISTS MNGL_BRANCH_ADDED_PATHS)
 			file(TO_CMAKE_PATH "${MNGL_ADDED_PATH}" MNGL_ADDED_PATH)
-			if(MNGL_ADDED_PATH MATCHES "\\.(h|hpp)$")
+			if(MNGL_ADDED_PATH MATCHES "\\.(h|hpp|inc)$")
 				list(APPEND MNGL_BRANCH_ONLY_HEADERS "${MNGL_ADDED_PATH}")
 			endif()
 		endforeach()
@@ -283,6 +459,7 @@ find_dependency(Freetype REQUIRED)]=])
 		file(GLOB_RECURSE MNGL_HEADERS CONFIGURE_DEPENDS LIST_DIRECTORIES false
 			"${CMAKE_CURRENT_SOURCE_DIR}/${source_directory}/*.h"
 			"${CMAKE_CURRENT_SOURCE_DIR}/${source_directory}/*.hpp"
+			"${CMAKE_CURRENT_SOURCE_DIR}/${source_directory}/*.inc"
 		)
 		foreach(MNGL_HEADER IN LISTS MNGL_HEADERS)
 			file(RELATIVE_PATH MNGL_HEADER_RELATIVE_PATH

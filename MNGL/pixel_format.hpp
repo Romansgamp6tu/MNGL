@@ -82,4 +82,4 @@ namespace mngl
 		bgrx32 = SDL_PIXELFORMAT_BGRX32,
 		xbgr32 = SDL_PIXELFORMAT_XBGR32
 	};
-}
+} // namespace mngl

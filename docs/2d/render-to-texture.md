@@ -3,21 +3,20 @@
 Обычную `mngl::texture` можно использовать как цель рендеринга, а затем нарисовать её содержимое в окне:
 
 ```cpp
-mngl::render_window window("MNGL 2D", { 800, 600 });
+mngl::render_window window("MNGL 2D", {800, 600});
 mngl::texture scene(800, 600);
-mngl::sprite scene_sprite{ scene, mngl::rectangle{ 0.0f, 0.0f, 4.0f / 3.0f, 1.0f } };
+mngl::sprite scene_sprite{scene, mngl::rectangle{0.0f, 0.0f, 4.0f / 3.0f, 1.0f}};
 
-while (mngl::Input::continue_work())
+while (mngl::input::continue_work())
 {
-    auto scene_frame = scene.frame();
-    scene_frame.draw(mngl::two_d::rectangle_shape{
-        { 0.1f, 0.1f, 0.3f, 0.2f },
-        mngl::color{ 0.9f, 0.3f, 0.2f, 1.0f } });
-    scene_frame.display();
+	auto scene_frame = scene.frame();
+	scene_frame.draw(
+	    mngl::two_d::rectangle_shape{{0.1f, 0.1f, 0.3f, 0.2f}, mngl::color{0.9f, 0.3f, 0.2f, 1.0f}});
+	scene_frame.display();
 
-    auto window_frame = window.frame();
-    window_frame.draw(scene_sprite);
-    window_frame.display();
+	auto window_frame = window.frame();
+	window_frame.draw(scene_sprite);
+	window_frame.display();
 }
 ```
 

@@ -11,8 +11,9 @@
 
 mngl::clipboard::set_text("Copied from MNGL");
 
-if (mngl::clipboard::has_text()) {
-    const std::string text = mngl::clipboard::get_text();
+if (mngl::clipboard::has_text())
+{
+	const std::string text = mngl::clipboard::get_text();
 }
 ```
 
@@ -27,28 +28,30 @@ UTF-8-строку; память, выделенную SDL, MNGL освобож�
 ```cpp
 #include <MNGL/clipboard.hpp>
 
-const std::vector<std::byte> serialized_level = {
-    std::byte{0x4D}, std::byte{0x4E}, std::byte{0x47}, std::byte{0x4C}
-};
+const std::vector<std::byte> serialized_level = {std::byte{0x4D}, std::byte{0x4E}, std::byte{0x47},
+                                                 std::byte{0x4C}};
 
-mngl::clipboard::set_data(
-    { "application/x-mngl-level", "text/plain" },
-    [serialized_level](std::string_view mime_type)
-        -> std::optional<std::vector<std::byte>> {
-        if (mime_type == "application/x-mngl-level") {
-            return serialized_level;
-        }
-        if (mime_type == "text/plain") {
-            constexpr std::string_view description = "MNGL level";
-            std::vector<std::byte> text;
-            text.reserve(description.size());
-            for (const unsigned char character : description) {
-                text.push_back(static_cast<std::byte>(character));
-            }
-            return text;
-        }
-        return std::nullopt;
-    });
+mngl::clipboard::set_data({"application/x-mngl-level", "text/plain"},
+                          [serialized_level](std::string_view mime_type)
+                              -> std::optional<std::vector<std::byte>>
+                          {
+	                          if (mime_type == "application/x-mngl-level")
+	                          {
+		                          return serialized_level;
+	                          }
+	                          if (mime_type == "text/plain")
+	                          {
+		                          constexpr std::string_view description = "MNGL level";
+		                          std::vector<std::byte> text;
+		                          text.reserve(description.size());
+		                          for (const unsigned char character : description)
+		                          {
+			                          text.push_back(static_cast<std::byte>(character));
+		                          }
+		                          return text;
+	                          }
+	                          return std::nullopt;
+                          });
 ```
 
 `set_data()` копирует список MIME-типов и сохраняет callback вместе с буфером
@@ -61,12 +64,14 @@ mngl::clipboard::set_data(
 Чтение форматов выглядит так:
 
 ```cpp
-for (const auto& mime_type : mngl::clipboard::mime_types()) {
-    logger.info("Clipboard format: ", mime_type);
+for (const auto& mime_type : mngl::clipboard::mime_types())
+{
+	logger.info("Clipboard format: ", mime_type);
 }
 
-if (mngl::clipboard::has_data("application/x-mngl-level")) {
-    const auto bytes = mngl::clipboard::get_data("application/x-mngl-level");
+if (mngl::clipboard::has_data("application/x-mngl-level"))
+{
+	const auto bytes = mngl::clipboard::get_data("application/x-mngl-level");
 }
 ```
 
@@ -83,8 +88,9 @@ SDL API выбрасываются как `mngl::sdl_error`; пустой или
 ```cpp
 mngl::clipboard::primary_selection::set_text("Selected text");
 
-if (mngl::clipboard::primary_selection::has_text()) {
-    const auto selected = mngl::clipboard::primary_selection::get_text();
+if (mngl::clipboard::primary_selection::has_text())
+{
+	const auto selected = mngl::clipboard::primary_selection::get_text();
 }
 ```
 
@@ -93,16 +99,18 @@ if (mngl::clipboard::primary_selection::has_text()) {
 
 ## Событие изменения
 
-Событие `mngl::clipboardUpdate` приходит при изменении системного буфера.
+Событие `mngl::clipboard_update` приходит при изменении системного буфера.
 Оно содержит признак `owner` и копию списка MIME-типов из события SDL, поэтому
 список остаётся доступен после вызова callback:
 
 ```cpp
-auto clipboard_subscription = mngl::event_manager::on<mngl::clipboardUpdate>(
-    [](const mngl::clipboardUpdate& event) {
-        if (!event.owner) {
-            // Содержимое изменилось извне; при необходимости перечитайте его.
-        }
+auto clipboard_subscription = mngl::event_manager::on<mngl::clipboard_update>(
+    [](const mngl::clipboard_update& event)
+    {
+	    if (!event.owner)
+	    {
+		    // Содержимое изменилось извне; при необходимости перечитайте его.
+	    }
     });
 ```
 

@@ -33,14 +33,27 @@ rm -rf "$stage" "$mngl_build" "$glslang_build" "$spirv_build" "$spirv_prefix" "$
 mkdir -p "$stage/bin" "$stage/lib"
 
 # Build only the runtime library; the runtime archive does not contain the demo.
-cmake -S "$repo" -B "$mngl_build" -GNinja -DCMAKE_BUILD_TYPE=Release
-cmake --build "$mngl_build" --target mngl_imgui --parallel 4
+cmake -S "$repo" -B "$mngl_build" -GNinja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+cmake --build "$mngl_build" --target mngl_audio_runtime_smoke --parallel 4
+cmake --build "$mngl_build" --target mngl_gpu_runtime_smoke --parallel 4
+cmake --install "$mngl_build" --prefix "$stage" --component library
 mngl_library=$(find "$mngl_build" -maxdepth 2 -type f -name 'libmngl_imgui.so*' -print -quit)
 if [[ -z "$mngl_library" ]]; then
 	printf '%s\n' 'libmngl_imgui.so was not produced.' >&2
 	exit 1
 fi
 cp -a "$mngl_library" "$stage/lib/"
+mixer_library=$(find "$mngl_build" -type f -name 'libSDL3_mixer.so*' -print -quit)
+if [[ -z "$mixer_library" || ! -e "$stage/lib/$(basename "$mixer_library")" ]]; then
+	printf '%s\n' 'SDL3_mixer runtime library was not installed into the package.' >&2
+	exit 1
+fi
+audio_smoke=$(find "$mngl_build" -type f -name 'mngl_audio_runtime_smoke' -perm -u+x -print -quit)
+gpu_smoke=$(find "$mngl_build" -type f -name 'mngl_gpu_runtime_smoke' -perm -u+x -print -quit)
+if [[ -z "$audio_smoke" || -z "$gpu_smoke" ]]; then
+	printf '%s\n' 'Runtime smoke-test executables were not produced.' >&2
+	exit 1
+fi
 
 cmake -S "$repo/upstream/glslang" -B "$glslang_build" -GNinja \
 	-DCMAKE_BUILD_TYPE=Release -DENABLE_GLSLANG_BINARIES=ON
@@ -92,7 +105,7 @@ find "$shadercross_prefix/lib" -maxdepth 1 \( -type f -o -type l \) -name '*.so*
 cp -a "$repo/MNGL/shaders" "$stage/shaders"
 
 # Copy the non-system ELF dependency closure required by the package's shader
-# tools and MNGL's SDL3/SDL3_image/FreeType runtime. glibc, display/audio stacks,
+# tools and MNGL's SDL3/SDL3_image/SDL3_mixer/FreeType runtime. glibc, display/audio stacks,
 # Vulkan loader, and GPU drivers remain host-provided dependencies.
 is_host_runtime() {
 	case "$(basename "$1")" in
@@ -110,6 +123,9 @@ queue=(
 	"$glslang_exe"
 	"$shadercross_prefix/bin/shadercross"
 	"$mngl_library"
+	"$mixer_library"
+	"$audio_smoke"
+	"$gpu_smoke"
 )
 while ((${#queue[@]})); do
 	current=${queue[0]}
@@ -156,6 +172,22 @@ while IFS= read -r -d '' library; do
 	fi
 done < <(find "$stage/lib" -maxdepth 1 -type f -name '*.so*' -print0)
 
+smoke_directory="$work/smoke"
+mkdir -p "$smoke_directory"
+install -m 0755 "$audio_smoke" "$smoke_directory/mngl_audio_runtime_smoke"
+install -m 0755 "$gpu_smoke" "$smoke_directory/mngl_gpu_runtime_smoke"
+SDL_AUDIODRIVER=dummy LD_LIBRARY_PATH="$stage/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+	"$smoke_directory/mngl_audio_runtime_smoke"
+set +e
+LD_LIBRARY_PATH="$stage/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+	"$smoke_directory/mngl_gpu_runtime_smoke"
+gpu_smoke_status=$?
+set -e
+if [[ "$gpu_smoke_status" -ne 0 && "$gpu_smoke_status" -ne 77 ]]; then
+	printf 'Packaged GPU smoke test failed with exit code %s.\n' "$gpu_smoke_status" >&2
+	exit "$gpu_smoke_status"
+fi
+
 cp -f "$repo/MNGL/imgui/LICENSE.txt" "$stage/MNGL-ImGui-LICENSE.txt"
 cat > "$stage/runtime-manifest.txt" <<EOF
 MNGL runtime package $PACKAGE_VERSION
@@ -165,6 +197,10 @@ MNGL source: ${GITHUB_SHA:-local}
 glslang: $(git -C "$repo/upstream/glslang" rev-parse HEAD)
 SDL_shadercross: $(git -C "$shadercross_source" rev-parse HEAD)
 SDL3: $(pkg-config --modversion sdl3 2>/dev/null || printf 'CMake package on runner')
+SDL3_mixer: bundled release-3.2.4 with built-in decoders
+SDL3_mixer and built-in decoder license notices: included
+Audio runtime smoke: passed
+GPU device smoke: $([[ "$gpu_smoke_status" -eq 0 ]] && printf 'passed' || printf 'skipped; no usable video/GPU backend or adapter on runner')
 
 The archive contains runtime libraries, shader tools, and built-in shaders only. It does not include the demo, development archive, headers, or import/static libraries.
 glibc, the Vulkan loader, GPU drivers, and the host display/audio stack are system dependencies and are not bundled.

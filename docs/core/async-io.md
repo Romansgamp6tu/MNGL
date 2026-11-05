@@ -1,6 +1,6 @@
 # Асинхронный ввод-вывод
 
-`<MNGL/async_io.hpp>` предоставляет `mngl::async_io::Queue` и `Request` для
+`<MNGL/async_io.hpp>` предоставляет `mngl::async_io::queue` и `request` для
 фонового чтения и записи локальных файлов. Запрос хранит буфер до окончания
 операции и закрытия файла. Удалять или изменять исходный буфер записи после
 передачи в `write_file` безопасно: очередь хранит собственный буфер.
@@ -8,72 +8,85 @@
 ```cpp
 #include <MNGL/async_io.hpp>
 
-mngl::async_io::Queue io;
+mngl::async_io::queue io;
 auto load = io.read_file("assets/level.dat");
 auto save = io.write_text_file("save.json", "{\"level\": 3}", true);
 
-// Вызывайте раз за кадр или в другом удобном месте главного цикла.
-io.poll();
-
-if (load.ready()) {
-    const auto result = load.result();
-    if (result.status == mngl::async_io::request_status::completed) {
-        const auto bytes = load.take_data();
-        // Используйте bytes.
-    }
+const auto loaded = io.wait(load);
+if (!loaded)
+{
+	logger.error(loaded.error().message);
+}
+else
+{
+	const auto& bytes = loaded->data;
+	// Используйте bytes.
 }
 
-if (save.ready() && save.result().status == mngl::async_io::request_status::failed) {
-    logger.error(save.result().error);
+const auto saved = io.wait(save);
+if (!saved)
+{
+	logger.error(saved.error().message);
 }
 ```
 
+`queue::wait(request)` ждёт именно этот запрос и сам обрабатывает события очереди. Он возвращает
+`request_outcome` — `std::expected<request_value, request_error>`: успешное чтение передаёт буфер
+в `request_value::data`, а ошибка содержит код, снимок метаданных и сообщение. Для записи `data`
+пуст, а число записанных байт указано в `request_value::info.bytes_transferred`.
+
 ## Запросы
 
-- `Queue::read_file(path)` читает весь файл в принадлежащий запросу буфер.
-  После успешного завершения `Request::take_data()` перемещает его вызывающему
+- `queue::read_file(path)` читает весь файл в принадлежащий запросу буфер.
+  После успешного завершения `request::take_data()` перемещает его вызывающему
   коду; `take_text()` возвращает байты как `std::string`.
-- `Queue::read_range(path, offset, size)` читает диапазон в отдельный буфер.
-  Смещение и запрошенный размер доступны через `Request::result()`; у конца
+- `queue::read_range(path, offset, size)` читает диапазон в отдельный буфер.
+  Смещение и запрошенный размер доступны через `request::result()`; у конца
   файла фактически прочитанный объём может быть меньше запрошенного.
-- `Queue::write_file(path, bytes)` принимает `std::vector<std::byte>` или
+- `queue::write_file(path, bytes)` принимает `std::vector<std::byte>` или
   `std::span<const std::byte>`. Переданный вектор перемещается в запрос,
   диапазон копируется. `write_text_file` принимает `std::string_view`.
-- `Queue::write_range(path, offset, bytes)` и `write_text_range` записывают по
+- `queue::write_range(path, offset, bytes)` и `write_text_range` записывают по
   смещению в существующий файл, не обнуляя его перед записью. Диапазонный вызов
   использует режим `r+`, поэтому файл должен существовать. Не отправляйте
   пересекающиеся диапазоны одного файла параллельно.
-- `Request::result()` сообщает состояние, объём запроса, число переданных байт
-  (`offset`, `bytes_requested`, `bytes_transferred`) и описание ошибки. Вызов
-  до завершения возвращает `pending`.
-- `Request::take_data()` доступен один раз и только после успешного чтения.
-  Для записи проверяйте итоговое число переданных байт через `result()`.
-- `Queue::poll()` неблокирующе забирает готовые результаты. Его нужно вызывать,
+- `request::result()` — неблокирующий snapshot состояния, объёма запроса, числа
+  переданных байт (`offset`, `bytes_requested`, `bytes_transferred`) и ошибки.
+  Вызов до завершения возвращает `pending`.
+- `request::take_data()` доступен один раз и только после успешного чтения.
+  Вариант `queue::wait(request)` объединяет ожидание и передачу результата; буфер
+  после этого считается потреблённым для всех копий `request`.
+- `request_error_code` различает ошибку операции, отмену, пустой request, чужую
+  очередь, уже забранный результат и запрос, который очередь больше не обслуживает.
+- `queue::poll()` неблокирующе забирает готовые результаты. Его нужно вызывать,
   пока ожидаются запросы. `pending_count()` возвращает число запросов, для
   которых очередь ещё не обработала завершение.
-- `Queue::wait(timeout)` ждёт готовый результат не дольше указанного числа
+- `queue::wait(timeout)` ждёт готовый результат не дольше указанного числа
   миллисекунд и возвращает число запросов, завершившихся в этом вызове. Нулевой
   таймаут работает как неблокирующий опрос.
 
-Например, диапазонный запрос можно ждать короткими интервалами, если вызывающему
-коду нужно получить результат до продолжения:
+Для покадрового или неблокирующего сценария оставлены `poll()`, `wait(timeout)`,
+`ready()` и snapshot `result()`. Например, диапазонный запрос можно ждать короткими
+интервалами:
 
 ```cpp
 auto chunk = io.read_range("assets/archive.bin", 4096, 1024);
-while (!chunk.ready()) {
-    io.wait(std::chrono::milliseconds(50));
+while (!chunk.ready())
+{
+	io.wait(std::chrono::milliseconds(50));
 }
 const auto bytes = chunk.take_data();
 ```
 
-Состояния запроса: `pending`, `completed`, `failed` и `cancelled`. Ошибки
+Состояния snapshot’а: `pending`, `completed`, `failed` и `cancelled`. Ошибки
 открытия файла и получения его размера возникают синхронно и выбрасывают
-`sdl_error`; ошибки фоновых операций доступны через `Request::result()`.
-Удаление `Request` не отменяет операцию: очередь удерживает её состояние и
-буферы. Уничтожение `Queue` закрывает файлы и ждёт завершения незабранных
+`sdl_error`; ошибки фоновых операций доступны через `queue::wait(request)` или
+неблокирующий `request::result()`.
+Удаление `request` не отменяет операцию: очередь удерживает её состояние и
+буферы. Уничтожение `queue` закрывает файлы и ждёт завершения незабранных
 операций, поэтому деструктор очереди может блокироваться. Очередь нужно
 уничтожить до завершения SDL. Если очередь уничтожена с незабранными
-результатами, соответствующие `Request` переходят в `failed`, а результат
+результатами, соответствующие `request` переходят в `failed`, а результат
 операции теряется.
 
 `write_file` открывает файл в режиме перезаписи и обнуляет прежнее содержимое.
@@ -82,9 +95,15 @@ const auto bytes = chunk.take_data();
 
 `SDL_AsyncIOFromFile` и получение размера выполняются синхронно; в фоне идут
 передача данных и закрытие файла. Это API работает с путями локальной файловой
-системы. Оно не принимает `TitleStorage` или `UserStorage`: их операции остаются
-синхронными и используют backend SDL Storage.
+системы. Оно не принимает `title_storage` или `user_storage`: их операции остаются
+синхронными и используют backend SDL store.
 
 Каждый запрос открывает и закрывает свой файл. Это удобно для отдельных
 диапазонных запросов; для постоянной потоковой работы с одним файлом нужен будет
 отдельный долгоживущий файловый объект.
+
+`request::valid()` и явный `operator bool` проверяют наличие состояния. После move
+исходный request пуст: `ready()` возвращает `true`, `result()` сообщает `failed`,
+а `take_data()`/`take_text()` бросают `std::logic_error`. Копии request разделяют одну
+операцию и один буфер; успешный `take_data()` или `queue::wait(request)` потребляет его
+для всех копий.

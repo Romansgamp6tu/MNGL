@@ -1,13 +1,16 @@
 # Аудио MNGL: план первой версии
 
-Практическое руководство по готовому API: [Звуки и потоковая музыка](../core/audio.md).
+Практическое руководство по готовому API: [Аудио](../core/audio.md).
 Эта страница фиксирует проектные решения и оставшиеся этапы поставки.
 
-**Статус:** SDL3_mixer подключён как Git submodule на `release-3.2.4`; заголовки
-условно подключаются в CMake и Visual Studio. Добавлены `AudioError`, внутренний
-SDL3_mixer runtime, `Sound`, загрузка коротких эффектов, управляемые голоса и
-громкость master/music/sfx. Есть `Music` с потоковым чтением файлов и
-`std::istream`, линковка и доставка бинарников CI/CD ещё не подключены.
+**Статус:** API v1 и поставка SDL3_mixer `release-3.2.4` реализованы. Публичные
+заголовки подключают SDL3_mixer условно; development и runtime workflows
+собирают и доставляют зависимость. Захват, пространственная позиция и
+пользовательский PCM-ввод добавлены в [аудио v2](audio-v2.md).
+
+Описанный ниже `try_` слой сохраняет первоначальный expected-контракт. Обычные
+вызовы возвращают ресурс напрямую и бросают `audio_error`; это правило закреплено
+в [стиле API](api-style.md).
 
 ## Цель
 
@@ -31,9 +34,8 @@ SDL3_mixer runtime, `Sound`, загрузка коротких эффектов,
   `MNGL_CUSTOM_AUDIO_INTERFACE` и `MNGL_CUSTOM_AUDIO_BACKEND` CMake не добавляет
   путь к ним и не устанавливает их в development package; Visual Studio не
   добавляет путь и не включает их в проект.
-- CI/CD должен получать бинарники SDL3_mixer той же версии и устанавливать их
-  рядом с библиотеками SDL3. В этом шаге линкировка и получение бинарников не
-  меняются.
+- CMake target `MNGL::MNGL` подключает SDL3_mixer, а development и runtime
+  workflows собирают библиотеки нужной версии и доставляют их с MNGL.
 - SDL3_mixer 3.2.4 требует SDL 3.4.0 или новее; заголовки SDL в MNGL сейчас имеют
   версию 3.4.8. См. [SDL3_mixer](https://github.com/libsdl-org/SDL_mixer) и
   [список релизов](https://github.com/libsdl-org/SDL_mixer/releases).
@@ -59,9 +61,9 @@ SDL3_mixer runtime, `Sound`, загрузка коротких эффектов,
 `Engine` остаётся внутренней деталью backend’а: приложению не нужно создавать его
 вручную. Первый публичный аудиовызов, которому нужен микшер (например, загрузка
 эффекта), автоматически создаст один runtime на системном playback-устройстве по
-умолчанию. Ошибка запуска попадёт в `std::expected<T, AudioError>` этого вызова;
+умолчанию. Ошибка запуска попадёт в `std::expected<T, error>` этого вызова;
 следующий аудиовызов повторит попытку. Если приложение вообще не использует аудио,
-микшер не создаётся. `load_sound()` и `play()` запускают этот runtime автоматически.
+микшер не создаётся. `try_load_sound()` и `try_play()` запускают этот runtime автоматически.
 
 В CMake режим выбирается одноимённой опцией, например
 `-DMNGL_CUSTOM_AUDIO_INTERFACE=ON`. В Visual Studio задаётся свойство
@@ -76,40 +78,38 @@ MNGL предоставляет собственный слой `mngl::audio`. �
 #include "audio.hpp"
 #include <fstream>
 
-auto click_result = mngl::audio::load_sound("assets/click.ogg");
-if (!click_result) {
-	// AudioError содержит код и описание ошибки инициализации или загрузки.
+auto click_result = mngl::audio::try_load_sound("assets/click.ogg");
+if (!click_result)
+{
+	// error содержит код и описание ошибки инициализации или загрузки.
 	return;
 }
 auto click = std::move(*click_result);
 
-auto play_result = mngl::audio::play(click, {
-	.volume = 0.8f,
-	.loop = false,
-	.bus = mngl::audio::Bus::sfx
-});
-if (!play_result) return;
+auto play_result =
+    mngl::audio::try_play(click, {.volume = 0.8f, .loop = false, .bus = mngl::audio::bus::sfx});
+if (!play_result)
+	return;
 auto voice = *play_result;
 
-// Голосом можно управлять независимо от других запусков того же Sound.
-(void)mngl::audio::pause(voice);
-(void)mngl::audio::resume(voice);
-auto playing = mngl::audio::is_playing(voice);
+// Голосом можно управлять независимо от других запусков того же sound.
+(void)mngl::audio::try_pause(voice);
+(void)mngl::audio::try_resume(voice);
+auto playing = mngl::audio::try_is_playing(voice);
 
-(void)mngl::audio::set_master_volume(0.8f);
-(void)mngl::audio::set_bus_volume(mngl::audio::Bus::sfx, 0.5f);
+(void)mngl::audio::try_set_master_volume(0.8f);
+(void)mngl::audio::try_set_bus_volume(mngl::audio::bus::sfx, 0.5f);
 
-auto theme_result = mngl::audio::load_music("assets/theme.ogg");
-if (!theme_result) return;
-auto theme_voice = mngl::audio::play(*theme_result, {
-	.loop = true,
-	.bus = mngl::audio::Bus::music
-});
-if (!theme_voice) return;
+auto theme_result = mngl::audio::try_load_music("assets/theme.ogg");
+if (!theme_result)
+	return;
+auto theme_voice = mngl::audio::try_play(*theme_result, {.loop = true, .bus = mngl::audio::bus::music});
+if (!theme_voice)
+	return;
 
 // std::fstream (потомок std::iostream) тоже подходит, если stream seekable.
 std::fstream music_file("assets/level.ogg", std::ios::in | std::ios::binary);
-auto level_music = mngl::audio::load_music(music_file);
+auto level_music = mngl::audio::try_load_music(music_file);
 ```
 
 ### Типы и поведение
@@ -121,52 +121,52 @@ auto level_music = mngl::audio::load_music(music_file);
   весь этот teardown происходит до `SDL_Quit()`. Создание, использование и
   уничтожение выполняются в основном потоке. Повторная попытка запуска выполняется
   при следующем аудиовызове, если предыдущая завершилась ошибкой.
-- **`Sound`** — короткий эффект, загруженный в память для быстрого старта.
+- **`sound`** — короткий эффект, загруженный в память для быстрого старта.
   Звук предварительно декодируется при загрузке. Его можно запускать несколько
-  раз одновременно; каждый вызов `play()` создаёт отдельный голос и возвращает
-  собственный `VoiceHandle`. Копии `Sound` разделяют ресурс. Текущие голоса
-  удерживают данные SDL3_mixer, поэтому уничтожение последней копии `Sound` не
+  раз одновременно; каждый вызов `try_play()` создаёт отдельный голос и возвращает
+  собственный `voice_handle`. Копии `sound` разделяют ресурс. Текущие голоса
+  удерживают данные SDL3_mixer, поэтому уничтожение последней копии `sound` не
   обрывает уже начатое воспроизведение.
-- **`Music`** — длинный источник, читаемый небольшими блоками при
-  воспроизведении, без загрузки всего файла в память. `load_music()` принимает
+- **`music`** — длинный источник, читаемый небольшими блоками при
+  воспроизведении, без загрузки всего файла в память. `try_load_music()` принимает
   UTF-8 путь или seekable `std::istream&` (включая `std::iostream` и
   `std::ifstream`); поток читается от текущей позиции до конца. Для потока с
   управляемым временем жизни есть overload с `std::shared_ptr<std::istream>`.
-  Заимствованный stream должен оставаться открытым, пока жив `Music` или его
+  Заимствованный stream должен оставаться открытым, пока жив `music` или его
   голос; не следует обращаться к нему извне во время воспроизведения. Для
   каждого голоса создаётся независимая позиция чтения, поэтому источник можно
   запускать одновременно несколько раз.
-  `play(music)` по умолчанию использует шину `music`; повторы, пауза,
-  продолжение, остановка и состояние работают через те же `PlayOptions` и
-  `VoiceHandle`, что и для эффектов.
-- **`VoiceHandle`** — значение, обозначающее конкретный запуск `Sound`, а не
+  `try_play(music)` по умолчанию использует шину `music`; повторы, пауза,
+  продолжение, остановка и состояние работают через те же `play_options` и
+  `voice_handle`, что и для эффектов.
+- **`voice_handle`** — значение, обозначающее конкретный запуск `sound`, а не
   номер фиксированного канала. Каждый запуск получает новый 64-битный ID; ID не
   переиспользуются в течение жизни `Engine`. Поэтому устаревший handle не сможет
   начать управлять новым голосом. После естественного завершения запросы
-  `is_playing()` и `is_paused()` возвращают `false`, а `pause()`, `resume()` и
-  `stop()` возвращают `AudioErrorCode::voice_inactive`.
-- **`PlayOptions`** — начальная громкость, зацикливание и шина (`Bus::sfx` или
-  `Bus::music`). По умолчанию эффект запускается один раз на `sfx` с громкостью
+  `try_is_playing()` и `try_is_paused()` возвращают `false`, а `try_pause()`, `try_resume()` и
+  `try_stop()` возвращают `error_code::voice_inactive`.
+- **`play_options`** — начальная громкость, зацикливание и шина (`bus::sfx` или
+  `bus::music`). По умолчанию эффект запускается один раз на `sfx` с громкостью
   `1.0f`. Громкость clamp’ится к `[0, 1]`; `loop = true` зацикливает голос
   бесконечно.
 - **Шины громкости** — независимые `master`, `music` и `sfx`. `master` задаётся
-  через `set_master_volume()`, `music` и `sfx` — через `set_bus_volume(Bus, ...)`.
-  Громкость можно получить функциями `master_volume()` и `bus_volume(Bus)`.
+  через `try_set_master_volume()`, `music` и `sfx` — через `try_set_bus_volume(bus, ...)`.
+  Громкость можно получить функциями `try_master_volume()` и `try_bus_volume(bus)`.
   Конечные значения clamp’ятся к `[0, 1]`; NaN и бесконечность отклоняются.
   Изменение bus volume применяется к текущим и будущим голосам этой шины, не
   меняя громкость исходного ресурса или относительную громкость голоса.
-- **Состояние голоса** — `is_playing()` и `is_paused()` дают текущее состояние.
+- **Состояние голоса** — `try_is_playing()` и `try_is_paused()` дают текущее состояние.
   Естественное завершение делает handle неактивным; завершённый track удаляется
   при следующем аудиовызове. Запросы управления по нему возвращают ошибку
   `voice_inactive`. Callbacks из аудиопотока не вызываются в пользовательский код.
 - **Ресурсы и время жизни** — runtime удерживает аудиосистему до завершения
   приложения. Загрузка ресурса и создание голоса возвращают
-  `std::expected<T, AudioError>`; уничтожение ресурса, который ещё используется
+  `std::expected<T, error>`; уничтожение ресурса, который ещё используется
   голосом, должно быть безопасным: backend удерживает нужные данные до остановки
   голоса.
 - **Ошибки** — создание движка, загрузка ресурса, запуск и команды управления
-  возвращают `std::expected<T, AudioError>` (для команд —
-  `std::expected<void, AudioError>`). `AudioError` содержит MNGL-код и текст;
+  возвращают `std::expected<T, error>` (для команд —
+  `std::expected<void, error>`). `error` содержит MNGL-код и текст;
   публичный интерфейс не требует от приложения разбирать `SDL_GetError()`.
 - **Потоки** — публичные вызовы `Engine`, кроме простых копий handle/resource,
   выполняются в потоке создания `Engine`. Декодирование/микширование backend
@@ -176,7 +176,7 @@ auto level_music = mngl::audio::load_music(music_file);
   mixer на новое системное устройство при смене default. Перечень устройств,
   ручной выбор, запись и пользовательская обработка hotplug остаются следующими
   возможностями.
-- **Цикл приложения** — `Input::continue_work()` продолжает обслуживать только
+- **Цикл приложения** — `input::continue_work()` продолжает обслуживать только
   ввод и события приложения. Аудио запускается и работает через mixer/device;
   отдельный покадровый `audio.update()` не нужен.
 - **Фокус окна** — потеря фокуса автоматически не ставит музыку на паузу.
@@ -207,7 +207,7 @@ backend или вызывает SDL3_mixer напрямую в своём код
 или `MNGL_CUSTOM_AUDIO_BACKEND` убирает их из требований к сборке MNGL.
 
 Во всех режимах SDL-события, не относящиеся к аудио, продолжают обрабатываться
-обычным циклом приложения. `Input::continue_work()` не запускает и не обновляет
+обычным циклом приложения. `input::continue_work()` не запускает и не обновляет
 аудио. При `MNGL_CUSTOM_AUDIO_BACKEND` приложение всё ещё может явно переопределить
 `APP_FLAGS`, если ему нужна собственная инициализация SDL audio.
 
@@ -219,7 +219,7 @@ backend или вызывает SDL3_mixer напрямую в своём код
 3. Используется системное playback-устройство по умолчанию; выбора устройства в
    публичном API v1 нет.
 4. Все вызовы `mngl::audio` выполняются в основном потоке.
-5. Аудио работает независимо от покадрового цикла. `Input::continue_work()` не
+5. Аудио работает независимо от покадрового цикла. `input::continue_work()` не
    обслуживает mixer; `audio.update()` отсутствует.
 6. Общее время жизни: `Engine` создаётся после SDL и уничтожается до `SDL_Quit()`.
    Приложение не вызывает `Engine::create()` и не освобождает его вручную.
@@ -235,35 +235,34 @@ backend или вызывает SDL3_mixer напрямую в своём код
    исключает `SDL_INIT_AUDIO` из стандартного `APP_FLAGS` и audio-device события
    из фасада `event.hpp`; private backend header также исключён из установки в
    custom-конфигурациях.
-3. **Жизненный цикл и ошибки.** Готово: добавлены `AudioError`, внутренний
+3. **Жизненный цикл и ошибки.** Готово: добавлены `error`, внутренний
    `Engine::create()`, ленивое создание по первому вызову, повтор при ошибке и
    уничтожение SDL3_mixer перед `SDL_Quit()`.
-4. **Загрузка коротких звуков.** Готово: добавлены копируемый `Sound` и
-   `load_sound()` с предварительным декодированием. SDL3_mixer tracks удерживают
+4. **Загрузка коротких звуков.** Готово: добавлены копируемый `sound` и
+   `try_load_sound()` с предварительным декодированием. SDL3_mixer tracks удерживают
    звук до завершения активного воспроизведения.
-5. **Управляемые голоса.** Готово: `play()` создаёт отдельный SDL3_mixer track
-   и возвращает уникальный `VoiceHandle`; добавлены `PlayOptions`, шины `Bus`,
-   `is_playing()`, `is_paused()`, `pause()`, `resume()` и `stop()`. Завершённые
+5. **Управляемые голоса.** Готово: `try_play()` создаёт отдельный SDL3_mixer track
+   и возвращает уникальный `voice_handle`; добавлены `play_options`, шины `bus`,
+   `try_is_playing()`, `try_is_paused()`, `try_pause()`, `try_resume()` и `try_stop()`. Завершённые
    голоса очищаются при следующем аудиовызове, ID не переиспользуются.
-6. **Громкость.** Готово: `set_master_volume()` управляет общим mixer gain,
-   `set_bus_volume()` — уровнями `music` и `sfx` для активных и будущих голосов;
+6. **Громкость.** Готово: `try_set_master_volume()` управляет общим mixer gain,
+   `try_set_bus_volume()` — уровнями `music` и `sfx` для активных и будущих голосов;
    getters читают текущие значения, громкость clamp’ится в `[0, 1]`.
-7. **Потоковая музыка.** Готово: `Music` загружает проверенный seekable источник
+7. **Потоковая музыка.** Готово: `music` загружает проверенный seekable источник
    из файла или `std::istream`, создаёт отдельный SDL_IOStream для каждого
    запуска и читает данные во время воспроизведения; повторы и управление
-   состоянием используют общий `VoiceHandle`.
-8. **Интеграция поставки и пример.** Подключить SDL3_mixer binary linking и
-   runtime libraries в CI/CD для поддерживаемых платформ; добавить пример,
-   проверить обычную сборку, все варианты defines, CMake consumer и Visual
-   Studio проект.
-9. **Расширения после v1.** При необходимости отдельно добавить fades, seek и
-   позицию воспроизведения, выбор устройства, пользовательские шины, pan и
-   callbacks на главном потоке.
+   состоянием используют общий `voice_handle`.
+8. **Интеграция поставки и пример.** Готово: SDL3_mixer подключён к CMake
+   target, а package workflows собирают и доставляют runtime библиотеки.
+9. **Расширения после v1.** Позиционное аудио, захват и push-источники PCM
+   реализованы в v2. Возможные отдельные расширения: fades, seek, выбор output
+   устройства, пользовательские шины, pan и callbacks на главном потоке.
 
 ## Вне первой версии
 
 - захват микрофона и системного звука;
 - пространственное и продвинутое 3D-аудио;
+- пользовательские push-источники PCM;
 - UI и сохранение настроек громкости;
 - динамическая загрузка backend DLL;
 - FMOD Studio tooling и SoLoud-специфичные функции в общем API.
@@ -281,3 +280,16 @@ backend или вызывает SDL3_mixer напрямую в своём код
 - [Руководство по миграции](https://wiki.libsdl.org/SDL3_mixer/README-migration)
   описывает различия архитектуры SDL3_mixer v3, в том числе ресурсы, tracks,
   громкость, остановку и потоковое воспроизведение.
+
+## Короткий синхронный API
+
+Обычные операции возвращают ресурс напрямую и бросают `audio_error` при ошибке.
+`audio_error::code()` сохраняет код backend failure. Примеры выше с `try_` показывают
+вариант с явным `std::expected`; он доступен для загрузки, воспроизведения и управления.
+
+```cpp
+auto click = mngl::audio::load_sound("assets/click.wav");
+auto voice = mngl::audio::play(click);
+mngl::audio::set_master_volume(0.8f);
+mngl::audio::stop(voice);
+```

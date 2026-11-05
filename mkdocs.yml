@@ -23,6 +23,7 @@ nav:
       - Текст: 2d/text-rendering.md
       - Рендер в текстуру: 2d/render-to-texture.md
       - Координаты и view: 2d/coordinates-and-view.md
+      - Произвольная геометрия: 2d/geometry.md
       - Трансформации: 2d/transforms.md
       - Hit testing: 2d/hit-testing.md
       - Расширенный рендеринг: 2d/advanced-rendering.md
@@ -30,7 +31,7 @@ nav:
   - Основы:
       - Обзор: core/index.md
       - Окна и ввод: core/windows-and-input.md
-      - Звуки и музыка: core/audio.md
+      - Аудио: core/audio.md
       - Системные диалоги: core/dialogs.md
       - Буфер обмена: core/clipboard.md
       - Хранилище и файлы: core/storage.md
@@ -55,5 +56,8 @@ nav:
       - Среда и CI/CD: mods/automation.md
   - Справочник по модулям: reference/index.md
   - Проектные решения:
+      - Принципы и стиль API: design/api-style.md
+      - Миграция API: design/migration.md
       - Input v2: design/input-v2.md
       - Аудио v1: design/audio-v1.md
+      - Аудио v2: design/audio-v2.md

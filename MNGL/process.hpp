@@ -1,6 +1,6 @@
 #pragma once
 
-#include "utilities.hpp"
+#include "runtime.hpp"
 
 #include <SDL3/SDL_process.h>
 
@@ -73,18 +73,13 @@ namespace mngl::process
 
 		struct sdl_free_deleter
 		{
-			void operator()(void* value) const noexcept
-			{
-				SDL_free(value);
-			}
+			void operator()(void* value) const noexcept { SDL_free(value); }
 		};
 
 		inline std::string path_to_utf8(const std::filesystem::path& path)
 		{
 			const auto encoded = path.u8string();
-			std::string result(
-				reinterpret_cast<const char*>(encoded.data()),
-				encoded.size());
+			std::string result(reinterpret_cast<const char*>(encoded.data()), encoded.size());
 			if (result.find('\0') != std::string::npos)
 			{
 				throw std::invalid_argument("process working directory cannot contain a null character");
@@ -96,10 +91,14 @@ namespace mngl::process
 		{
 			switch (route)
 			{
-			case stdio_route::inherited: return SDL_PROCESS_STDIO_INHERITED;
-			case stdio_route::discard: return SDL_PROCESS_STDIO_NULL;
-			case stdio_route::pipe: return SDL_PROCESS_STDIO_APP;
-			default: throw std::invalid_argument("invalid process standard I/O route");
+			case stdio_route::inherited:
+				return SDL_PROCESS_STDIO_INHERITED;
+			case stdio_route::discard:
+				return SDL_PROCESS_STDIO_NULL;
+			case stdio_route::pipe:
+				return SDL_PROCESS_STDIO_APP;
+			default:
+				throw std::invalid_argument("invalid process standard I/O route");
 			}
 		}
 
@@ -116,24 +115,24 @@ namespace mngl::process
 			const char* error = SDL_GetError();
 			return error && *error ? error : "SDL process stream error";
 		}
-	}
+	} // namespace detail
 
-	class Process
+	class child_process
 	{
 	public:
-		Process(const Process&) = delete;
-		Process& operator=(const Process&) = delete;
+		child_process(const child_process&) = delete;
+		child_process& operator=(const child_process&) = delete;
 
-		Process(Process&& other) noexcept
-			: m_process(std::exchange(other.m_process, nullptr)),
-			  m_stdin(std::exchange(other.m_stdin, nullptr)),
-			  m_stdout(std::exchange(other.m_stdout, nullptr)),
-			  m_stderr(std::exchange(other.m_stderr, nullptr)),
-			  m_exit_code(std::exchange(other.m_exit_code, std::nullopt))
+		child_process(child_process&& other) noexcept
+		    : m_process(std::exchange(other.m_process, nullptr)),
+		      m_stdin(std::exchange(other.m_stdin, nullptr)),
+		      m_stdout(std::exchange(other.m_stdout, nullptr)),
+		      m_stderr(std::exchange(other.m_stderr, nullptr)),
+		      m_exit_code(std::exchange(other.m_exit_code, std::nullopt))
 		{
 		}
 
-		Process& operator=(Process&& other) noexcept
+		child_process& operator=(child_process&& other) noexcept
 		{
 			if (this != &other)
 			{
@@ -147,18 +146,15 @@ namespace mngl::process
 			return *this;
 		}
 
-		~Process() noexcept
-		{
-			destroy_handle();
-		}
+		~child_process() noexcept { destroy_handle(); }
 
-		[[nodiscard]] static Process launch(
-			std::vector<std::string> arguments,
-			const launch_options& options = {})
+		[[nodiscard]] static child_process launch(std::vector<std::string> arguments,
+		                                          const launch_options& options = {})
 		{
 			if (arguments.empty() || arguments.front().empty())
 			{
-				throw std::invalid_argument("process arguments must include a non-empty executable path at index 0");
+				throw std::invalid_argument(
+				    "process arguments must include a non-empty executable path at index 0");
 			}
 			for (const auto& argument : arguments)
 			{
@@ -170,7 +166,7 @@ namespace mngl::process
 			if (options.merge_standard_error && options.standard_error != stdio_route::inherited)
 			{
 				throw std::invalid_argument(
-					"set standard_error to inherited when merging it into standard_output");
+				    "set standard_error to inherited when merging it into standard_output");
 			}
 
 			std::vector<char*> argv;
@@ -188,53 +184,40 @@ namespace mngl::process
 			}
 
 			detail::check_property(
-				SDL_SetPointerProperty(
-					properties.id,
-					SDL_PROP_PROCESS_CREATE_ARGS_POINTER,
-					argv.data()),
-				"failed to set process arguments: ");
+			    SDL_SetPointerProperty(properties.id, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv.data()),
+			    "failed to set process arguments: ");
 
 			if (!options.working_directory.empty())
 			{
 				const auto working_directory = detail::path_to_utf8(options.working_directory);
-				detail::check_property(
-					SDL_SetStringProperty(
-						properties.id,
-						SDL_PROP_PROCESS_CREATE_WORKING_DIRECTORY_STRING,
-						working_directory.c_str()),
-					"failed to set process working directory: ");
+				detail::check_property(SDL_SetStringProperty(properties.id,
+				                                             SDL_PROP_PROCESS_CREATE_WORKING_DIRECTORY_STRING,
+				                                             working_directory.c_str()),
+				                       "failed to set process working directory: ");
 			}
 
 			detail::check_property(
-				SDL_SetNumberProperty(
-					properties.id,
-					SDL_PROP_PROCESS_CREATE_STDIN_NUMBER,
-					static_cast<Sint64>(detail::to_sdl_route(options.standard_input))),
-				"failed to set process standard input: ");
+			    SDL_SetNumberProperty(properties.id, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER,
+				                      static_cast<Sint64>(detail::to_sdl_route(options.standard_input))),
+			    "failed to set process standard input: ");
 			detail::check_property(
-				SDL_SetNumberProperty(
-					properties.id,
-					SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER,
-					static_cast<Sint64>(detail::to_sdl_route(options.standard_output))),
-				"failed to set process standard output: ");
+			    SDL_SetNumberProperty(properties.id, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER,
+				                      static_cast<Sint64>(detail::to_sdl_route(options.standard_output))),
+			    "failed to set process standard output: ");
 
 			if (options.merge_standard_error)
 			{
 				detail::check_property(
-					SDL_SetBooleanProperty(
-						properties.id,
-						SDL_PROP_PROCESS_CREATE_STDERR_TO_STDOUT_BOOLEAN,
-						true),
-					"failed to merge process standard error: ");
+				    SDL_SetBooleanProperty(properties.id, SDL_PROP_PROCESS_CREATE_STDERR_TO_STDOUT_BOOLEAN,
+					                       true),
+				    "failed to merge process standard error: ");
 			}
 			else
 			{
 				detail::check_property(
-					SDL_SetNumberProperty(
-						properties.id,
-						SDL_PROP_PROCESS_CREATE_STDERR_NUMBER,
-						static_cast<Sint64>(detail::to_sdl_route(options.standard_error))),
-					"failed to set process standard error: ");
+				    SDL_SetNumberProperty(properties.id, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER,
+					                      static_cast<Sint64>(detail::to_sdl_route(options.standard_error))),
+				    "failed to set process standard error: ");
 			}
 
 			auto* process = SDL_CreateProcessWithProperties(properties.id);
@@ -243,7 +226,7 @@ namespace mngl::process
 				throw sdl_error("failed to launch process: ");
 			}
 
-			Process result(process);
+			child_process result(process);
 			try
 			{
 				const auto process_properties = SDL_GetProcessProperties(process);
@@ -269,10 +252,8 @@ namespace mngl::process
 				}
 				if (!options.merge_standard_error && options.standard_error == stdio_route::pipe)
 				{
-					result.m_stderr = static_cast<SDL_IOStream*>(SDL_GetPointerProperty(
-						process_properties,
-						SDL_PROP_PROCESS_STDERR_POINTER,
-						nullptr));
+					result.m_stderr = static_cast<SDL_IOStream*>(
+					    SDL_GetPointerProperty(process_properties, SDL_PROP_PROCESS_STDERR_POINTER, nullptr));
 					if (!result.m_stderr)
 					{
 						throw sdl_error("failed to get process standard error: ");
@@ -289,15 +270,9 @@ namespace mngl::process
 			return result;
 		}
 
-		[[nodiscard]] bool valid() const noexcept
-		{
-			return m_process != nullptr;
-		}
+		[[nodiscard]] bool valid() const noexcept { return m_process != nullptr; }
 
-		[[nodiscard]] SDL_Process* raw() const noexcept
-		{
-			return m_process;
-		}
+		[[nodiscard]] SDL_Process* raw() const noexcept { return m_process; }
 
 		[[nodiscard]] std::optional<std::uint64_t> id() const
 		{
@@ -392,9 +367,8 @@ namespace mngl::process
 			return write_stdin(std::as_bytes(std::span(text.data(), text.size())));
 		}
 
-		[[nodiscard]] static command_result run(
-			std::vector<std::string> arguments,
-			std::filesystem::path working_directory = {})
+		[[nodiscard]] static command_result run(std::vector<std::string> arguments,
+		                                        std::filesystem::path working_directory = {})
 		{
 			launch_options options;
 			options.working_directory = std::move(working_directory);
@@ -404,10 +378,10 @@ namespace mngl::process
 			options.merge_standard_error = true;
 
 			auto process = launch(std::move(arguments), options);
-			size_t size = 0;
+			std::size_t size = 0;
 			int exit_code = 0;
 			std::unique_ptr<void, detail::sdl_free_deleter> output(
-				SDL_ReadProcess(process.m_process, &size, &exit_code));
+			    SDL_ReadProcess(process.m_process, &size, &exit_code));
 			if (!output)
 			{
 				sdl_error error("failed to read process output: ");
@@ -416,14 +390,11 @@ namespace mngl::process
 			}
 
 			const auto* chars = static_cast<const char*>(output.get());
-			return { std::string(chars, size), exit_code };
+			return {std::string(chars, size), exit_code};
 		}
 
 	private:
-		explicit Process(SDL_Process* process)
-			: m_process(process)
-		{
-		}
+		explicit child_process(SDL_Process* process) : m_process(process) {}
 
 		void ensure_valid() const
 		{
@@ -433,10 +404,8 @@ namespace mngl::process
 			}
 		}
 
-		[[nodiscard]] stream_read_result read_stream(
-			SDL_IOStream* stream,
-			std::size_t max_bytes,
-			const char* unavailable_message)
+		[[nodiscard]] stream_read_result read_stream(SDL_IOStream* stream, std::size_t max_bytes,
+		                                             const char* unavailable_message)
 		{
 			ensure_valid();
 			if (!stream)
@@ -489,4 +458,19 @@ namespace mngl::process
 		SDL_IOStream* m_stderr = nullptr;
 		std::optional<int> m_exit_code;
 	};
+} // namespace mngl::process
+
+// Compatibility names; new code uses snake_case.
+namespace mngl::process
+{
+	using Process = child_process;
 }
+
+namespace mngl::process
+{
+	[[nodiscard]] inline child_process launch(std::vector<std::string> arguments,
+	                                          const launch_options& options = {})
+	{
+		return child_process::launch(std::move(arguments), options);
+	}
+} // namespace mngl::process

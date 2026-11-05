@@ -8,15 +8,15 @@ MNGL автоматически инициализирует SDL через sing
 и camera. `MNGL_CUSTOM_AUDIO_BACKEND` исключает audio из стандартных флагов.
 Собственный `APP_FLAGS` полностью задаёт состав подсистем.
 
-У `SDL_Runtime` значение `true` означает ошибку запуска. Проверьте его
-перед созданием ресурсов:
+Проверьте запуск до создания ресурсов; ошибка попадёт в обычный обработчик исключений:
 
 ```cpp
-if (SDL_Runtime) {
-    std::cerr << std::string(SDL_Runtime) << '\n'; // Нужен <iostream>.
-    return 1;
-}
+#include <MNGL/runtime.hpp>
+mngl::runtime::ensure();
 ```
+
+`runtime.hpp` подключает только базовый runtime и ошибки. Старый глобальный
+`SDL_Runtime` остаётся в `utilities.hpp` для совместимости: его `true` означает ошибку.
 
 Внутренний аудиомикшер создаётся отдельно при первом аудиовызове и
 уничтожается раньше SDL runtime. Не вызывайте `SDL_Quit()` вручную, пока
@@ -36,9 +36,9 @@ if (SDL_Runtime) {
 #define APP_ID "com.example.mygame"
 #define APP_ORGANIZATION "Example Studio"
 #define APP_STORAGE_NAME "My game"
-#define APP_CREATOR "Example Studio" // необязательно
+#define APP_CREATOR "Example Studio"  // необязательно
 #define APP_URL "https://example.com" // необязательно
-#define APP_TYPE "game" // необязательно
+#define APP_TYPE "game"               // необязательно
 #include <MNGL/paths.hpp>
 ```
 
@@ -62,13 +62,13 @@ if (SDL_Runtime) {
 `<MNGL/paths.hpp>` предоставляет пути SDL как `std::filesystem::path` и
 сообщает ошибки через `std::expected<path, sdl_error>`:
 
-- `mngl::paths::application_directory()` — каталог ресурсов приложения.
+- `mngl::paths::try_application_directory()` — каталог ресурсов приложения.
   На macOS это может быть `Resources` внутри `.app` bundle. Используйте его
   для чтения упакованных данных, не для сохранений.
-- `mngl::paths::user_data_directory()` — персональный каталог приложения для
+- `mngl::paths::try_user_data_directory()` — персональный каталог приложения для
   настроек и сохранений. SDL создаёт его при первом запросе, используя
   `APP_ORGANIZATION` и `APP_STORAGE_NAME`.
-- `mngl::paths::user_folder_path(folder)` — стандартный каталог пользователя:
+- `mngl::paths::try_user_folder_path(folder)` — стандартный каталог пользователя:
   `home`, `desktop`, `documents`, `downloads`, `music`, `pictures`,
   `public_share`, `saved_games`, `screenshots`, `templates` или `videos`.
   Некоторые каталоги доступны не на каждой платформе.
@@ -78,16 +78,18 @@ if (SDL_Runtime) {
 #include <filesystem>
 #include <iostream>
 
-auto data = mngl::paths::user_data_directory();
-if (!data) {
-    std::cerr << data.error().what() << '\n';
-} else {
-    const auto saves = *data / "saves";
-    std::filesystem::create_directories(saves);
+auto data = mngl::paths::try_user_data_directory();
+if (!data)
+{
+	std::cerr << data.error().what() << '\n';
+}
+else
+{
+	const auto saves = *data / "saves";
+	std::filesystem::create_directories(saves);
 }
 
-auto downloads = mngl::paths::user_folder_path(
-    mngl::paths::user_folder::downloads);
+auto downloads = mngl::paths::try_user_folder_path(mngl::paths::user_folder::downloads);
 ```
 
 Рабочий каталог процесса зависит от того, откуда приложение запустили; он не
@@ -99,7 +101,7 @@ Windows.
 
 ## Логирование
 
-Глобальный `logger` (тип `Logger`) пишет сообщения в консоль и `last.log`. Доступны уровни `log`, `debug`, `info`, `success`, `warning`, `error` и `critical`; `debug` по умолчанию включён в Debug-сборке. `enableDebug()`, `disableDebug()` и `setDebug(bool)` меняют его во время работы, а `flush()` сбрасывает буферы вывода.
+`mngl::log` (тип `mngl::logger`) пишет сообщения в консоль и `last.log`. Доступны уровни `log`, `debug`, `info`, `success`, `warning`, `error` и `critical`; `debug` по умолчанию включён в Debug-сборке. `enable_debug()`, `disable_debug()` и `set_debug(bool)` меняют его во время работы, а `flush()` сбрасывает буферы вывода.
 
 ```cpp
 logger.info("Loaded texture: ", image.width(), " x ", image.height());
@@ -108,6 +110,10 @@ logger.error("Failed to load scene");
 
 ## Обновляемые объекты и interop
 
-Наследник `mngl::Iupdatable` регистрируется при создании и удаляется из `update_manager` при уничтожении. `Input::continue_work()` вызывает его `update(double dt)` каждый кадр. Этот механизм рассчитан на простые глобальные обновления, например анимацию, а не на сложные иерархии объектов.
+Наследник `mngl::updatable` регистрируется при создании и удаляется из `update_manager` при уничтожении. `input::continue_work()` вызывает его `update(double dt)` каждый кадр. Этот механизм рассчитан на простые глобальные обновления, например анимацию, а не на сложные иерархии объектов.
 
-`mngl::Proxy` и alias вроде `rectangleProxy` — низкоуровневые адаптеры для передачи типов MNGL в функции SDL, принимающие указатели на SDL-структуры. Для обычного прикладного кода обращаться к ним напрямую не требуется. `read_binary_file(path)` — утилита чтения файла в `std::vector<uint8_t>`.
+`mngl::proxy` и alias вроде `rectangle_proxy` — низкоуровневые адаптеры для передачи типов MNGL в функции SDL, принимающие указатели на SDL-структуры. Для обычного прикладного кода обращаться к ним напрямую не требуется. `read_binary_file(path)` — утилита чтения файла в `std::vector<uint8_t>`.
+
+Обычные `application_directory()`, `user_data_directory()` и `user_folder_path()`
+возвращают `std::filesystem::path` напрямую; при отказе SDL бросается `sdl_error`.
+Явный `try_` вариант сохраняет `std::expected` и позволяет обработать отказ как значение.
