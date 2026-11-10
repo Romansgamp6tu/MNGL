@@ -5,12 +5,14 @@
 #include <MNGL/dialog.hpp>
 #include <MNGL/event.hpp>
 #include <MNGL/color.hpp>
+#include <MNGL/rectangle.hpp>
 #include <MNGL/window.hpp>
 #include <MNGL/paths.hpp>
 #include <MNGL/process.hpp>
 #include <MNGL/storage.hpp>
 
 #include <atomic>
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <iostream>
@@ -83,6 +85,35 @@ namespace
 		require(calls == 3, "destroyed event connection remained subscribed");
 	}
 
+	void test_concurrent_subscriptions()
+	{
+		std::atomic_int permanent_calls = 0;
+		std::atomic_int transient_calls = 0;
+		std::atomic_bool start = false;
+		auto permanent =
+		    mngl::event_manager::on<mngl::window_resized>([&](const auto&) { ++permanent_calls; });
+		std::jthread subscriber(
+		    [&]
+		    {
+			    while (!start.load(std::memory_order_acquire))
+				    std::this_thread::yield();
+			    for (int index = 0; index < 500; ++index)
+			    {
+				    auto temporary = mngl::event_manager::on<mngl::window_resized>([&](const auto&)
+					                                                               { ++transient_calls; });
+				    std::this_thread::yield();
+			    }
+		    });
+		start.store(true, std::memory_order_release);
+		for (int index = 0; index < 1000; ++index)
+			mngl::event_manager::emit(mngl::window_resized{});
+		subscriber.join();
+		require(permanent_calls == 1000, "Subscription churn dropped events from a permanent listener");
+		const auto before = transient_calls.load();
+		mngl::event_manager::emit(mngl::window_resized{});
+		require(transient_calls == before, "Destroyed concurrent subscription still received events");
+	}
+
 	void test_sdl_event_delivery()
 	{
 		std::atomic_int calls = 0;
@@ -137,6 +168,70 @@ namespace
 		flags.resizable = true;
 		require(mngl::window::flags(static_cast<SDL_WindowFlags>(flags)).resizable,
 		        "resizable flag did not round-trip");
+	}
+
+	void test_color_encoding()
+	{
+		const mngl::color value(0x12345678u);
+		require(value.rgb_uint() == 0x123456u, "RGB encoding included alpha or omitted red");
+		require(mngl::color{"#aBcDeF"}.rgba_uint() == 0xABCDEFFFu,
+		        "HEX parser lost a valid mixed-case RGB color");
+		require(mngl::color{"#12345678"} == value, "HEX parser lost a valid RGBA color");
+		for (const std::string invalid : {"#12345g", "#12 345", "#-00001", "#+00001", "#0x1234"})
+		{
+			bool rejected = false;
+			try
+			{
+				(void)mngl::color(invalid);
+			}
+			catch (const std::invalid_argument&)
+			{
+				rejected = true;
+			}
+			require(rejected, "HEX parser accepted characters outside the HEX color grammar");
+		}
+	}
+
+	void test_rectangle_contracts()
+	{
+		const mngl::rectangle area{0.0f, 0.0f, 4.0f, 4.0f};
+		const SDL_FRect sdl_area = area;
+		const std::array cases{
+		    mngl::rectangle{4.0f, 1.0f, 2.0f, 2.0f}, mngl::rectangle{4.0f, 4.0f, 0.0f, 0.0f},
+		    mngl::rectangle{1.0f, 1.0f, 0.0f, 2.0f}, mngl::rectangle{2.0f, 2.0f, -1.0f, 1.0f},
+		    mngl::rectangle{10.0f, 10.0f, 1.0f, 1.0f}};
+		for (const auto& value : cases)
+		{
+			const SDL_FRect sdl_value = value;
+			const bool expected = SDL_HasRectIntersectionFloat(&sdl_area, &sdl_value);
+			require(area.intersects(value) == expected && value.intersects(area) == expected,
+			        "Rectangle intersection disagreed with SDL float rectangle semantics");
+			SDL_FRect overlap{};
+			if (SDL_GetRectIntersectionFloat(&sdl_area, &sdl_value, &overlap))
+			{
+				require(area.intersection(value).equals(overlap),
+				        "Rectangle intersection bounds differ from SDL");
+			}
+			else
+			{
+				require(area.intersection(value).empty(), "Disjoint rectangle intersection was not empty");
+			}
+		}
+
+		const mngl::rectangle empty{2.0f, 2.0f, -1.0f, -1.0f};
+		const mngl::rectangle elsewhere{10.0f, 10.0f, 4.0f, 4.0f};
+		require(empty.union_with(elsewhere) == elsewhere && elsewhere.union_with(empty) == elsewhere,
+		        "An empty rectangle expanded a union");
+		require(!empty.intersects_line({1.0f, 1.0f}, {3.0f, 3.0f}),
+		        "An empty rectangle reported a line intersection");
+
+		const std::array<glm::vec2, 3> points{{{-1.0f, -1.0f}, {2.0f, 3.0f}, {8.0f, 9.0f}}};
+		const auto bounds = enclosing_points(std::span<const glm::vec2>(points), area);
+		require(bounds == mngl::rectangle{2.0f, 3.0f, 0.0f, 0.0f},
+		        "Clipped point bounds included points outside the clip");
+		const std::array<glm::vec2, 2> outside{{{-1.0f, -1.0f}, {8.0f, 9.0f}}};
+		require(enclosing_points(std::span<const glm::vec2>(outside), area).empty(),
+		        "Point bounds were nonempty without any point inside the clip");
 	}
 
 	void test_files()
@@ -294,8 +389,11 @@ int main(int argc, char** argv)
 		mngl::runtime::ensure();
 		test_errors_and_paths();
 		test_event_connection();
+		test_concurrent_subscriptions();
 		test_sdl_event_delivery();
 		test_value_contracts();
+		test_color_encoding();
+		test_rectangle_contracts();
 		test_files();
 		test_dialog_arguments();
 		test_process_input(std::filesystem::absolute(argv[0]).string());

@@ -4,6 +4,7 @@
 
 #include <MNGL/gpu_buffer.hpp>
 #include <MNGL/texture.hpp>
+#include <MNGL/render_pass.hpp>
 
 #include <array>
 #include <cstring>
@@ -74,6 +75,77 @@ namespace
 		require(sampled.has_usage(usage::sampler), "Texture lost its sampler usage");
 		require(!sampled.has_usage(usage::sampler | usage::color_target),
 		        "Texture usage query accepted a missing requested flag");
+	}
+
+	void test_render_pass_uniforms(const mngl::gpu::device& device)
+	{
+		const std::array<float, 4> uniform{1.0f, 2.0f, 3.0f, 4.0f};
+		const auto rejects_inactive = [&](const mngl::gpu::render_pass& pass)
+		{
+			bool vertex_rejected = false;
+			bool fragment_rejected = false;
+			try
+			{
+				pass.push_vertex_uniform(0, uniform);
+			}
+			catch (const std::logic_error&)
+			{
+				vertex_rejected = true;
+			}
+			try
+			{
+				pass.push_fragment_uniform(0, uniform);
+			}
+			catch (const std::logic_error&)
+			{
+				fragment_rejected = true;
+			}
+			require(vertex_rejected && fragment_rejected, "Inactive render pass accepted uniform data");
+		};
+		rejects_inactive(mngl::gpu::render_pass{});
+		mngl::gpu::texture target(device, {2, 2}, mngl::gpu::texture_format::r8g8b8a8_unorm,
+		                          mngl::gpu::texture::usage_flags::color_target);
+		mngl::gpu::command_buffer commands(device);
+		mngl::gpu::render_pass pass(commands, target);
+		pass.push_vertex_uniform(0, uniform);
+		pass.push_fragment_uniform(0, uniform);
+		mngl::gpu::render_pass moved(std::move(pass));
+		rejects_inactive(pass);
+		moved.push_vertex_uniform(0, uniform);
+		moved.push_fragment_uniform(0, uniform);
+		mngl::gpu::render_pass assigned;
+		assigned = std::move(moved);
+		rejects_inactive(moved);
+		assigned.push_vertex_uniform(0, uniform);
+		assigned.push_fragment_uniform(0, uniform);
+		assigned.end_pass();
+		rejects_inactive(assigned);
+		commands.submit();
+
+		mngl::gpu::command_buffer invalid(nullptr);
+		bool invalid_rejected = false;
+		try
+		{
+			mngl::gpu::render_pass unused(invalid, target);
+		}
+		catch (const std::invalid_argument&)
+		{
+			invalid_rejected = true;
+		}
+		require(invalid_rejected, "Render pass accepted an inactive command buffer");
+
+		const mngl::gpu::device other_device;
+		mngl::gpu::command_buffer foreign_commands(other_device);
+		bool foreign_rejected = false;
+		try
+		{
+			mngl::gpu::render_pass unused(foreign_commands, target);
+		}
+		catch (const std::invalid_argument&)
+		{
+			foreign_rejected = true;
+		}
+		require(foreign_rejected, "Render pass accepted a target from another GPU device");
 	}
 
 	void test_texture_update_preserves_pending_reads(const mngl::gpu::device& device)
@@ -168,6 +240,7 @@ int main()
 		std::cout << "SDL GPU driver: " << driver << '\n';
 		test_partial_buffer_updates(*device);
 		test_texture_usage(*device);
+		test_render_pass_uniforms(*device);
 		test_texture_update_preserves_pending_reads(*device);
 		return 0;
 	}

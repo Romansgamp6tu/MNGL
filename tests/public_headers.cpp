@@ -14,10 +14,19 @@
 #include <MNGL/paths.hpp>
 #include <MNGL/process.hpp>
 #include <MNGL/render_window.hpp>
+#include <MNGL/render_pass.hpp>
 #include <MNGL/storage.hpp>
 
 #include <concepts>
 #include <type_traits>
+
+// Instantiate template bodies so delayed MSVC parsing cannot hide incorrect SDL handle types.
+void check_render_uniform_templates(const mngl::gpu::render_pass& pass)
+{
+	const std::array<float, 4> uniform{};
+	pass.push_vertex_uniform(0, uniform);
+	pass.push_fragment_uniform(0, uniform);
+}
 
 static_assert(std::same_as<mngl::Input, mngl::input>);
 static_assert(std::same_as<mngl::windowResized, mngl::window_resized>);
