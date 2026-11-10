@@ -189,7 +189,7 @@
 					    auto& state = ensure_mouse_state_locked(e.which);
 					    set_mouse_window_locked(state, e.window_id);
 					    state.position = e.mouse_position;
-					    state.scroll_delta += e.scroll;
+					    state.scroll_delta += e.direction == wheel_direction::flipped ? -e.scroll : e.scroll;
 					    state.has_position = true;
 				    }
 			    });

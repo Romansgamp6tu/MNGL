@@ -15,11 +15,18 @@ commands.submit();
 
 Загружайте пустой набор вершин нельзя. Метод `size()` возвращает количество вершин, а `gpu_buffer()` предоставляет лежащий под ним обычный GPU buffer для низкоуровневого binding.
 
+`buffer::upload_range()` сохраняет байты вне обновляемого диапазона и данные,
+на которые ссылаются ранее записанные GPU-команды. Для этого перед частичной
+загрузкой весь буфер копируется на GPU в переиспользуемый запасной буфер;
+CPU передаёт только изменённый диапазон. После обновления `raw()` может вернуть другой handle.
+
 ## Текстуры и форматы
 
 `mngl::gpu::texture` создаётся с размером, `gpu::texture_format` и usage-флагами и удерживает состояние переданного `gpu::device` до освобождения текстуры. Например, `sampler` разрешает чтение через sampler, `color_target` — использование как color attachment, `graphics_read` — чтение как graphics storage resource, `compute_read`/`compute_write`/`compute_rw` — доступ из compute pass. Не каждая комбинация формата и usage поддерживается выбранным GPU; создание неподдерживаемой комбинации завершается ошибкой.
 
 `mngl::gpu::texture` не загружает файл и не управляет 2D-кадром. Для повседневной работы используйте [высокоуровневую `mngl::texture`](../2d/render-to-texture.md).
+
+`has_usage(flags)` возвращает `true`, когда присутствуют все переданные флаги.
 
 Для compute buffers доступны `compute_storage_read` и `compute_storage_write`; indirect dispatch использует `buffer_usage::indirect`. Эти флаги можно объединять оператором `|`, например `compute_storage_write | indirect` для буфера, который compute shader заполняет командами отрисовки. Права чтения/записи должны совпадать с тем, как ресурс объявлен в compute shader. Подробнее — в [руководстве по compute shaders](compute.md).
 

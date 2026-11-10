@@ -23,22 +23,8 @@ concurrency:
 
 jobs:
   test-matrix:
-    # Keep old matrix check names, but run only the Linux entry on the server.
-    if: matrix.platform == 'linux' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: windows
-            runner: windows-latest
-          - platform: linux
-            runner: ubuntu-24.04
-          - platform: macos-arm64
-            runner: macos-15
-            cmake_arch: arm64
-          - platform: macos-x64
-            runner: macos-15-intel
-            cmake_arch: x86_64
+    # Only the Linux self-hosted runner is currently available.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, linux, x64]
     container:
       image: node:24-bookworm

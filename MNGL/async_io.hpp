@@ -669,6 +669,12 @@ namespace mngl::async_io
 							state->error = "async file request failed";
 						}
 					}
+					// SDL has finished using the buffer. Only successful reads
+					// expose data; polling clients may retain request handles.
+					if (state->type == operation::write || state->status != request_status::completed)
+					{
+						std::vector<std::byte>().swap(state->buffer);
+					}
 				}
 			}
 

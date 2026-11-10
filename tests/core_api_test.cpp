@@ -2,6 +2,7 @@
 #define APP_VERSION 1
 #define APP_FLAGS (SDL_INIT_VIDEO | SDL_INIT_EVENTS)
 #include <MNGL/async_io.hpp>
+#include <MNGL/dialog.hpp>
 #include <MNGL/event.hpp>
 #include <MNGL/color.hpp>
 #include <MNGL/window.hpp>
@@ -13,6 +14,7 @@
 #include <chrono>
 #include <filesystem>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <stdexcept>
 #include <thread>
@@ -41,11 +43,15 @@ namespace
 	{
 		SDL_SetError("captured backend error");
 		mngl::sdl_error captured("context: ");
+		const std::string captured_message(captured.what());
 		SDL_SetError("unrelated later error");
-		require(std::string(captured.what()) == "context: captured backend error",
+		require(std::string_view(captured.what()).starts_with("context: captured backend error") &&
+		            captured_message == captured.what(),
 		        "SDL error was not captured");
 		auto invalid = mngl::paths::try_user_folder_path(static_cast<mngl::paths::user_folder>(-1));
-		require(!invalid && std::string(invalid.error().what()) == "invalid user folder",
+		require(!invalid && std::string_view(invalid.error().what()).starts_with("invalid user folder") &&
+		            std::string_view(invalid.error().what()).find("unrelated later error") ==
+		                std::string_view::npos,
 		        "try_ path retained stale SDL state");
 		bool threw = false;
 		try
@@ -188,6 +194,86 @@ namespace
 		}
 		require(threw, "async buffer could be consumed twice");
 	}
+
+	void test_dialog_arguments()
+	{
+		const auto rejects_argument = [](auto&& action)
+		{
+			try
+			{
+				action();
+			}
+			catch (const std::invalid_argument&)
+			{
+				return true;
+			}
+			return false;
+		};
+		mngl::dialog::file_dialog_options options;
+		options.filters = {{std::string("Text\0Files", 10), "txt"}};
+		require(rejects_argument([&] { (void)mngl::dialog::open_file(options); }),
+		        "dialog accepted a truncated filter name");
+		options.filters = {{"Text", std::string("txt\0png", 7)}};
+		require(rejects_argument([&] { (void)mngl::dialog::open_files(options); }),
+		        "dialog accepted a truncated filter pattern");
+		options.filters.clear();
+		const std::filesystem::path invalid_path(std::u8string(u8"bad\0path", 8));
+		options.default_location = invalid_path;
+		require(rejects_argument([&] { (void)mngl::dialog::save_file(options); }),
+		        "dialog accepted a truncated default file location");
+		mngl::dialog::folder_dialog_options folder_options;
+		folder_options.default_location = invalid_path;
+		require(rejects_argument([&] { (void)mngl::dialog::open_folder(folder_options); }),
+		        "dialog accepted a truncated default folder location");
+	}
+
+	void test_process_input(const std::string& executable)
+	{
+		mngl::process::launch_options options;
+		options.standard_input = mngl::process::stdio_route::pipe;
+		options.standard_error = mngl::process::stdio_route::discard;
+		auto child = mngl::process::launch({executable, "--child-eof"}, options);
+		const std::string_view input = "pipe payload";
+		std::size_t written = 0;
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+		while (written < input.size())
+		{
+			require(std::chrono::steady_clock::now() < deadline, "process input write timed out");
+			written += child.write_stdin(input.substr(written));
+			if (written < input.size())
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+		child.close_stdin();
+		child.close_stdin();
+		bool rejected_write = false;
+		try
+		{
+			(void)child.write_stdin("after EOF");
+		}
+		catch (const std::logic_error&)
+		{
+			rejected_write = true;
+		}
+		require(rejected_write, "process input accepted a write after closing stdin");
+		std::string output;
+		while (true)
+		{
+			const auto chunk = child.read_stdout();
+			require(chunk.state != mngl::process::stream_state::failed, "failed to read process output");
+			if (!chunk.data.empty())
+				output.append(reinterpret_cast<const char*>(chunk.data.data()), chunk.data.size());
+			if (chunk.state == mngl::process::stream_state::end_of_stream)
+				break;
+			if (std::chrono::steady_clock::now() >= deadline)
+			{
+				(void)child.terminate();
+				throw std::runtime_error("process did not finish after stdin EOF");
+			}
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+		require(child.wait() == 9 && output == "eof:pipe payload",
+		        "process lost input or did not observe stdin EOF");
+	}
 } // namespace
 
 int main(int argc, char** argv)
@@ -197,6 +283,12 @@ int main(int argc, char** argv)
 		std::cout << "child-result";
 		return 7;
 	}
+	if (argc == 2 && std::string_view(argv[1]) == "--child-eof")
+	{
+		const std::string input{std::istreambuf_iterator<char>(std::cin), std::istreambuf_iterator<char>()};
+		std::cout << "eof:" << input;
+		return 9;
+	}
 	try
 	{
 		mngl::runtime::ensure();
@@ -205,6 +297,8 @@ int main(int argc, char** argv)
 		test_sdl_event_delivery();
 		test_value_contracts();
 		test_files();
+		test_dialog_arguments();
+		test_process_input(std::filesystem::absolute(argv[0]).string());
 		auto result =
 		    mngl::process::child_process::run({std::filesystem::absolute(argv[0]).string(), "--child"});
 		require(result.exit_code == 7 && result.output == "child-result",

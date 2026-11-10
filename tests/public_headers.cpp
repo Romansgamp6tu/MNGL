@@ -35,6 +35,8 @@ static_assert(
 static_assert(!std::copy_constructible<mngl::process::child_process>);
 static_assert(std::is_nothrow_move_constructible_v<mngl::process::child_process>);
 static_assert(std::copy_constructible<mngl::gpu::device>);
+static_assert(
+    std::same_as<decltype(std::declval<const mngl::imgui_compat::widgets::button&>().is_small()), bool>);
 static_assert(std::same_as<decltype(std::declval<const mngl::gpu::graphics_pipeline&>().raw()),
                            SDL_GPUGraphicsPipeline*>);
 static_assert(std::same_as<mngl::async_io::request_outcome,

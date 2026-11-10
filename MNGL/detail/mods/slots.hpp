@@ -81,8 +81,8 @@ namespace mngl::mods
 			    std::make_shared<around_registration>(std::move(mod_id), priority, std::move(callable));
 			std::lock_guard lock(m_state->mutex);
 
-			if (std::any_of(m_state->around.begin(), m_state->around.end(),
-			                [&](const auto& item) { return item->mod_id == registration->mod_id; })) [[unlikely]]
+			if (std::any_of(m_state->around.begin(), m_state->around.end(), [&](const auto& item)
+			                { return item->mod_id == registration->mod_id; })) [[unlikely]]
 				throw registry_error(error_code::duplicate_registration,
 				                     "Mod already registered an around callback for this slot", m_id,
 				                     registration->mod_id);
@@ -235,6 +235,9 @@ namespace mngl::mods
 			}
 			catch (...)
 			{
+				// A failed next() has no result to recover and belongs to the inner call.
+				if (next_called && !next_result)
+					throw;
 				hook->active = false;
 				detail::report(m_state->diagnostics, error_code::callback_failed, hook->mod_id, m_id,
 				               "Around callback threw; registration disabled");

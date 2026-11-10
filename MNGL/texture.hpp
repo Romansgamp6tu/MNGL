@@ -266,6 +266,10 @@ namespace mngl
 		template <typename T> void update_pixels(gpu::command_buffer& cmd, std::span<const T> pixels)
 		{
 			static_assert(std::is_trivially_copyable_v<T>, "Pixel data must be trivially copyable!");
+			if (rendering()) [[unlikely]]
+			{
+				throw std::logic_error("Cannot update a texture while it is being rendered to");
+			}
 			upload_raw(m_gpu_tex, cmd, pixels.data(), pixels.size_bytes());
 			m_hit_test_frame.reset();
 		}
@@ -449,7 +453,8 @@ namespace mngl
 
 			void ensure_active() const
 			{
-				if (!m_owner || m_generation == 0 || m_owner->m_active_frame_generation != m_generation) [[unlikely]]
+				if (!m_owner || m_generation == 0 || m_owner->m_active_frame_generation != m_generation)
+				    [[unlikely]]
 				{
 					throw std::logic_error("Texture frame scope is no longer active");
 				}
@@ -478,8 +483,7 @@ namespace mngl
 		friend class two_d::renderer;
 		friend class two_d::cached_layer;
 		// Preserves existing target pixels; cached layers redraw only their dirty regions.
-		[[nodiscard]] frame_scope frame_preserving(
-		    const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f))
+		[[nodiscard]] frame_scope frame_preserving(const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f))
 		{
 			return frame_scope(*this, clear_color, true);
 		}
@@ -640,7 +644,8 @@ namespace mngl
 			dst_region.h = tex.height();
 			dst_region.d = 1;
 
-			SDL_UploadToGPUTexture(copy_pass, &src_info, &dst_region, false);
+			// Replacing every pixel can cycle safely and preserves images used by pending commands.
+			SDL_UploadToGPUTexture(copy_pass, &src_info, &dst_region, true);
 			SDL_EndGPUCopyPass(copy_pass);
 		}
 	};
