@@ -1,87 +1,56 @@
-name: Package MNGL development kits
+name: Package MNGL Linux development kit
 
 on:
   push:
     branches: ["**"]
     tags: ["v*"]
+    paths-ignore:
+      - ".github/workflows/**"
+      - "README.md"
+      - "docs/**"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  build-package:
-    runs-on: windows-latest
-    timeout-minutes: 30
+  version:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 5
     outputs:
-      version: ${{ steps.version.outputs.value }}
+      value: ${{ steps.version.outputs.value }}
     steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          submodules: recursive
-
       - name: Choose package version
         id: version
-        shell: pwsh
+        shell: bash
         run: |
-          if ($env:GITHUB_REF_TYPE -eq "tag") {
-            $version = $env:GITHUB_REF_NAME.Substring(1)
-          } else {
-            $version = "0.0.0+ci.$env:GITHUB_RUN_NUMBER"
-          }
-          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$') {
-            throw "Expected a semantic version such as 1.2.3; got: $version"
-          }
-          [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "value=$version`n", [System.Text.UTF8Encoding]::new($false))
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.0.0+ci.${GITHUB_RUN_NUMBER}"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Expected a semantic version such as 1.2.3; got: $version" >&2
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Configure Windows package
-        env:
-          MNGL_PACKAGE_VERSION: ${{ steps.version.outputs.value }}
-          MNGL_PACKAGE_BRANCH: ${{ github.ref_type == 'branch' && github.ref_name || 'main' }}
-        run: >-
-          cmake -S . -B build -A x64
-          -DMNGL_BUILD_WINDOWS_DEVEL_PACKAGE=ON
-          "-DMNGL_PACKAGE_VERSION=$env:MNGL_PACKAGE_VERSION"
-          "-DMNGL_PACKAGE_BRANCH=$env:MNGL_PACKAGE_BRANCH"
-
-      - name: Build ImGui DLL
-        run: |
-          cmake --build build --config Release --target mngl_imgui --parallel 4
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cmake --build build --config Release --target SDL3_mixer-shared --parallel 4
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Create Windows development ZIP
-        run: cpack --config build/CPackConfig.cmake -C Release -G ZIP
-
-      - name: Test installed Windows package from a consumer project
-        shell: pwsh
-        run: |
-          $sdkArchiveRoot = Join-Path (Get-Location) 'build/package-consumer-sdk'
-          Expand-Archive -LiteralPath (Get-ChildItem 'build/packages/*.zip' | Select-Object -First 1).FullName -DestinationPath $sdkArchiveRoot -Force
-          $sdk = Get-ChildItem -LiteralPath $sdkArchiveRoot -Directory | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $sdk) { throw 'The Windows SDK archive did not contain its package directory.' }
-          cmake -S tests/package-consumer -B build/package-consumer -A x64 "-DCMAKE_PREFIX_PATH=$sdk"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cmake --build build/package-consumer --config Release --parallel 4
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $env:PATH = "$sdk/bin;$env:PATH"
-          ctest --test-dir build/package-consumer -C Release --output-on-failure
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Save package artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: mngl-devel-windows-x64-${{ steps.version.outputs.value }}
-          path: build/packages/*.zip
-          if-no-files-found: error
-          retention-days: 30
+  build-package:
+    if: ${{ false }}
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - name: Windows package is paused until a Windows runner is available
+        run: echo "Skipped"
 
   build-linux-package:
-    needs: build-package
-    runs-on: ubuntu-24.04
+    needs: version
+    runs-on: [self-hosted, linux, x64]
+    container:
+      image: node:24-bookworm
+      options: --user 0:0
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 60
     steps:
       - name: Check out source
@@ -89,6 +58,12 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+          persist-credentials: false
+
+      - name: Install Linux package tools
+        run: |
+          apt-get update
+          apt-get install --yes sudo build-essential cmake ninja-build git pkg-config python3 libfreetype-dev
 
       - name: Set up pinned SDL3 and SDL3_image
         id: sdl
@@ -100,14 +75,9 @@ jobs:
           cmake-generator: Ninja
           install-linux-dependencies: true
 
-      - name: Install Linux package dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes libfreetype-dev
-
       - name: Configure Linux package
         env:
-          MNGL_PACKAGE_VERSION: ${{ needs.build-package.outputs.version }}
+          MNGL_PACKAGE_VERSION: ${{ needs.version.outputs.value }}
           MNGL_PACKAGE_BRANCH: ${{ github.ref_type == 'branch' && github.ref_name || 'main' }}
           SDL_PREFIX: ${{ steps.sdl.outputs.prefix }}
         run: |
@@ -117,7 +87,7 @@ jobs:
             "-DMNGL_PACKAGE_VERSION=$MNGL_PACKAGE_VERSION" \
             "-DMNGL_PACKAGE_BRANCH=$MNGL_PACKAGE_BRANCH"
 
-      - name: Build ImGui shared library
+      - name: Build package libraries
         run: |
           cmake --build build-devel-linux --target mngl_imgui --parallel 4
           cmake --build build-devel-linux --target SDL3_mixer-shared --parallel 4
@@ -126,9 +96,8 @@ jobs:
         run: cpack --config build-devel-linux/CPackConfig.cmake -G TGZ
 
       - name: Test installed Linux package from a consumer project
-        shell: bash
         env:
-          MNGL_PACKAGE_VERSION: ${{ needs.build-package.outputs.version }}
+          MNGL_PACKAGE_VERSION: ${{ needs.version.outputs.value }}
           SDL_PREFIX: ${{ steps.sdl.outputs.prefix }}
         run: |
           sdk="$PWD/build-devel-linux/package-consumer-sdk"
@@ -144,13 +113,18 @@ jobs:
       - name: Save package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mngl-devel-linux-x64-${{ needs.build-package.outputs.version }}
+          name: mngl-devel-linux-x64-${{ needs.version.outputs.value }}
           path: build-devel-linux/packages/*.tar.gz
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 1
+
+      - name: Restore runner workspace ownership
+        if: always()
+        run: chown -R 1000:1000 "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
 
   build-macos-package:
-    needs: build-package
+    if: ${{ false }}
+    needs: version
     strategy:
       fail-fast: false
       matrix:
@@ -161,89 +135,26 @@ jobs:
           - runner: macos-15-intel
             cmake_arch: x86_64
             package_arch: x64
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    runs-on: [self-hosted, linux, x64]
     steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          submodules: recursive
-
-      - name: Set up pinned SDL3 and SDL3_image
-        id: sdl
-        uses: libsdl-org/setup-sdl@afd98199e97f9c2aa739474be7e0886d149a5e47
-        with:
-          version: 3.4.18
-          version-sdl-image: 3.4.8
-          build-type: Release
-          cmake-generator: Ninja
-          cmake-arguments: -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
-
-      - name: Install FreeType
-        run: brew install freetype
-
-      - name: Configure macOS package
-        env:
-          MNGL_PACKAGE_VERSION: ${{ needs.build-package.outputs.version }}
-          MNGL_PACKAGE_BRANCH: ${{ github.ref_type == 'branch' && github.ref_name || 'main' }}
-          SDL_PREFIX: ${{ steps.sdl.outputs.prefix }}
-        run: >-
-          cmake -S . -B build-devel-macos -GNinja -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_arch }}
-          -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
-          -DMNGL_BUILD_MACOS_DEVEL_PACKAGE=ON
-          "-DCMAKE_PREFIX_PATH=$SDL_PREFIX;$(brew --prefix)"
-          "-DMNGL_PACKAGE_VERSION=$MNGL_PACKAGE_VERSION"
-          "-DMNGL_PACKAGE_BRANCH=$MNGL_PACKAGE_BRANCH"
-
-      - name: Build package libraries
-        run: |
-          cmake --build build-devel-macos --target mngl_imgui --parallel 4
-          cmake --build build-devel-macos --target SDL3_mixer-shared --parallel 4
-
-      - name: Create macOS development tarball
-        run: cpack --config build-devel-macos/CPackConfig.cmake -G TGZ
-
-      - name: Test installed macOS package from a consumer project
-        env:
-          MNGL_PACKAGE_VERSION: ${{ needs.build-package.outputs.version }}
-          SDL_PREFIX: ${{ steps.sdl.outputs.prefix }}
-        run: |
-          sdk="$PWD/build-devel-macos/package-consumer-sdk"
-          mkdir -p "$sdk"
-          tar -xzf "build-devel-macos/packages/mngl-devel-macos-${{ matrix.package_arch }}-${MNGL_PACKAGE_VERSION}.tar.gz" -C "$sdk"
-          sdk="$sdk/mngl-devel-macos-${{ matrix.package_arch }}-${MNGL_PACKAGE_VERSION}"
-          cmake -S tests/package-consumer -B build-devel-macos/package-consumer -GNinja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="$sdk;$SDL_PREFIX;$(brew --prefix)"
-          cmake --build build-devel-macos/package-consumer --parallel 4
-          DYLD_LIBRARY_PATH="$sdk/lib:$SDL_PREFIX/lib:$(brew --prefix)/lib" \
-            ctest --test-dir build-devel-macos/package-consumer --output-on-failure
-
-      - name: Save package artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: mngl-devel-macos-${{ matrix.package_arch }}-${{ needs.build-package.outputs.version }}
-          path: build-devel-macos/packages/*.tar.gz
-          if-no-files-found: error
-          retention-days: 30
+      - name: macOS packages are paused until native runners are available
+        run: echo "Skipped"
 
   publish-release:
-    needs: [build-package, build-linux-package, build-macos-package]
+    needs: [version, build-linux-package]
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     permissions:
       contents: write
     steps:
-      - name: Download development packages
+      - name: Download Linux development package
         uses: actions/download-artifact@v4
         with:
-          pattern: mngl-devel-*
+          pattern: mngl-devel-linux-*
           path: release-assets
           merge-multiple: true
 
-      - name: Publish package on GitHub Release
+      - name: Publish Linux package on GitHub Release
         uses: actions/github-script@v7
         with:
           script: |
@@ -251,9 +162,9 @@ jobs:
             const path = require("node:path");
             const { owner, repo } = context.repo;
             const tag_name = context.ref.replace("refs/tags/", "");
-            const files = fs.readdirSync("release-assets").filter((name) => /\.(zip|tar\.gz)$/.test(name));
-            if (files.length !== 4) {
-              throw new Error(`Expected four development packages, found ${files.length}`);
+            const files = fs.readdirSync("release-assets").filter((name) => name.endsWith(".tar.gz"));
+            if (files.length !== 1) {
+              throw new Error("Expected one Linux development package, found " + files.length);
             }
 
             let release;
@@ -268,7 +179,7 @@ jobs:
                     owner,
                     repo,
                     tag_name,
-                    name: `MNGL ${tag_name}`,
+                    name: "MNGL " + tag_name,
                     draft: false,
                     prerelease: tag_name.includes("-"),
                   }));
@@ -279,12 +190,12 @@ jobs:
                 }
               }
             }
-            if (!release) throw new Error(`Could not find or create release ${tag_name}`);
+            if (!release) throw new Error("Could not find or create release " + tag_name);
             ({ data: release } = await github.rest.repos.updateRelease({
               owner,
               repo,
               release_id: release.id,
-              name: `MNGL ${tag_name}`,
+              name: "MNGL " + tag_name,
               prerelease: tag_name.includes("-"),
             }));
 
@@ -308,9 +219,12 @@ jobs:
                 name: assetName,
                 data,
                 headers: {
-                  "content-type": assetName.endsWith(".zip") ? "application/zip" : "application/gzip",
+                  "content-type": "application/gzip",
                   "content-length": String(data.length),
                 },
               });
             }
 
+      - name: Clean up downloaded package
+        if: always()
+        run: rm -rf release-assets

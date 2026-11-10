@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore:
+      - ".github/workflows/**"
+      - "README.md"
+      - "docs/**"
   workflow_dispatch:
 
 permissions:
@@ -15,7 +19,7 @@ concurrency:
 
 jobs:
   version:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     outputs:
       value: ${{ steps.version.outputs.value }}
     steps:
@@ -34,68 +38,15 @@ jobs:
           fi
           echo "value=$version" >> "$GITHUB_OUTPUT"
 
-  runtime-windows:
-    needs: version
-    runs-on: windows-latest
-    timeout-minutes: 180
-    steps:
-      - name: Check out MNGL
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          submodules: recursive
-
-      - name: Check out pinned glslang
-        uses: actions/checkout@v4
-        with:
-          repository: KhronosGroup/glslang
-          ref: e1b562a8bed273a02f30b59b66a5d499793cede5
-          path: upstream/glslang
-          submodules: recursive
-          persist-credentials: false
-
-      - name: Check out pinned SDL_shadercross
-        uses: actions/checkout@v4
-        with:
-          repository: libsdl-org/SDL_shadercross
-          ref: 1ff05bec573988a98ef9e0260b4da44f512b8367
-          path: upstream/SDL_shadercross
-          submodules: recursive
-          persist-credentials: false
-
-      - name: Fetch pinned glslang dependencies
-        shell: pwsh
-        working-directory: upstream/glslang
-        run: python update_glslang_sources.py
-
-      - name: Set up SDL3 and SDL3_image
-        id: sdl
-        uses: libsdl-org/setup-sdl@afd98199e97f9c2aa739474be7e0886d149a5e47
-        with:
-          version: 3.4.18
-          version-sdl-image: 3.4.8
-          build-type: Release
-          cmake-generator: Visual Studio 18 2026
-
-      - name: Build runtime package
-        shell: pwsh
-        env:
-          PACKAGE_VERSION: ${{ needs.version.outputs.value }}
-          SDL_ROOT: ${{ steps.sdl.outputs.prefix }}
-          SDL_VERSION: ${{ steps.sdl.outputs.version }}
-        run: ./scripts/package-runtime-windows.ps1
-
-      - name: Upload Windows runtime artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: mngl-runtime-windows-x64-${{ needs.version.outputs.value }}
-          path: mngl-runtime-windows-x64-*.zip
-          if-no-files-found: error
-          retention-days: 30
-
   runtime-linux:
     needs: version
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64]
+    container:
+      image: node:24-bookworm
+      options: --user 0:0
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 180
     steps:
       - name: Check out MNGL
@@ -121,6 +72,11 @@ jobs:
           path: upstream/SDL_shadercross
           submodules: recursive
           persist-credentials: false
+
+      - name: Install Linux runtime build tools
+        run: |
+          apt-get update
+          apt-get install --yes sudo build-essential cmake ninja-build git pkg-config python3 bison flex patchelf binutils libjson-perl libvulkan-dev libfreetype-dev libxrandr-dev
 
       - name: Set up pinned SDL3 and SDL3_image
         id: sdl
@@ -132,18 +88,11 @@ jobs:
           cmake-generator: Ninja
           install-linux-dependencies: true
 
-      - name: Install Linux runtime build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes build-essential bison flex patchelf binutils libjson-perl libvulkan-dev libfreetype-dev libxrandr-dev
-
       - name: Fetch pinned glslang dependencies
-        shell: bash
         working-directory: upstream/glslang
         run: python3 update_glslang_sources.py
 
-      - name: Build runtime package on Ubuntu 24.04
-        shell: bash
+      - name: Build runtime package on Linux x86_64
         env:
           PACKAGE_VERSION: ${{ needs.version.outputs.value }}
           SDL_PREFIX: ${{ steps.sdl.outputs.prefix }}
@@ -156,102 +105,27 @@ jobs:
           name: mngl-runtime-linux-x64-${{ needs.version.outputs.value }}
           path: mngl-runtime-linux-x64-*.tar.gz
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 1
 
-  runtime-macos:
-    needs: version
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15
-            cmake_arch: arm64
-            package_arch: arm64
-          - runner: macos-15-intel
-            cmake_arch: x86_64
-            package_arch: x64
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 180
-    steps:
-      - name: Check out MNGL
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          submodules: recursive
-
-      - name: Check out pinned glslang
-        uses: actions/checkout@v4
-        with:
-          repository: KhronosGroup/glslang
-          ref: e1b562a8bed273a02f30b59b66a5d499793cede5
-          path: upstream/glslang
-          submodules: recursive
-          persist-credentials: false
-
-      - name: Check out pinned SDL_shadercross
-        uses: actions/checkout@v4
-        with:
-          repository: libsdl-org/SDL_shadercross
-          ref: 1ff05bec573988a98ef9e0260b4da44f512b8367
-          path: upstream/SDL_shadercross
-          submodules: recursive
-          persist-credentials: false
-
-      - name: Fetch pinned glslang dependencies
-        shell: bash
-        working-directory: upstream/glslang
-        run: python3 update_glslang_sources.py
-
-      - name: Set up pinned SDL3 and SDL3_image
-        id: sdl
-        uses: libsdl-org/setup-sdl@afd98199e97f9c2aa739474be7e0886d149a5e47
-        with:
-          version: 3.4.18
-          version-sdl-image: 3.4.8
-          build-type: Release
-          cmake-generator: Ninja
-          cmake-arguments: -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
-
-      - name: Install macOS runtime build dependencies
-        run: brew install bison flex freetype dylibbundler
-
-      - name: Add Homebrew parser tools to PATH
-        run: |
-          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
-          echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
-
-      - name: Build and verify macOS runtime package
-        shell: bash
-        env:
-          PACKAGE_VERSION: ${{ needs.version.outputs.value }}
-          SDL_PREFIX: ${{ steps.sdl.outputs.prefix }}
-          SDL_VERSION: ${{ steps.sdl.outputs.version }}
-          SDL_IMAGE_VERSION: 3.4.8
-        run: bash scripts/package-runtime-macos.sh
-
-      - name: Upload macOS runtime artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: mngl-runtime-macos-${{ matrix.package_arch }}-${{ needs.version.outputs.value }}
-          path: mngl-runtime-macos-${{ matrix.package_arch }}-*.tar.gz
-          if-no-files-found: error
-          retention-days: 30
+      - name: Restore runner workspace ownership
+        if: always()
+        run: chown -R 1000:1000 "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
 
   publish-release:
-    needs: [version, runtime-windows, runtime-linux, runtime-macos]
+    needs: [version, runtime-linux]
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     permissions:
       contents: write
     steps:
-      - name: Download runtime packages
+      - name: Download Linux runtime package
         uses: actions/download-artifact@v4
         with:
-          pattern: mngl-runtime-*
+          pattern: mngl-runtime-linux-*
           path: release-assets
           merge-multiple: true
 
-      - name: Attach runtime packages to the GitHub Release
+      - name: Attach Linux runtime package to the GitHub Release
         uses: actions/github-script@v7
         with:
           script: |
@@ -272,7 +146,7 @@ jobs:
                     owner,
                     repo,
                     tag_name,
-                    name: `MNGL ${tag_name}`,
+                    name: "MNGL " + tag_name,
                     draft: false,
                     prerelease: tag_name.includes("-"),
                   }));
@@ -283,17 +157,17 @@ jobs:
                 }
               }
             }
-            if (!release) throw new Error(`Could not find or create release ${tag_name}`);
+            if (!release) throw new Error("Could not find or create release " + tag_name);
             ({ data: release } = await github.rest.repos.updateRelease({
               owner,
               repo,
               release_id: release.id,
-              name: `MNGL ${tag_name}`,
+              name: "MNGL " + tag_name,
               prerelease: tag_name.includes("-"),
             }));
 
-            const files = fs.readdirSync("release-assets").filter((name) => /\.(zip|tar\.gz)$/.test(name));
-            if (files.length !== 4) throw new Error(`Expected four runtime packages, found ${files.length}`);
+            const files = fs.readdirSync("release-assets").filter((name) => name.endsWith(".tar.gz"));
+            if (files.length !== 1) throw new Error("Expected one Linux runtime package, found " + files.length);
             const existingAssets = await github.paginate(github.rest.repos.listReleaseAssets, {
               owner,
               repo,
@@ -313,8 +187,12 @@ jobs:
                 name: assetName,
                 data,
                 headers: {
-                  "content-type": assetName.endsWith(".zip") ? "application/zip" : "application/gzip",
+                  "content-type": "application/gzip",
                   "content-length": String(data.length),
                 },
               });
             }
+
+      - name: Clean up downloaded package
+        if: always()
+        run: rm -rf release-assets

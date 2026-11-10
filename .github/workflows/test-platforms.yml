@@ -3,14 +3,28 @@ name: Test MNGL platform matrix
 on:
   push:
     branches: ["**"]
+    paths-ignore:
+      - ".github/workflows/**"
+      - "README.md"
+      - "docs/**"
   pull_request:
+    paths-ignore:
+      - ".github/workflows/**"
+      - "README.md"
+      - "docs/**"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: mngl-linux-tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test-matrix:
+    # Keep old matrix check names, but run only the Linux entry on the server.
+    if: matrix.platform == 'linux' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     strategy:
       fail-fast: false
       matrix:
@@ -25,16 +39,27 @@ jobs:
           - platform: macos-x64
             runner: macos-15-intel
             cmake_arch: x86_64
-    runs-on: ${{ matrix.runner }}
+    runs-on: [self-hosted, linux, x64]
+    container:
+      image: node:24-bookworm
+      options: --user 0:0
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 90
     steps:
       - name: Check out source
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          persist-credentials: false
+
+      - name: Install Linux build tools
+        run: |
+          apt-get update
+          apt-get install --yes sudo build-essential cmake ninja-build git pkg-config python3 libfreetype-dev
 
       - name: Set up pinned SDL3 and SDL3_image
-        if: matrix.platform != 'windows'
         id: sdl
         uses: libsdl-org/setup-sdl@afd98199e97f9c2aa739474be7e0886d149a5e47
         with:
@@ -42,64 +67,26 @@ jobs:
           version-sdl-image: 3.4.8
           build-type: Release
           cmake-generator: Ninja
-          install-linux-dependencies: ${{ matrix.platform == 'linux' }}
-          cmake-arguments: ${{ startsWith(matrix.platform, 'macos-') && '-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0' || '' }}
+          install-linux-dependencies: true
 
-      - name: Install Linux and macOS build dependencies
-        if: matrix.platform == 'linux' || startsWith(matrix.platform, 'macos-')
-        shell: bash
-        run: |
-          if [[ "$RUNNER_OS" == Linux ]]; then
-            sudo apt-get update
-            sudo apt-get install --yes libfreetype-dev
-          else
-            brew install freetype
-          fi
-
-      - name: Configure Windows tests and demo
-        if: matrix.platform == 'windows'
-        run: cmake -S . -B build -A x64 -DBUILD_TESTING=ON -DMNGL_BUILD_MOD_EXAMPLE=ON
-
-      - name: Configure Linux and macOS tests and demo
-        if: matrix.platform != 'windows'
-        shell: bash
+      - name: Configure Linux tests and demo
         env:
           SDL_PREFIX: ${{ steps.sdl.outputs.prefix }}
-          CMAKE_ARCH: ${{ matrix.cmake_arch }}
         run: |
-          prefix="$SDL_PREFIX"
-          if [[ "$RUNNER_OS" == macOS ]]; then
-            prefix="$prefix;$(brew --prefix)"
-          fi
-          arch_options=()
-          if [[ -n "$CMAKE_ARCH" ]]; then
-            arch_options=(-DCMAKE_OSX_ARCHITECTURES="$CMAKE_ARCH" -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0)
-          fi
           cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=Release \
-            "${arch_options[@]}" \
-            -DCMAKE_PREFIX_PATH="$prefix" \
+            -DCMAKE_PREFIX_PATH="$SDL_PREFIX" \
             -DBUILD_TESTING=ON -DMNGL_BUILD_MOD_EXAMPLE=ON
 
       - name: Build all targets
-        if: matrix.platform == 'windows'
-        run: cmake --build build --config Release --parallel 4
-
-      - name: Build all targets
-        if: matrix.platform != 'windows'
         run: cmake --build build --parallel 4
 
       - name: Run CTest suite
-        if: matrix.platform == 'windows'
-        run: ctest --test-dir build -C Release --output-on-failure
-
-      - name: Run CTest suite
-        if: matrix.platform == 'linux'
-        env:
-          LD_LIBRARY_PATH: ${{ steps.sdl.outputs.prefix }}/lib
-        run: ctest --test-dir build --output-on-failure
-
-      - name: Run CTest suite (shader toolchain is verified by runtime packaging)
-        if: startsWith(matrix.platform, 'macos-')
         env:
           SDL_PREFIX: ${{ steps.sdl.outputs.prefix }}
-        run: DYLD_LIBRARY_PATH="$SDL_PREFIX/lib:$(brew --prefix)/lib" ctest --test-dir build -E '^mngl_shader_compile_smoke$' --output-on-failure
+        run: |
+          LD_LIBRARY_PATH="$SDL_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            ctest --test-dir build --output-on-failure
+
+      - name: Restore runner workspace ownership
+        if: always()
+        run: chown -R 1000:1000 "$GITHUB_WORKSPACE" "$RUNNER_TEMP"

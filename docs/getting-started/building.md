@@ -8,9 +8,10 @@
 MNGL — header-oriented C++23 библиотека. Обычная сборка CMake собирает
 `mngl_demo`; на Windows demo использует отдельную DLL `mngl_imgui`, а на Linux
 ImGui собирается в `libmngl_imgui.so`. Целевые настольные платформы — Windows
-x64, Linux x86_64 и macOS arm64/x86_64. Для всех трёх систем собираются
-development- и runtime-пакеты; CI собирает архивы и проверяет проект-
-потребитель. Актуальные ограничения и проверки описаны в
+x64, Linux x86_64 и macOS arm64/x86_64. Сейчас self-hosted Linux runner собирает
+и проверяет тесты и development/runtime-пакеты только для Linux x86_64. Пакеты
+Windows/macOS и проверки на этих системах приостановлены до подключения native
+runners. Актуальные ограничения и проверки описаны в
 [политике платформ](../design/platform-support.md).
 
 В `main` реализованы input v2 и аудио поверх SDL3_mixer. Корневой CMake-проект
@@ -96,10 +97,11 @@ SDL3_image и FreeType, шейдеры и шрифт ImGui. Runtime DLL микш
 
 #### Development-пакеты
 
-GitHub Actions собирает Windows x64 ZIP на GitHub-hosted `windows-latest` runner,
-Linux x64 tar.gz на `ubuntu-24.04` и macOS-пакеты для arm64/x86_64 при push и
-для ручного запуска workflow. При push тега `vX.Y.Z` все четыре пакета
-прикладываются к GitHub Release. Для ручной сборки Windows-пакета:
+Workflow `Package MNGL Linux development kit` собирает Linux x64 tar.gz на
+self-hosted runner-е при push и ручном запуске. При push тега `vX.Y.Z` этот
+Linux-пакет прикладывается к GitHub Release. Артефакты обычных CI-запусков
+хранятся один день. Автоматическая сборка Windows/macOS-пакетов приостановлена;
+инструкции ниже остаются для локальной сборки. Для ручной сборки Windows-пакета:
 
 ```powershell
 cmake -S . -B build-package -A x64 `
@@ -112,8 +114,9 @@ cpack --config build-package/CPackConfig.cmake -C Release -G ZIP
 
 Артефакт появится в `build-package/packages/`. Он содержит заголовки,
 `mngl_imgui.dll`, SDL3 и SDL3_mixer с import libraries, CMake configs, лицензии
-и targets `MNGL::MNGL` и `MNGL::ImGui`. GitHub Actions после упаковки
-распаковывает архив и собирает из него CMake-потребителя с аудиосмоук-проверкой.
+и targets `MNGL::MNGL` и `MNGL::ImGui`. Linux CI после упаковки распаковывает архив и собирает CMake-потребителя с
+аудиосмоук-проверкой. Автоматическая проверка Windows-пакета возобновится
+после подключения Windows runner-а.
 Подключение в приложении:
 
 ```cmake
@@ -131,8 +134,8 @@ target_link_libraries(my_app PRIVATE MNGL::MNGL)
 заголовки ImGui не копируются. При ручной сборке feature-ветки укажите её через
 `-DMNGL_PACKAGE_BRANCH=<имя-ветки>` и убедитесь, что `origin/main` доступен.
 
-Linux x64 development-пакет собирается на GitHub-hosted `ubuntu-24.04` с
-SDL3/SDL3_image 3.4.18/3.4.8 и системным FreeType:
+Linux x64 development-пакет CI собирает на self-hosted Linux runner-е в
+контейнере Debian Bookworm с SDL3/SDL3_image 3.4.18/3.4.8 и системным FreeType:
 
 ```sh
 cmake -S . -B build-devel -GNinja -DCMAKE_BUILD_TYPE=Release \
@@ -156,11 +159,13 @@ ImGui не гарантирует совместимость ABI между ве
 
 #### Runtime-пакеты
 
-Workflow `Package MNGL runtime` собирает Windows x64 на GitHub-hosted runner,
-Linux x86_64 на GitHub-hosted `ubuntu-24.04`, а macOS arm64 и x86_64 — на
-GitHub-hosted `macos-15` и `macos-15-intel`. Для локального повторения Linux
-сборки установите CMake, Ninja, Git, `pkg-config`, Bison, `patchelf`, `readelf`,
-SDL3/SDL3_image и FreeType development-пакеты, а также XRandR development-пакет:
+Workflow `Package MNGL runtime` собирает только Linux x86_64 на self-hosted
+runner-е в контейнере Debian Bookworm. Workflow запускается на push в `main`,
+теге и вручную; обычные CI-артефакты хранятся один день, а к GitHub Release
+прикладывается Linux tar.gz. Автоматические сборки Windows/macOS приостановлены.
+Для локального повторения Linux-сборки установите CMake, Ninja, Git,
+`pkg-config`, Bison, `patchelf`, `readelf`, SDL3/SDL3_image и FreeType
+development-пакеты, а также XRandR development-пакет:
 
 ```sh
 sudo apt update
@@ -173,14 +178,10 @@ SDL3_image 3.4.8, задайте `SDL_PREFIX` на их install prefix и доб
 `$SDL_PREFIX/lib/pkgconfig` в `PKG_CONFIG_PATH`. CI устанавливает эти версии из
 исходников через `setup-sdl`.
 
-На push в `main` или ручной запуск workflow runtime ZIP/tar.gz доступен как
-Actions artifact. При push тега `vX.Y.Z` четыре runtime-пакета также
-добавляются к GitHub Release:
+На push в `main` или ручной запуск workflow Linux runtime tar.gz доступен как
+Actions artifact в течение одного дня. При push тега `vX.Y.Z` к GitHub Release прикладывается Linux runtime-пакет:
 
-- `mngl-runtime-windows-x64-X.Y.Z.zip`
 - `mngl-runtime-linux-x64-X.Y.Z.tar.gz`
-- `mngl-runtime-macos-arm64-X.Y.Z.tar.gz`
-- `mngl-runtime-macos-x64-X.Y.Z.tar.gz`
 
 В архивах находятся `mngl_imgui.dll`/`libmngl_imgui.so`, SDL3, SDL3_image,
 SDL3_mixer, FreeType и их переносимые зависимости, лицензии микшера и
@@ -199,7 +200,7 @@ export PATH="/path/to/mngl-runtime/bin:$PATH"
 export LD_LIBRARY_PATH="/path/to/mngl-runtime/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
 
-Linux-пакет собирается на Ubuntu 24.04 x86_64. glibc, Vulkan loader
+Linux-пакет CI собирается в Debian Bookworm x86_64 контейнере. glibc, Vulkan loader
 (`libvulkan1`), GPU-драйверы и системные графические/аудио-библиотеки не
 копируются в архив; для запуска нужна совместимая Ubuntu-система с установленным
 драйвером.
@@ -327,14 +328,14 @@ Runtime workflow запускает аудиосмоук-тест с SDL dummy a
 файл в `glslangValidator.exe`.
 
 Поставки инструментов различаются: у них могут быть дополнительные DLL,
-`.dylib` или `.so`. Runtime workflow собирает инструменты для Windows x64,
-Linux x86_64, macOS arm64 и x86_64. Обычная локальная CMake-сборка их не
-скачивает и не копирует.
+`.dylib` или `.so`. Сейчас runtime workflow автоматически собирает инструменты
+только для Linux x86_64. Локальная CMake-сборка их не скачивает и не копирует.
 
-Для Windows и Linux SDL_shadercross компилирует HLSL через DXC. Для macOS пакет
-собирает shadercross без DXC и использует проверенную цепочку glslangValidator
-(HLSL → SPIR-V) и shadercross/SPIRV-Cross (SPIR-V → MSL). Runtime-архив macOS
-включает оба инструмента и их `.dylib` зависимости.
+Скрипты сборки Windows/macOS runtime остаются в репозитории, но CI их пока не
+запускает: для этого нужны native runners. Windows и Linux SDL_shadercross
+компилирует HLSL через DXC. Сборка macOS использует проверенную цепочку
+glslangValidator (HLSL → SPIR-V) и shadercross/SPIRV-Cross (SPIR-V → MSL); для
+неё нужны оба инструмента и их `.dylib` зависимости.
 
 DXIL-файлы в `MNGL/shaders/` рассчитаны на Windows; на macOS и Linux
 используются соответствующие MSL/SPIR-V пути и HLSL-файлы. MoltenVK — Vulkan
