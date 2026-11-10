@@ -334,7 +334,197 @@ while (mngl::input::continue_work())
 }
 ```
 
-Создавайте ImGui-кадр после `input::continue_work()` и завершайте его до `render_window::display()`: `display()` добавляет UI-проход после 2D-кадра. `input` передаёт SDL-события backend-у на главном потоке и не отдаёт игре клавиатурный или мышиный ввод, захваченный интерфейсом. Обёртки `frame_scope`, `window_scope`, `dockspace_scope`, `main_menu_bar_scope` и `menu_scope` управляют временем жизни кадра, окон, меню и dockable-панелей; доступны `window()`, `dockspace()`, `main_menu_bar()`, `menu()`, `toggle()`, `text()`, `button()`, `input()`, `checkbox()`, `selectable()`, `context_menu()`, `radio_button()`, `bullet()`, `progress_bar()`, `slider()`, `combo()` и `image()`.
+Создавайте ImGui-кадр после `input::continue_work()` и завершайте его до `render_window::display()`: `display()` добавляет UI-проход после 2D-кадра. `input` передаёт SDL-события backend-у на главном потоке. Устаревшие агрегированные запросы ввода фильтруются по захвату ImGui; физические состояния отдельных устройств и `input_context` этого автоматически не делают. `frame_scope::input()` сообщает `wants_keyboard`, `wants_mouse` и `wants_text`; по ним приложение может временно выключить игровой `input_context` через `set_enabled()`.
+
+Обёртки `frame_scope`, `window_scope`, `dockspace_scope`, `main_menu_bar_scope` и `menu_scope` управляют временем жизни кадра, окон, меню и dockable-панелей. Они предоставляют `window()`, `dockspace()`, `main_menu_bar()`, `menu()`, `toggle()`, `menu_item()`, `text()`, `text_wrapped()`, `text_disabled()`, `text_colored()`, `button()`, `small_button()`, `input()`, `input_text()`, `checkbox()`, `selectable()`, `context_menu()`, `radio_button()`, `bullet()`, `progress_bar()`, `slider()`, `combo()` и `image()`.
+
+## Виджеты и компоновка через MNGL
+
+Для обычного UI вызывайте методы MNGL scope-объектов. Интерфейс принимает `std::string_view`, `glm::vec2`, `mngl::color` и типы опций MNGL; символы, флаги и структуры Dear ImGui остаются внутри адаптера.
+
+Фасад покрывает типичный интерфейсный код без вызовов `ImGui::`: блоки `Begin*`/`End*` становятся вложенными scope-объектами; `GetIO()` — снимком `frame.input()`; проверки клавиш и мыши — методами `frame`; `GetWindowDrawList()` — ограниченным `canvas_scope`. Для динамического текста передавайте результат `std::format()` в `text()` или `text_colored()`; для цветов используйте `mngl::color`, а не packed-цвет Dear ImGui.
+
+```cpp
+auto ui = gui.frame();
+ui.dockspace_over_viewport();
+
+bool show_tools = true;
+if (auto tools = ui.window("Tools", show_tools, {.no_collapse = true}))
+{
+	tools.text("Tools panel");
+}
+
+if (auto menu_bar = ui.main_menu_bar())
+{
+	if (auto file = menu_bar.menu("File"); file && file.menu_item("Open"))
+	{
+		open_file();
+	}
+}
+
+if (auto panel = ui.window("Tree"))
+{
+	panel.text_wrapped("MNGL widgets do not require Dear ImGui calls in application code.");
+	panel.set_next_item_width(-1.0f);
+	(void)panel.input_text("Filter", filter, "Search nodes...");
+
+	if (auto child = panel.child("Results", {.size = {0.0f, 240.0f}, .border = true}))
+	{
+		if (child.collapsing_header("Visible nodes", true))
+		{
+			child.text_disabled("Filtered results appear here.");
+		}
+	}
+
+	if (auto table = panel.table("Properties", 2,
+	                             {.row_background = true, .inner_vertical_borders = true}))
+	{
+		table.setup_column("Property");
+		table.setup_column("Value");
+		table.table_headers_row();
+		table.next_row();
+		(void)table.next_column();
+		table.text("Root");
+		(void)table.next_column();
+		table.text("42");
+	}
+}
+```
+
+`child()`, `begin_combo()`, `popup()`, `modal()`, `context_popup()`, `tab_bar()`, `tab()`, `table()`, `tooltip()`, `disabled()` и `tree_node()` возвращают scope с RAII-завершением соответствующего блока. Закрывающая операция вызывается при выходе из области, даже если дочернее окно оказалось скрыто. `last_item()`, `focused()`, `available_size()`, `cursor_screen_position()`, `metrics()` и методы прокрутки дают нужное состояние без доступа к ImGui IO или style-структурам.
+
+Окно можно связать с переменной видимости через `frame.window(title, open, options)` или `dockspace.window(title, open, options)`. `window_options` задаёт типичные настройки заголовка, изменения размера и позиции, прокрутки, фона, меню, навигации и docking без битовых флагов ImGui.
+
+Для интерактивной области с пользовательской отрисовкой используйте `canvas()`. Он создаёт hit target, сообщает состояние мыши и ограничивает рисунок прямоугольником canvas:
+
+```cpp
+auto canvas = panel.canvas("TreeCanvas", panel.available_size(),
+	                        {.left_button = true, .middle_button = true, .right_button = true});
+if (canvas)
+{
+	canvas.fill_rectangle({{8.0f, 8.0f}, {96.0f, 32.0f}}, mngl::color(0.12f, 0.16f, 0.22f));
+	canvas.draw_rectangle({{8.0f, 8.0f}, {96.0f, 32.0f}}, mngl::color(0.4f, 0.6f, 0.9f));
+	canvas.text({16.0f, 16.0f}, "root", mngl::color(1.0f));
+	if (canvas.clicked(mngl::mouse_button::middle))
+	{
+		// Начать перемещение canvas.
+	}
+}
+```
+
+`canvas_scope` рисует изображения MNGL, залитые и обведённые прямоугольники, линии и текст через внутренний ImGui draw list. `frame_scope::key_pressed()`, `mouse_down()`, `mouse_clicked()`, `mouse_double_clicked()`, `mouse_dragging()`, `input()`, `main_viewport()`, `set_next_window_position()` и `set_next_window_size()` покрывают состояние клавиатуры, мыши и главного viewport типами MNGL.
+
+## Виджеты-объекты с собственным состоянием
+
+Если состояние удобнее хранить вместе с элементом интерфейса, используйте `mngl::imgui_compat::widgets`. Каждый объект создаётся один раз, хранит значение и настройки, а `draw()` вызывается для нужного окна каждый кадр. Это дополнительный слой: прямые методы `window_scope` остаются удобны для коротких и динамических UI.
+
+```cpp
+namespace ui_widget = mngl::imgui_compat::widgets;
+
+ui_widget::button save{"Save"};
+ui_widget::checkbox show_grid{"Show grid", true};
+ui_widget::slider<float> zoom{"Zoom", 1.0f, 0.25f, 4.0f};
+ui_widget::text_input filter{"Filter", "", "Search nodes..."};
+ui_widget::numeric_input<int> visible_layers{"Layers", 4};
+ui_widget::combo<std::string> renderer{"Renderer", {"Default", "Software"}};
+ui_widget::image preview_image{{180.0f, 135.0f}};
+
+while (mngl::input::continue_work())
+{
+	{
+		auto frame = gui.frame();
+		if (auto panel = frame.window("Tools"))
+		{
+			(void)save.draw(panel);
+			if (save) save_document();
+			(void)show_grid.draw(panel);
+			(void)zoom.draw(panel);
+			(void)filter.draw(panel);
+			(void)visible_layers.draw(panel);
+			(void)renderer.draw(panel);
+			preview_image.draw(panel, preview);
+		}
+	}
+	window.display();
+}
+```
+
+`checkbox::value()`, `slider::value()`, `text_input::value()`, `numeric_input::value()` и `combo<T>::selected()` читают или меняют значения; `selectable` хранит состояние выбора, переключает его при нажатии и возвращает факт нажатия. `slider<T>` принимает скаляр или `glm`-вектор, а `combo<T>` хранит элементы и использует тот же протокол преобразования подписей, что и `combo(label, range)`. `text_input::set_multiline_size()` включает многострочный режим; regex-проверка применяется к однострочному вводу. `button` можно проверить в `if` после `draw()`: `operator bool()` сообщает результат последнего вызова `draw()`. `set_enabled()` отключает controls, а `radio_button<T>` связывает вариант с общим значением выбора; `context_menu` возвращает индекс выбранной команды и рисуется сразу после элемента, к которому привязан. `image::draw(panel, texture)` получает текстуру на каждый вызов и не удерживает её. Объекты не хранят ImGui-контекст и могут рисоваться в разных окнах, пока переданный `window_scope` активен.
+
+Классовый слой покрывает элементы и контейнеры всего текущего MNGL UI: `text`, `button`, `checkbox`, `selectable`, `bullet`, `radio_button<T>`, `combo<T>`, `combo_popup`, `context_menu`, `image`, `text_input`, `numeric_input<T>`, `slider<T>`, `progress_bar`, `collapsing_header`, `tree_node`, `window`, `child`, `popup`, `modal`, `context_popup`, `tab_bar`/`tab`, `table`, `tooltip`, `disabled`, `dockspace`, `main_menu_bar`/`menu`/`menu_item`, `font`, `canvas`, `style_color` и `id_block`. Контейнеры получают содержимое через callback. Scope остаётся локальным внутри `draw()`, поэтому каждый ImGui-блок гарантированно закрывается при выходе, включая исключения из callback. Одноразовые операции компоновки, измерения, фокуса и прокрутки остаются методами типизированного `drawing_context`:
+
+```cpp
+ui_widget::window tools{"Tools"};
+ui_widget::main_menu_bar menu_bar;
+ui_widget::menu file_menu{"File"};
+ui_widget::menu_item save_item{"Save", "Ctrl+S"};
+ui_widget::child results{"Results", {.size = {0.0f, 240.0f}, .border = true}};
+ui_widget::tree_node root{"Root", {.default_open = true}};
+ui_widget::table properties{"Properties", 2, {.row_background = true}};
+ui_widget::collapsing_header advanced{"Advanced"};
+ui_widget::combo_popup recent_file{"Recent file", "Choose a file"};
+
+while (mngl::input::continue_work())
+{
+	{
+		auto frame = gui.frame();
+		(void)menu_bar.draw(frame, [&](auto& bar)
+		{
+			(void)file_menu.draw(bar, [&](auto& file)
+			{
+				if (save_item.draw(file)) save_document();
+			});
+		});
+
+		(void)tools.draw(frame, [&](auto& panel)
+		{
+			(void)results.draw(panel, [&](auto& list)
+			{
+				(void)root.draw(list, [&](auto& node)
+				{
+					node.text("Child node");
+				});
+			});
+
+			(void)properties.draw(panel, [&](auto& table)
+			{
+				table.setup_column("Property");
+				table.setup_column("Value");
+				table.table_headers_row();
+				table.next_row();
+				(void)table.next_column();
+				table.text("Visible");
+				(void)table.next_column();
+				table.text("True");
+			});
+
+			(void)advanced.draw(panel, [&](auto& contents)
+			{
+				contents.text("Advanced settings");
+			});
+
+			(void)recent_file.draw(panel, [&](auto& contents)
+			{
+				if (contents.selectable("scene.mngl")) open_recent_file("scene.mngl");
+				if (contents.selectable("project.mngl")) open_recent_file("project.mngl");
+			});
+		});
+	}
+	window.display();
+}
+```
+
+`collapsing_header::draw()` возвращает состояние раскрытия; с callback он запускает содержимое только пока заголовок открыт. `combo_popup` хранит подпись предпросмотра и позволяет собрать пользовательское содержимое выпадающего списка. `combo<T>` остаётся готовым вариантом с типизированным набором значений.
+
+`key` включает стандартные клавиши, цифры, буквы, F1–F24, пунктуацию, keypad и клавиши меню браузера; `frame.input()` также возвращает модификаторы, захват UI, необязательную позицию курсора, его смещение, прокрутку, `delta_time` и масштаб framebuffer. Пример обработки сочетания клавиш с учётом ввода текста:
+
+```cpp
+const auto state = ui.input();
+if (ui.key_pressed(mngl::imgui_compat::key::s) && state.control && !state.wants_text)
+{
+	save_document();
+}
+```
 
 Чтобы выводить весь ImGui workspace в одну offscreen-текстуру, используйте `mngl::resizable_texture`: она обновляет backing-текстуру до `window.pixel_size()` при обращении к `target()`, а `as_sprite()` подгоняет размер спрайта к логической области окна. Обычные `mngl::texture` при изменении окна остаются прежнего размера. Для HiDPI включите `window_flags.high_pixel_density`: backing-текстура создаётся в физических пикселях, а ImGui сохраняет логический размер элементов, учитывая `DisplayFramebufferScale` от SDL. Текстура должна оставаться живой до `window.display()`:
 

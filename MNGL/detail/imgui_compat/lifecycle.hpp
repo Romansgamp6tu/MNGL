@@ -410,8 +410,9 @@ namespace mngl
 	}
 
 	inline imgui_context::window_scope::window_scope(imgui_context& owner, std::string_view title,
+	                                                 const imgui_compat::window_options& options,
 	                                                 std::optional<ImGuiID> dockspace_id, bool* open)
-	    : owner(&owner), visible(false)
+	    : owner(&owner), visible(false), end(end_action::window)
 	{
 		if (!owner.context || !owner.frame_active)
 		{
@@ -423,8 +424,15 @@ namespace mngl
 		{
 			ImGui::SetNextWindowDockID(*dockspace_id, ImGuiCond_FirstUseEver);
 		}
-		const std::string terminated_title(title);
-		visible = ImGui::Begin(terminated_title.c_str(), open);
+		const std::string terminated_title = imgui_compat::detail::widget_label(title);
+		visible = ImGui::Begin(terminated_title.c_str(), open,
+		                       imgui_compat::detail::to_imgui_window_flags(options));
+	}
+
+	inline imgui_context::window_scope::window_scope(imgui_context& owner, bool visible,
+	                                                 end_action end) noexcept
+	    : owner(&owner), visible(visible), end(end)
+	{
 	}
 
 	inline imgui_context::main_menu_bar_scope::main_menu_bar_scope(imgui_context& owner)
@@ -515,15 +523,17 @@ namespace mngl
 		return dockspace_scope(*owner, dockspace_id);
 	}
 
-	inline imgui_context::window_scope imgui_context::dockspace_scope::window(std::string_view title) const
+	inline imgui_context::window_scope imgui_context::dockspace_scope::window(
+	    std::string_view title, const imgui_compat::window_options& options) const
 	{
-		return window_scope(*owner, title, id);
+		return window_scope(*owner, title, options, id);
 	}
 
 	inline imgui_context::window_scope imgui_context::dockspace_scope::window(std::string_view title,
-	                                                                          bool& open) const
+	                                                                          bool& open,
+	                                                                          const imgui_compat::window_options& options) const
 	{
-		return window_scope(*owner, title, id, &open);
+		return window_scope(*owner, title, options, id, &open);
 	}
 
 	inline imgui_context::window_scope::~window_scope() noexcept
@@ -531,7 +541,20 @@ namespace mngl
 		if (owner && owner->context)
 		{
 			owner->make_current();
-			ImGui::End();
+			switch (end)
+			{
+			case end_action::window: ImGui::End(); break;
+			case end_action::child: ImGui::EndChild(); break;
+			case end_action::combo: ImGui::EndCombo(); break;
+			case end_action::popup: ImGui::EndPopup(); break;
+			case end_action::tab_bar: ImGui::EndTabBar(); break;
+			case end_action::tab_item: ImGui::EndTabItem(); break;
+			case end_action::table: ImGui::EndTable(); break;
+			case end_action::tooltip: ImGui::EndTooltip(); break;
+			case end_action::disabled: ImGui::EndDisabled(); break;
+			case end_action::tree_node: ImGui::TreePop(); break;
+			case end_action::none: break;
+			}
 		}
 	}
 

@@ -762,13 +762,24 @@ namespace mngl
 		return main_menu_bar_scope(*owner);
 	}
 
-	inline imgui_context::window_scope imgui_context::frame_scope::window(std::string_view title) const
+	inline imgui_context::window_scope imgui_context::frame_scope::window(
+	    std::string_view title, const imgui_compat::window_options& options) const
 	{
 		if (!owner)
 		{
 			throw std::logic_error("Cannot create an ImGui window from an inactive frame scope");
 		}
-		return window_scope(*owner, title);
+		return window_scope(*owner, title, options);
+	}
+
+	inline imgui_context::window_scope imgui_context::frame_scope::window(
+	    std::string_view title, bool& open, const imgui_compat::window_options& options) const
+	{
+		if (!owner)
+		{
+			throw std::logic_error("Cannot create an ImGui window from an inactive frame scope");
+		}
+		return window_scope(*owner, title, options, std::nullopt, &open);
 	}
 
 	inline imgui_context::menu_scope imgui_context::main_menu_bar_scope::menu(std::string_view label) const
