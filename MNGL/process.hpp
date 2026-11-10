@@ -80,7 +80,7 @@ namespace mngl::process
 		{
 			const auto encoded = path.u8string();
 			std::string result(reinterpret_cast<const char*>(encoded.data()), encoded.size());
-			if (result.find('\0') != std::string::npos)
+			if (result.find('\0') != std::string::npos) [[unlikely]]
 			{
 				throw std::invalid_argument("process working directory cannot contain a null character");
 			}
@@ -104,7 +104,7 @@ namespace mngl::process
 
 		inline void check_property(bool success, const char* message)
 		{
-			if (!success)
+			if (!success) [[unlikely]]
 			{
 				throw sdl_error(message);
 			}
@@ -151,19 +151,19 @@ namespace mngl::process
 		[[nodiscard]] static child_process launch(std::vector<std::string> arguments,
 		                                          const launch_options& options = {})
 		{
-			if (arguments.empty() || arguments.front().empty())
+			if (arguments.empty() || arguments.front().empty()) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "process arguments must include a non-empty executable path at index 0");
 			}
 			for (const auto& argument : arguments)
 			{
-				if (argument.find('\0') != std::string::npos)
+				if (argument.find('\0') != std::string::npos) [[unlikely]]
 				{
 					throw std::invalid_argument("process arguments cannot contain null characters");
 				}
 			}
-			if (options.merge_standard_error && options.standard_error != stdio_route::inherited)
+			if (options.merge_standard_error && options.standard_error != stdio_route::inherited) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "set standard_error to inherited when merging it into standard_output");
@@ -178,7 +178,7 @@ namespace mngl::process
 			argv.push_back(nullptr);
 
 			detail::properties_guard properties;
-			if (!properties.id)
+			if (!properties.id) [[unlikely]]
 			{
 				throw sdl_error("failed to create process properties: ");
 			}
@@ -221,7 +221,7 @@ namespace mngl::process
 			}
 
 			auto* process = SDL_CreateProcessWithProperties(properties.id);
-			if (!process)
+			if (!process) [[unlikely]]
 			{
 				throw sdl_error("failed to launch process: ");
 			}
@@ -230,14 +230,14 @@ namespace mngl::process
 			try
 			{
 				const auto process_properties = SDL_GetProcessProperties(process);
-				if (!process_properties)
+				if (!process_properties) [[unlikely]]
 				{
 					throw sdl_error("failed to get process properties: ");
 				}
 				if (options.standard_input == stdio_route::pipe)
 				{
 					result.m_stdin = SDL_GetProcessInput(process);
-					if (!result.m_stdin)
+					if (!result.m_stdin) [[unlikely]]
 					{
 						throw sdl_error("failed to get process standard input: ");
 					}
@@ -245,7 +245,7 @@ namespace mngl::process
 				if (options.standard_output == stdio_route::pipe)
 				{
 					result.m_stdout = SDL_GetProcessOutput(process);
-					if (!result.m_stdout)
+					if (!result.m_stdout) [[unlikely]]
 					{
 						throw sdl_error("failed to get process standard output: ");
 					}
@@ -254,7 +254,7 @@ namespace mngl::process
 				{
 					result.m_stderr = static_cast<SDL_IOStream*>(
 					    SDL_GetPointerProperty(process_properties, SDL_PROP_PROCESS_STDERR_POINTER, nullptr));
-					if (!result.m_stderr)
+					if (!result.m_stderr) [[unlikely]]
 					{
 						throw sdl_error("failed to get process standard error: ");
 					}
@@ -278,7 +278,7 @@ namespace mngl::process
 		{
 			ensure_valid();
 			const auto properties = SDL_GetProcessProperties(m_process);
-			if (!properties)
+			if (!properties) [[unlikely]]
 			{
 				throw sdl_error("failed to get process properties: ");
 			}
@@ -316,7 +316,7 @@ namespace mngl::process
 				return *m_exit_code;
 			}
 			int exit_code = 0;
-			if (!SDL_WaitProcess(m_process, true, &exit_code))
+			if (!SDL_WaitProcess(m_process, true, &exit_code)) [[unlikely]]
 			{
 				throw sdl_error("failed while waiting for process: ");
 			}
@@ -345,7 +345,7 @@ namespace mngl::process
 		[[nodiscard]] std::size_t write_stdin(std::span<const std::byte> bytes)
 		{
 			ensure_valid();
-			if (!m_stdin)
+			if (!m_stdin) [[unlikely]]
 			{
 				throw std::logic_error("process standard input was not piped");
 			}
@@ -355,7 +355,7 @@ namespace mngl::process
 			}
 
 			const auto written = SDL_WriteIO(m_stdin, bytes.data(), bytes.size());
-			if (SDL_GetIOStatus(m_stdin) == SDL_IO_STATUS_ERROR)
+			if (SDL_GetIOStatus(m_stdin) == SDL_IO_STATUS_ERROR) [[unlikely]]
 			{
 				throw sdl_error("failed to write to process standard input: ");
 			}
@@ -398,7 +398,7 @@ namespace mngl::process
 
 		void ensure_valid() const
 		{
-			if (!m_process)
+			if (!m_process) [[unlikely]]
 			{
 				throw std::logic_error("process handle is empty");
 			}
@@ -408,7 +408,7 @@ namespace mngl::process
 		                                             const char* unavailable_message)
 		{
 			ensure_valid();
-			if (!stream)
+			if (!stream) [[unlikely]]
 			{
 				throw std::logic_error(unavailable_message);
 			}

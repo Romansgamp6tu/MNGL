@@ -156,7 +156,7 @@ namespace mngl::detail
 
 		Return operator()(Args... args)
 		{
-			if (!m_operations)
+			if (!m_operations) [[unlikely]]
 			{
 				throw std::bad_function_call();
 			}

@@ -205,6 +205,7 @@
     <ClCompile Include="imgui\backends\imgui_impl_sdlgpu3.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="mngl.hpp" />
     <ClInclude Include="gpu_buffer.hpp" />
     <ClInclude Include="batcher2d.hpp" />
     <ClInclude Include="renderer2d.hpp" />
@@ -230,6 +231,7 @@
     <ClInclude Include="iupdate.h" />
     <ClInclude Include="line.hpp" />
     <ClInclude Include="logger.h" />
+    <ClInclude Include="logger.hpp" />
     <ClInclude Include="console.hpp" />
     <ClInclude Include="mod_loader.hpp" />
     <ClInclude Include="mods.hpp" />
@@ -239,6 +241,7 @@
     <ClInclude Include="rectangle.hpp" />
     <ClInclude Include="render_pass.hpp" />
     <ClInclude Include="graphics_shader.hpp" />
+    <ClInclude Include="gpu_optimizations.hpp" />
     <ClInclude Include="sampler.hpp" />
     <ClInclude Include="shader_loader.hpp" />
     <ClInclude Include="surface.hpp" />
@@ -272,6 +275,9 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="shaders\batcher2d.frag.hlsl">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="shaders\batcher2d.cull.hlsl">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="shaders\custom_fill.frag.hlsl">

@@ -1,0 +1,27 @@
+#pragma once
+
+// Convenience include for common application features and 2D rendering settings.
+// Low-level GPU resources, pipelines, ImGui, and mod APIs remain separate.
+#include "action_map.hpp"
+#include "async_io.hpp"
+#include "audio.hpp"
+#include "clipboard.hpp"
+#include "color.hpp"
+#include "console.hpp"
+#include "device.hpp"
+#include "dialog.hpp"
+#include "event.hpp"
+#include "file_io.hpp"
+#include "gpu_optimizations.hpp"
+#include "input.hpp"
+#include "line.hpp"
+#include "logger.hpp"
+#include "paths.hpp"
+#include "process.hpp"
+#include "renderer2d.hpp"
+#include "render_window.hpp"
+#include "runtime.hpp"
+#include "storage.hpp"
+#include "text.hpp"
+#include "texture.hpp"
+#include "window.hpp"

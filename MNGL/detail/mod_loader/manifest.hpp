@@ -309,14 +309,14 @@ namespace mngl::mods
 		inline api_version parse_api_version(std::string_view text)
 		{
 			const auto dot = text.find('.');
-			if (dot == std::string_view::npos || text.find('.', dot + 1) != std::string_view::npos)
+			if (dot == std::string_view::npos || text.find('.', dot + 1) != std::string_view::npos) [[unlikely]]
 				throw std::runtime_error("api_version must have MAJOR.MINOR format");
 			api_version version;
 			const auto major = std::from_chars(text.data(), text.data() + dot, version.major);
 			const auto minor =
 			    std::from_chars(text.data() + dot + 1, text.data() + text.size(), version.minor);
 			if (major.ec != std::errc{} || major.ptr != text.data() + dot || minor.ec != std::errc{} ||
-			    minor.ptr != text.data() + text.size())
+			    minor.ptr != text.data() + text.size()) [[unlikely]]
 				throw std::runtime_error("api_version must contain unsigned decimal numbers");
 			return version;
 		}
@@ -338,16 +338,16 @@ namespace mngl::mods
 				const auto dot = text.find('.', start);
 				const auto end = part == 2 ? text.size() : dot;
 				if (end == std::string_view::npos || end == start ||
-				    (part == 2 && dot != std::string_view::npos))
+				    (part == 2 && dot != std::string_view::npos)) [[unlikely]]
 					throw std::runtime_error("version must have MAJOR.MINOR.PATCH format");
 				const auto parsed =
 				    std::from_chars(text.data() + start, text.data() + end, *components[part]);
 				if (parsed.ec != std::errc{} || parsed.ptr != text.data() + end ||
-				    (end - start > 1 && text[start] == '0'))
+				    (end - start > 1 && text[start] == '0')) [[unlikely]]
 					throw std::runtime_error("version must contain canonical unsigned decimal numbers");
 				start = end + 1;
 			}
-			if (start != text.size() + 1)
+			if (start != text.size() + 1) [[unlikely]]
 				throw std::runtime_error("version must have MAJOR.MINOR.PATCH format");
 			return version;
 		}
@@ -403,7 +403,7 @@ namespace mngl::mods
 			}
 
 			const auto version_text = token.substr(prefix_length);
-			if (version_text.empty())
+			if (version_text.empty()) [[unlikely]]
 				throw std::runtime_error("dependency version range has an empty version clause");
 			return {relation, parse_semantic_version(version_text)};
 		}
@@ -426,10 +426,10 @@ namespace mngl::mods
 					++end;
 				callback(parse_version_clause(range.substr(start, end - start)));
 				start = end;
-				if (++count > 64)
+				if (++count > 64) [[unlikely]]
 					throw std::runtime_error("dependency version range has more than 64 clauses");
 			}
-			if (count == 0)
+			if (count == 0) [[unlikely]]
 				throw std::runtime_error("dependency version range cannot be empty");
 		}
 
@@ -480,12 +480,12 @@ namespace mngl::mods
 		                                   std::string_view key)
 		{
 			const auto found = values.find(std::string(key));
-			if (found == values.end())
+			if (found == values.end()) [[unlikely]]
 				throw std::runtime_error("mod.json is missing required field '" + std::string(key) + "'");
 			const auto* text = std::get_if<std::string>(&found->second);
-			if (!text)
+			if (!text) [[unlikely]]
 				throw std::runtime_error("mod.json field '" + std::string(key) + "' must be a string");
-			if (text->empty() || text->find('\0') != std::string::npos)
+			if (text->empty() || text->find('\0') != std::string::npos) [[unlikely]]
 				throw std::runtime_error("mod.json field '" + std::string(key) +
 				                         "' cannot be empty or contain NUL");
 			return *text;
@@ -495,10 +495,10 @@ namespace mngl::mods
 		                                   std::string_view key)
 		{
 			const auto found = values.find(std::string(key));
-			if (found == values.end())
+			if (found == values.end()) [[unlikely]]
 				throw std::runtime_error("mod.json is missing required field '" + std::string(key) + "'");
 			const auto* value = std::get_if<std::uint64_t>(&found->second);
-			if (!value || *value > std::numeric_limits<std::uint32_t>::max())
+			if (!value || *value > std::numeric_limits<std::uint32_t>::max()) [[unlikely]]
 				throw std::runtime_error("mod.json field '" + std::string(key) +
 				                         "' must be a 32-bit unsigned integer");
 			return static_cast<std::uint32_t>(*value);
@@ -520,24 +520,24 @@ namespace mngl::mods
 		inline mod_manifest parse_manifest_file(const std::filesystem::path& package_directory)
 		{
 			const auto package = std::filesystem::canonical(package_directory);
-			if (!std::filesystem::is_directory(package))
+			if (!std::filesystem::is_directory(package)) [[unlikely]]
 				throw std::runtime_error("mod package path is not a directory");
 			const auto manifest_path = package / "mod.json";
-			if (!std::filesystem::is_regular_file(manifest_path))
+			if (!std::filesystem::is_regular_file(manifest_path)) [[unlikely]]
 				throw std::runtime_error("package does not contain mod.json");
 			const auto size = std::filesystem::file_size(manifest_path);
 			constexpr std::uintmax_t max_manifest_size = 1024 * 1024;
-			if (size > max_manifest_size)
+			if (size > max_manifest_size) [[unlikely]]
 				throw std::runtime_error("mod.json exceeds the 1 MiB size limit");
 
 			std::ifstream input(manifest_path, std::ios::binary);
-			if (!input)
+			if (!input) [[unlikely]]
 				throw std::runtime_error("cannot open mod.json");
 			std::string source(static_cast<std::size_t>(size), '\0');
 			if (!source.empty())
 			{
 				input.read(source.data(), static_cast<std::streamsize>(source.size()));
-				if (!input || static_cast<std::size_t>(input.gcount()) != source.size())
+				if (!input || static_cast<std::size_t>(input.gcount()) != source.size()) [[unlikely]]
 					throw std::runtime_error("cannot read complete mod.json");
 			}
 
@@ -550,7 +550,7 @@ namespace mngl::mods
 			{
 				manifest.id = required_string(values, "id");
 				for (const auto& [key, _] : values)
-					if (!allowed.contains(key))
+					if (!allowed.contains(key)) [[unlikely]]
 						throw std::runtime_error("unknown mod.json field '" + key + "'");
 				manifest.schema_version = required_uint(values, "schema_version");
 				manifest.name = required_string(values, "name");
@@ -559,53 +559,53 @@ namespace mngl::mods
 				manifest.binary_abi = required_string(values, "binary_abi");
 				const auto binary = required_string(values, "binary");
 
-				if (manifest.schema_version != 1)
+				if (manifest.schema_version != 1) [[unlikely]]
 					throw std::runtime_error("unsupported manifest schema_version (supported: 1)");
 				require_id(manifest.id, "mod_id");
 				if (std::all_of(manifest.name.begin(), manifest.name.end(),
-				                [](unsigned char c) { return std::isspace(c) != 0; }))
+				                [](unsigned char c) { return std::isspace(c) != 0; })) [[unlikely]]
 					throw std::runtime_error("mod name cannot contain only whitespace");
 				validate_mod_version(manifest.version);
 				if (const auto dependencies = values.find("dependencies"); dependencies != values.end())
 				{
 					const auto* dependency_values =
 					    std::get_if<manifest_json::dependency_map>(&dependencies->second);
-					if (!dependency_values)
+					if (!dependency_values) [[unlikely]]
 						throw std::runtime_error(
 						    "mod.json field 'dependencies' must be an object of mod IDs to version ranges");
 					for (const auto& [dependency_id, version_range] : *dependency_values)
 					{
 						require_id(dependency_id, "dependency mod_id");
-						if (dependency_id == manifest.id)
+						if (dependency_id == manifest.id) [[unlikely]]
 							throw std::runtime_error("a mod cannot depend on itself");
 						for_each_version_clause(version_range, [](const version_clause&) {});
 						manifest.dependencies.push_back({dependency_id, version_range});
 					}
 				}
-				if (binary.find('\\') != std::string::npos)
+				if (binary.find('\\') != std::string::npos) [[unlikely]]
 					throw std::runtime_error("binary path must use forward slashes");
 
 				const auto relative_binary = std::filesystem::u8path(binary);
 				if (relative_binary.empty() || relative_binary.is_absolute() ||
-				    relative_binary.has_root_name() || relative_binary.has_root_directory())
+				    relative_binary.has_root_name() || relative_binary.has_root_directory()) [[unlikely]]
 					throw std::runtime_error("binary path must be relative to the mod package");
 				for (const auto& component : relative_binary)
-					if (component == ".." || component == ".")
+					if (component == ".." || component == ".") [[unlikely]]
 						throw std::runtime_error("binary path cannot contain '.' or '..' components");
 
 				const auto binary_path = std::filesystem::canonical(package / relative_binary);
 				const auto relative_to_package = binary_path.lexically_relative(package);
 				if (relative_to_package.empty() || relative_to_package.is_absolute() ||
-				    *relative_to_package.begin() == std::filesystem::path(".."))
+				    *relative_to_package.begin() == std::filesystem::path("..")) [[unlikely]]
 					throw std::runtime_error("binary path resolves outside the mod package");
-				if (!std::filesystem::is_regular_file(binary_path))
+				if (!std::filesystem::is_regular_file(binary_path)) [[unlikely]]
 					throw std::runtime_error("mod binary is not a regular file");
 				manifest.binary_path = binary_path;
 				return manifest;
 			}
 			catch (const std::exception& error)
 			{
-				if (!manifest.id.empty())
+				if (!manifest.id.empty()) [[unlikely]]
 					throw manifest_parse_error(manifest.id, error.what());
 				throw;
 			}

@@ -57,7 +57,7 @@ PDB-файлы содержат отладочную информацию и д�
 
 Для окон, событий, клавиатуры, мыши и геймпадов отдельная input-библиотека
 не нужна: MNGL использует SDL3. Демо обрабатывает события через
-`mngl::input::continue_work()`.
+`mngl::input::next_frame()`.
 
 ### Получение исходников
 
@@ -226,6 +226,7 @@ Win32-конфигурация Visual Studio и x86 CMake-сборка ищут 
 |---|---|---|
 | `BUILD_TESTING` | `ON` | Объявляет API, audio и GPU runtime smoke-проверки |
 | `MNGL_BUILD_MOD_EXAMPLE` | `ON` | Собирает host, пример мода и связанные mod targets |
+| `MNGL_BUILD_2D_BENCHMARK` | `OFF` | Собирает интерактивную 2D-сцену для профилирования |
 | `MNGL_CUSTOM_AUDIO_BACKEND` | `OFF` | Отключает аудиоинтеграцию MNGL целиком |
 | `MNGL_CUSTOM_AUDIO_INTERFACE` | `OFF` | Отключает фасад и встроенную интеграцию SDL3_mixer |
 | `MNGL_CUSTOM_MIXER_INTERFACE` | `OFF` | Отключает только фасад `mngl::audio` |
@@ -240,6 +241,11 @@ Win32-конфигурация Visual Studio и x86 CMake-сборка ищут 
 cmake -S . -B build -A x64 -DBUILD_TESTING=OFF -DMNGL_BUILD_MOD_EXAMPLE=OFF
 cmake --build build --config Debug --target mngl_demo
 ```
+
+Чтобы собрать benchmark, задайте `-DMNGL_BUILD_2D_BENCHMARK=ON` и соберите
+цель `mngl_2d_benchmark`. Она показывает нагрузку на спрайтах, пользовательской
+геометрии и смешанной сцене; запуск и управление описаны в
+[руководстве по 2D benchmark](../2d/benchmarking.md).
 
 Свойства аудио применяются ко всем потребителям source target `mngl`.
 Режимы и их приоритет описаны в [настройках аудио](../core/audio.md#audio-configuration).

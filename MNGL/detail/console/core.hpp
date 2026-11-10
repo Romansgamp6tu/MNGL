@@ -175,7 +175,7 @@ namespace mngl::console
 			if constexpr (std::same_as<value_t, std::string>)
 			{
 				const auto* stored = std::get_if<std::string>(&value);
-				if (!stored)
+				if (!stored) [[unlikely]]
 					throw registry_error(error_code::argument_type_mismatch,
 					                     "Argument '" + std::string(argument_name) + "' has the wrong type",
 					                     std::string(command_id));
@@ -184,11 +184,11 @@ namespace mngl::console
 			else if constexpr (is_integer_argument_v<value_t>)
 			{
 				const auto* stored = std::get_if<std::int64_t>(&value);
-				if (!stored)
+				if (!stored) [[unlikely]]
 					throw registry_error(error_code::argument_type_mismatch,
 					                     "Argument '" + std::string(argument_name) + "' has the wrong type",
 					                     std::string(command_id));
-				if (!std::in_range<value_t>(*stored))
+				if (!std::in_range<value_t>(*stored)) [[unlikely]]
 					throw registry_error(error_code::argument_out_of_range,
 					                     "Argument '" + std::string(argument_name) +
 					                         "' is outside the handler type range",
@@ -198,14 +198,14 @@ namespace mngl::console
 			else if constexpr (std::floating_point<value_t>)
 			{
 				const auto* stored = std::get_if<double>(&value);
-				if (!stored)
+				if (!stored) [[unlikely]]
 					throw registry_error(error_code::argument_type_mismatch,
 					                     "Argument '" + std::string(argument_name) + "' has the wrong type",
 					                     std::string(command_id));
 				if constexpr (!std::same_as<value_t, double>)
 				{
 					constexpr auto max_value = std::numeric_limits<value_t>::max();
-					if (*stored < -max_value || *stored > max_value)
+					if (*stored < -max_value || *stored > max_value) [[unlikely]]
 						throw registry_error(error_code::argument_out_of_range,
 						                     "Argument '" + std::string(argument_name) +
 						                         "' is outside the handler type range",
@@ -218,7 +218,7 @@ namespace mngl::console
 				static_assert(std::same_as<value_t, bool>,
 				              "Flags are declared with flag(), not argument<T>()");
 				const auto* stored = std::get_if<bool>(&value);
-				if (!stored)
+				if (!stored) [[unlikely]]
 					throw registry_error(error_code::argument_type_mismatch,
 					                     "Argument '" + std::string(argument_name) + "' has the wrong type",
 					                     std::string(command_id));
@@ -294,7 +294,7 @@ namespace mngl::console
 			           std::span<const argument_value> values,
 			           const command_descriptor& descriptor) mutable -> command_result
 			{
-				if (values.size() != sizeof...(Args))
+				if (values.size() != sizeof...(Args)) [[unlikely]]
 					throw registry_error(error_code::argument_count_mismatch,
 					                     "Command argument count does not match its declaration",
 					                     descriptor.id);

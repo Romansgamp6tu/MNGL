@@ -319,7 +319,7 @@ namespace mngl::audio
 	{
 		template <typename T> T value_or_throw(std::expected<T, error> result)
 		{
-			if (!result)
+			if (!result) [[unlikely]]
 				throw audio_error(result.error());
 			if constexpr (!std::is_void_v<T>)
 				return std::move(*result);

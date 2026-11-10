@@ -1,6 +1,6 @@
 #pragma once
 
-#include "utilities.hpp"
+#include <SDL3/SDL_pixels.h>
 
 namespace mngl
 {

@@ -54,10 +54,315 @@ namespace mngl::imgui_compat
 		font_source bold_italic{};
 		font_source monospace{};
 	};
+
+	// These types describe common UI behavior without exposing Dear ImGui's
+	// flags, keys, vectors, or IO structures to application code.
+	enum class key : std::uint8_t
+	{
+		tab,
+		left,
+		right,
+		up,
+		down,
+		page_up,
+		page_down,
+		home,
+		end,
+		insert,
+		delete_key,
+		backspace,
+		space,
+		enter,
+		escape,
+		left_control,
+		left_shift,
+		left_alt,
+		left_super,
+		right_control,
+		right_shift,
+		right_alt,
+		right_super,
+		menu,
+		digit_0,
+		digit_1,
+		digit_2,
+		digit_3,
+		digit_4,
+		digit_5,
+		digit_6,
+		digit_7,
+		digit_8,
+		digit_9,
+		a,
+		b,
+		c,
+		d,
+		e,
+		f,
+		g,
+		h,
+		i,
+		j,
+		k,
+		l,
+		m,
+		n,
+		o,
+		p,
+		q,
+		r,
+		s,
+		t,
+		u,
+		v,
+		w,
+		x,
+		y,
+		z,
+		f1,
+		f2,
+		f3,
+		f4,
+		f5,
+		f6,
+		f7,
+		f8,
+		f9,
+		f10,
+		f11,
+		f12,
+		f13,
+		f14,
+		f15,
+		f16,
+		f17,
+		f18,
+		f19,
+		f20,
+		f21,
+		f22,
+		f23,
+		f24,
+		apostrophe,
+		comma,
+		minus,
+		period,
+		slash,
+		semicolon,
+		equal,
+		left_bracket,
+		backslash,
+		right_bracket,
+		grave_accent,
+		caps_lock,
+		scroll_lock,
+		num_lock,
+		print_screen,
+		pause,
+		keypad_0,
+		keypad_1,
+		keypad_2,
+		keypad_3,
+		keypad_4,
+		keypad_5,
+		keypad_6,
+		keypad_7,
+		keypad_8,
+		keypad_9,
+		keypad_decimal,
+		keypad_divide,
+		keypad_multiply,
+		keypad_subtract,
+		keypad_add,
+		keypad_enter,
+		keypad_equal,
+		app_back,
+		app_forward
+	};
+
+	enum class color_role : std::uint8_t
+	{
+		text,
+		disabled_text,
+		window_background,
+		border,
+		button,
+		button_hovered,
+		button_active,
+		header,
+		header_active
+	};
+
+	enum class condition : std::uint8_t
+	{
+		always,
+		first_use,
+		once,
+		appearing
+	};
+
+	struct window_options
+	{
+		bool always_auto_resize = false;
+		bool no_title_bar = false;
+		bool no_resize = false;
+		bool no_move = false;
+		bool no_scrollbar = false;
+		bool no_scroll_with_mouse = false;
+		bool no_collapse = false;
+		bool no_docking = false;
+		bool no_saved_settings = false;
+		bool no_background = false;
+		bool no_mouse_inputs = false;
+		bool menu_bar = false;
+		bool horizontal_scrollbar = false;
+		bool no_focus_on_appearing = false;
+		bool no_bring_to_front_on_focus = false;
+		bool no_nav_inputs = false;
+		bool no_nav_focus = false;
+	};
+
+	struct child_options
+	{
+		glm::vec2 size{};
+		bool border = false;
+		bool resize_x = false;
+		bool resize_y = false;
+		bool auto_resize_x = false;
+		bool auto_resize_y = false;
+		bool always_auto_resize = false;
+		bool frame_style = false;
+		bool no_scrollbar = false;
+		bool no_scroll_with_mouse = false;
+	};
+
+	struct tab_bar_options
+	{
+		bool reorderable = false;
+		bool auto_select_new_tabs = false;
+	};
+
+	struct tab_item_options
+	{
+		bool unsaved_document = false;
+		bool set_selected = false;
+		bool leading = false;
+		bool trailing = false;
+	};
+
+	struct table_options
+	{
+		bool resizable = false;
+		bool reorderable = false;
+		bool hideable = false;
+		bool sortable = false;
+		bool row_background = false;
+		bool inner_horizontal_borders = false;
+		bool inner_vertical_borders = false;
+		bool stretch_columns = false;
+		bool no_saved_settings = false;
+	};
+
+	struct tree_node_options
+	{
+		bool selected = false;
+		bool default_open = false;
+		bool leaf = false;
+		bool span_available_width = false;
+		bool open_on_arrow = false;
+		bool open_on_double_click = false;
+		bool framed = false;
+	};
+
+	struct canvas_options
+	{
+		bool left_button = true;
+		bool middle_button = false;
+		bool right_button = false;
+	};
+
+	struct input_state
+	{
+		bool wants_keyboard = false;
+		bool wants_mouse = false;
+		bool wants_text = false;
+		bool control = false;
+		bool shift = false;
+		bool alt = false;
+		bool super = false;
+		float delta_time = 0.0f;
+		glm::vec2 framebuffer_scale{1.0f};
+		std::optional<glm::vec2> mouse_position;
+		glm::vec2 mouse_delta{};
+		glm::vec2 mouse_wheel{};
+	};
+
+	struct viewport_state
+	{
+		glm::vec2 position{};
+		glm::vec2 work_position{};
+		glm::vec2 size{};
+		glm::vec2 work_size{};
+	};
+
+	struct style_metrics
+	{
+		glm::vec2 item_spacing{};
+		glm::vec2 frame_padding{};
+		float scrollbar_size = 0.0f;
+		float text_line_height = 0.0f;
+	};
+
+	struct item_state
+	{
+		bool visible = false;
+		bool hovered = false;
+		bool active = false;
+		bool focused = false;
+		bool edited = false;
+		bool activated = false;
+		bool deactivated = false;
+		bool deactivated_after_edit = false;
+		bool clicked_left = false;
+		bool clicked_middle = false;
+		bool clicked_right = false;
+	};
 } // namespace mngl::imgui_compat
 
 namespace mngl::imgui_compat::detail
 {
+	[[nodiscard]] inline std::string widget_label(std::string_view value)
+	{
+		if (value.find('\0') != std::string_view::npos) [[unlikely]]
+		{
+			throw std::invalid_argument("Dear ImGui labels cannot contain embedded null characters");
+		}
+		return std::string(value);
+	}
+
+	[[nodiscard]] inline ImGuiWindowFlags to_imgui_window_flags(const window_options& options) noexcept
+	{
+		ImGuiWindowFlags result = ImGuiWindowFlags_None;
+		if (options.always_auto_resize) result |= ImGuiWindowFlags_AlwaysAutoResize;
+		if (options.no_title_bar) result |= ImGuiWindowFlags_NoTitleBar;
+		if (options.no_resize) result |= ImGuiWindowFlags_NoResize;
+		if (options.no_move) result |= ImGuiWindowFlags_NoMove;
+		if (options.no_scrollbar) result |= ImGuiWindowFlags_NoScrollbar;
+		if (options.no_scroll_with_mouse) result |= ImGuiWindowFlags_NoScrollWithMouse;
+		if (options.no_collapse) result |= ImGuiWindowFlags_NoCollapse;
+		if (options.no_docking) result |= ImGuiWindowFlags_NoDocking;
+		if (options.no_saved_settings) result |= ImGuiWindowFlags_NoSavedSettings;
+		if (options.no_background) result |= ImGuiWindowFlags_NoBackground;
+		if (options.no_mouse_inputs) result |= ImGuiWindowFlags_NoMouseInputs;
+		if (options.menu_bar) result |= ImGuiWindowFlags_MenuBar;
+		if (options.horizontal_scrollbar) result |= ImGuiWindowFlags_HorizontalScrollbar;
+		if (options.no_focus_on_appearing) result |= ImGuiWindowFlags_NoFocusOnAppearing;
+		if (options.no_bring_to_front_on_focus) result |= ImGuiWindowFlags_NoBringToFrontOnFocus;
+		if (options.no_nav_inputs) result |= ImGuiWindowFlags_NoNavInputs;
+		if (options.no_nav_focus) result |= ImGuiWindowFlags_NoNavFocus;
+		return result;
+	}
+
 	namespace combo_string_adl
 	{
 		using std::to_string;
@@ -81,7 +386,7 @@ namespace mngl::imgui_compat::detail
 			              std::same_as<std::remove_cv_t<std::remove_pointer_t<std::remove_reference_t<T>>>,
 			                           char>)
 			{
-				if (!value)
+				if (!value) [[unlikely]]
 				{
 					throw std::invalid_argument("Dear ImGui option text cannot be null");
 				}
@@ -180,7 +485,7 @@ namespace mngl::imgui_compat::detail
 
 	inline void validate_progress_fraction(float fraction)
 	{
-		if (!std::isfinite(fraction) || fraction < 0.0f || fraction > 1.0f)
+		if (!std::isfinite(fraction) || fraction < 0.0f || fraction > 1.0f) [[unlikely]]
 		{
 			throw std::invalid_argument("Dear ImGui progress fraction must be finite and between 0 and 1");
 		}
@@ -246,12 +551,12 @@ namespace mngl::imgui_compat::detail
 
 		if constexpr (std::floating_point<scalar_type>)
 		{
-			if (!std::isfinite(min) || !std::isfinite(max))
+			if (!std::isfinite(min) || !std::isfinite(max)) [[unlikely]]
 			{
 				throw std::invalid_argument("Dear ImGui vector slider bounds must be finite");
 			}
 		}
-		if (!(min < max))
+		if (!(min < max)) [[unlikely]]
 		{
 			throw std::invalid_argument("Dear ImGui vector slider minimum must be less than its maximum");
 		}
@@ -262,12 +567,12 @@ namespace mngl::imgui_compat::detail
 			const scalar_type component = value[index];
 			if constexpr (std::floating_point<scalar_type>)
 			{
-				if (!std::isfinite(component))
+				if (!std::isfinite(component)) [[unlikely]]
 				{
 					throw std::invalid_argument("Dear ImGui vector slider values must be finite");
 				}
 			}
-			if (component < min || component > max)
+			if (component < min || component > max) [[unlikely]]
 			{
 				throw std::invalid_argument("Dear ImGui vector slider values must be within their range");
 			}
@@ -327,16 +632,16 @@ namespace mngl::imgui_compat::detail
 	{
 		if constexpr (std::floating_point<std::remove_cv_t<T>>)
 		{
-			if (!std::isfinite(value) || !std::isfinite(min) || !std::isfinite(max))
+			if (!std::isfinite(value) || !std::isfinite(min) || !std::isfinite(max)) [[unlikely]]
 			{
 				throw std::invalid_argument("Dear ImGui slider values must be finite");
 			}
 		}
-		if (!(min < max))
+		if (!(min < max)) [[unlikely]]
 		{
 			throw std::invalid_argument("Dear ImGui slider minimum must be less than its maximum");
 		}
-		if (value < min || value > max)
+		if (value < min || value > max) [[unlikely]]
 		{
 			throw std::invalid_argument("Dear ImGui slider value must be within its range");
 		}
@@ -381,7 +686,7 @@ namespace mngl::imgui_compat::detail
 			return 0;
 		}
 
-		if (state.accepted_value.size() >= static_cast<std::size_t>(data->BufSize))
+		if (state.accepted_value.size() >= static_cast<std::size_t>(data->BufSize)) [[unlikely]]
 		{
 			throw std::logic_error("Dear ImGui input buffer cannot restore its last matching value");
 		}
@@ -405,7 +710,7 @@ namespace mngl::imgui_compat::detail
 
 	inline ImFont* load_font(ImFontAtlas& atlas, const font_source& source, ImFont* fallback = nullptr)
 	{
-		if (!std::isfinite(source.size_pixels) || source.size_pixels <= 0.0f)
+		if (!std::isfinite(source.size_pixels) || source.size_pixels <= 0.0f) [[unlikely]]
 		{
 			throw std::invalid_argument("ImGui font size must be finite and positive");
 		}
@@ -419,7 +724,7 @@ namespace mngl::imgui_compat::detail
 			ImFontConfig default_config{};
 			default_config.SizePixels = source.size_pixels;
 			ImFont* font = atlas.AddFontDefaultVector(&default_config);
-			if (!font)
+			if (!font) [[unlikely]]
 			{
 				throw std::runtime_error("Failed to load Dear ImGui's embedded vector font");
 			}
@@ -432,7 +737,7 @@ namespace mngl::imgui_compat::detail
 		static const ImWchar latin_cyrillic_ranges[] = {0x0020, 0x00FF, 0x0400, 0x052F, 0};
 		file_config.GlyphRanges = latin_cyrillic_ranges;
 		ImFont* font = atlas.AddFontFromFileTTF(filename.c_str(), source.size_pixels, &file_config);
-		if (!font)
+		if (!font) [[unlikely]]
 		{
 			throw std::runtime_error("Failed to load Dear ImGui font: " + filename);
 		}

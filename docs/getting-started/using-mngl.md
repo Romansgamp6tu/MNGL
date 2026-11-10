@@ -57,16 +57,17 @@ target_link_libraries(my_game PRIVATE MNGL::MNGL)
 ```
 
 Target передаёт требование C++23, include paths, линковку ImGui и базовых
-зависимостей. Публичные файлы MNGL из пакета `main` находятся в
-`include/MNGL/`; используйте `#include <MNGL/window.hpp>` и аналогичные пути.
-Короткие подключения вроде `#include "window.hpp"` тоже поддерживаются через
-include paths target. Единого обязательного umbrella-заголовка нет.
+зависимостей. Для обычного приложения можно подключить один заголовок
+`#include <MNGL/mngl.hpp>`; он включает ввод, окна, 2D, аудио, файлы и
+платформенные сервисы, а также функции глобальных настроек 2D-рендера.
+Если нужны только отдельные части, подключайте их напрямую — например,
+`#include <MNGL/window.hpp>`. Короткие пути вроде
+`#include "window.hpp"` тоже поддерживаются через include paths target.
 
 В `main.cpp`:
 
 ```cpp
-#include <MNGL/input.hpp>
-#include <MNGL/window.hpp>
+#include <MNGL/mngl.hpp>
 #include <exception>
 #include <iostream>
 #include <string>
@@ -75,16 +76,12 @@ int main()
 {
 	try
 	{
-		mngl::runtime::ensure();
 		mngl::window window("My game", {800, 600});
-		while (mngl::input::continue_work())
+		while (mngl::input::next_frame())
 		{
-			for (const auto& keyboard : mngl::input::keyboards())
+			if (mngl::input::keyboard().pressed(mngl::scancode::escape))
 			{
-				if (keyboard.pressed(mngl::scancode::escape))
-				{
-					mngl::input::should_work = false;
-				}
+				mngl::input::request_quit();
 			}
 		}
 	}
@@ -96,11 +93,14 @@ int main()
 }
 ```
 
-SDL запускается автоматически. `mngl::runtime::ensure()` проверяет запуск и
-бросает `mngl::sdl_error` при ошибке. После успешного запуска `input::continue_work()`
-обрабатывает события и обновляет ввод один раз за итерацию. Проверять
-`pressed()` и `released()` следует после этого вызова. Не добавляйте второй
-цикл `SDL_PollEvent()`, который заберёт события у MNGL.
+SDL запускается автоматически при создании окна; при необходимости его можно
+проверить заранее через `mngl::runtime::ensure()`. `input::next_frame()` обрабатывает
+события, обновляет ввод и время один раз за итерацию; старое имя
+`input::continue_work()` сохранено. Проверять `pressed()` и `released()` следует
+после этого вызова. Для обычной клавиатуры удобно сразу вызвать
+`input::keyboard()`; список `input::keyboards()` остаётся для работы с несколькими
+устройствами. Не добавляйте второй цикл `SDL_PollEvent()`, который заберёт события
+у MNGL.
 
 Настройте `APP_NAME`, `APP_VERSION`, стабильный `APP_ID`,
 `APP_ORGANIZATION` и `APP_STORAGE_NAME` до подключения заголовков MNGL.

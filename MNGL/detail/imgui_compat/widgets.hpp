@@ -29,7 +29,7 @@ namespace mngl
 
 	inline bool imgui_context::window_scope::button(const char* label) const
 	{
-		if (!label)
+		if (!label) [[unlikely]]
 		{
 			throw std::invalid_argument("Dear ImGui button label cannot be null");
 		}
@@ -53,7 +53,7 @@ namespace mngl
 		{
 			return;
 		}
-		if (!owner->frame_active)
+		if (!owner->frame_active) [[unlikely]]
 		{
 			throw std::logic_error("An ImGui progress bar must be submitted inside an active frame");
 		}
@@ -69,12 +69,12 @@ namespace mngl
 		{
 			return;
 		}
-		if (!owner->frame_active)
+		if (!owner->frame_active) [[unlikely]]
 		{
 			throw std::logic_error("An ImGui progress bar must be submitted inside an active frame");
 		}
 		imgui_compat::detail::validate_progress_fraction(fraction);
-		if (overlay.find('\0') != std::string_view::npos)
+		if (overlay.find('\0') != std::string_view::npos) [[unlikely]]
 		{
 			throw std::invalid_argument(
 			    "Dear ImGui progress overlays cannot contain embedded null characters");
@@ -92,11 +92,11 @@ namespace mngl
 		{
 			return false;
 		}
-		if (!owner->frame_active)
+		if (!owner->frame_active) [[unlikely]]
 		{
 			throw std::logic_error("An ImGui selectable must be submitted inside an active frame");
 		}
-		if (label.find('\0') != std::string_view::npos)
+		if (label.find('\0') != std::string_view::npos) [[unlikely]]
 		{
 			throw std::invalid_argument(
 			    "Dear ImGui selectable labels cannot contain embedded null characters");
@@ -109,7 +109,7 @@ namespace mngl
 
 	inline bool imgui_context::window_scope::selectable(const char* label, bool selected) const
 	{
-		if (!label)
+		if (!label) [[unlikely]]
 		{
 			throw std::invalid_argument("Dear ImGui selectable labels cannot be null");
 		}
@@ -122,7 +122,7 @@ namespace mngl
 		{
 			return;
 		}
-		if (!owner->frame_active)
+		if (!owner->frame_active) [[unlikely]]
 		{
 			throw std::logic_error("An ImGui bullet must be submitted inside an active frame");
 		}
@@ -137,7 +137,7 @@ namespace mngl
 		{
 			return;
 		}
-		if (!owner->frame_active)
+		if (!owner->frame_active) [[unlikely]]
 		{
 			throw std::logic_error("An ImGui bullet must be submitted inside an active frame");
 		}
@@ -150,7 +150,7 @@ namespace mngl
 
 	inline void imgui_context::window_scope::bullet(const char* label) const
 	{
-		if (!label)
+		if (!label) [[unlikely]]
 		{
 			throw std::invalid_argument("Dear ImGui bullet text cannot be null");
 		}
@@ -163,11 +163,11 @@ namespace mngl
 		{
 			return false;
 		}
-		if (!owner->frame_active)
+		if (!owner->frame_active) [[unlikely]]
 		{
 			throw std::logic_error("An ImGui radio button must be submitted inside an active frame");
 		}
-		if (label.find('\0') != std::string_view::npos)
+		if (label.find('\0') != std::string_view::npos) [[unlikely]]
 		{
 			throw std::invalid_argument(
 			    "Dear ImGui radio button labels cannot contain embedded null characters");
@@ -180,7 +180,7 @@ namespace mngl
 
 	inline bool imgui_context::window_scope::radio_button(const char* label, bool active) const
 	{
-		if (!label)
+		if (!label) [[unlikely]]
 		{
 			throw std::invalid_argument("Dear ImGui radio button labels cannot be null");
 		}
@@ -211,7 +211,7 @@ namespace mngl
 		{
 			return {};
 		}
-		if (!owner->frame_active)
+		if (!owner->frame_active) [[unlikely]]
 		{
 			throw std::logic_error("An ImGui combo must be submitted inside an active frame");
 		}
@@ -220,7 +220,7 @@ namespace mngl
 		if constexpr (std::ranges::sized_range<Range>)
 		{
 			const auto item_count = std::ranges::size(values);
-			if (std::cmp_greater(item_count, std::numeric_limits<int>::max()))
+			if (std::cmp_greater(item_count, std::numeric_limits<int>::max())) [[unlikely]]
 			{
 				throw std::length_error("Dear ImGui combo supports at most INT_MAX items");
 			}
@@ -229,7 +229,7 @@ namespace mngl
 
 		for (auto iterator = std::ranges::begin(values); iterator != std::ranges::end(values); ++iterator)
 		{
-			if (item_labels.size() == static_cast<std::size_t>(std::numeric_limits<int>::max()))
+			if (item_labels.size() == static_cast<std::size_t>(std::numeric_limits<int>::max())) [[unlikely]]
 			{
 				throw std::length_error("Dear ImGui combo supports at most INT_MAX items");
 			}
@@ -237,14 +237,14 @@ namespace mngl
 		}
 
 		owner->make_current();
-		if (label.find('\0') != std::string_view::npos)
+		if (label.find('\0') != std::string_view::npos) [[unlikely]]
 		{
 			throw std::invalid_argument("Dear ImGui combo labels cannot contain embedded null characters");
 		}
 		const std::string terminated_label(label);
 		const ImGuiID storage_id = ImGui::GetID(terminated_label.c_str());
 		ImGuiStorage* const storage = ImGui::GetStateStorage();
-		if (!storage)
+		if (!storage) [[unlikely]]
 		{
 			throw std::logic_error("Dear ImGui did not provide state storage for a combo");
 		}
@@ -355,7 +355,7 @@ namespace mngl
 	inline imgui_compat::detail::combo_result_t<Range> imgui_context::window_scope::combo(
 	    const char* label, Range&& values) const
 	{
-		if (!label)
+		if (!label) [[unlikely]]
 		{
 			throw std::invalid_argument("Dear ImGui combo labels cannot be null");
 		}
@@ -386,7 +386,7 @@ namespace mngl
 		{
 			return {};
 		}
-		if (!owner->frame_active)
+		if (!owner->frame_active) [[unlikely]]
 		{
 			throw std::logic_error("An ImGui context menu must be submitted inside an active frame");
 		}
@@ -423,7 +423,7 @@ namespace mngl
 		if constexpr (std::ranges::sized_range<Range>)
 		{
 			const auto item_count = std::ranges::size(values);
-			if (std::cmp_greater(item_count, std::numeric_limits<int>::max()))
+			if (std::cmp_greater(item_count, std::numeric_limits<int>::max())) [[unlikely]]
 			{
 				throw std::length_error("Dear ImGui context menu supports at most INT_MAX items");
 			}
@@ -432,12 +432,12 @@ namespace mngl
 
 		for (auto iterator = std::ranges::begin(values); iterator != std::ranges::end(values); ++iterator)
 		{
-			if (item_labels.size() == static_cast<std::size_t>(std::numeric_limits<int>::max()))
+			if (item_labels.size() == static_cast<std::size_t>(std::numeric_limits<int>::max())) [[unlikely]]
 			{
 				throw std::length_error("Dear ImGui context menu supports at most INT_MAX items");
 			}
 			std::string item_label = imgui_compat::detail::combo_item_to_string(*iterator);
-			if (item_label.find('\0') != std::string::npos)
+			if (item_label.find('\0') != std::string::npos) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "Dear ImGui context menu item labels cannot contain embedded null characters");
@@ -502,7 +502,7 @@ namespace mngl
 		{
 			return false;
 		}
-		if (!owner->frame_active)
+		if (!owner->frame_active) [[unlikely]]
 		{
 			throw std::logic_error("An ImGui slider must be submitted inside an active frame");
 		}
@@ -516,7 +516,7 @@ namespace mngl
 	inline bool imgui_context::window_scope::slider(const char* label, T& value, std::type_identity_t<T> min,
 	                                                std::type_identity_t<T> max) const
 	{
-		if (!label)
+		if (!label) [[unlikely]]
 		{
 			throw std::invalid_argument("Dear ImGui slider label cannot be null");
 		}
@@ -548,11 +548,11 @@ namespace mngl
 		{
 			return false;
 		}
-		if (!owner->frame_active)
+		if (!owner->frame_active) [[unlikely]]
 		{
 			throw std::logic_error("An ImGui vector slider must be submitted inside an active frame");
 		}
-		if (label.find('\0') != std::string_view::npos)
+		if (label.find('\0') != std::string_view::npos) [[unlikely]]
 		{
 			throw std::invalid_argument(
 			    "Dear ImGui vector slider labels cannot contain embedded null characters");
@@ -570,7 +570,7 @@ namespace mngl
 	    typename imgui_compat::detail::glm_slider_vector_traits<std::remove_cv_t<Vector>>::scalar_type max)
 	    const
 	{
-		if (!label)
+		if (!label) [[unlikely]]
 		{
 			throw std::invalid_argument("Dear ImGui vector slider labels cannot be null");
 		}
@@ -584,20 +584,20 @@ namespace mngl
 		{
 			return false;
 		}
-		if (!owner->frame_active)
+		if (!owner->frame_active) [[unlikely]]
 		{
 			throw std::logic_error("An ImGui input must be submitted inside an active frame");
 		}
-		if (value.find('\0') != std::string::npos)
+		if (value.find('\0') != std::string::npos) [[unlikely]]
 		{
 			throw std::invalid_argument("Dear ImGui text input does not support embedded null characters");
 		}
-		if (!std::regex_match(value, pattern))
+		if (!std::regex_match(value, pattern)) [[unlikely]]
 		{
 			throw std::invalid_argument(
 			    "The current Dear ImGui input value does not match its regular expression");
 		}
-		if (value.capacity() >= static_cast<std::size_t>(std::numeric_limits<int>::max()))
+		if (value.capacity() >= static_cast<std::size_t>(std::numeric_limits<int>::max())) [[unlikely]]
 		{
 			throw std::length_error("Dear ImGui text input exceeds its buffer size limit");
 		}
@@ -619,7 +619,7 @@ namespace mngl
 		{
 			return false;
 		}
-		if (!owner->frame_active)
+		if (!owner->frame_active) [[unlikely]]
 		{
 			throw std::logic_error("An ImGui input must be submitted inside an active frame");
 		}
@@ -635,7 +635,7 @@ namespace mngl
 		{
 			return false;
 		}
-		if (!owner->frame_active)
+		if (!owner->frame_active) [[unlikely]]
 		{
 			throw std::logic_error("An ImGui input must be submitted inside an active frame");
 		}
@@ -652,7 +652,7 @@ namespace mngl
 
 	inline bool imgui_context::window_scope::checkbox(const char* label, bool& value) const
 	{
-		if (!label)
+		if (!label) [[unlikely]]
 		{
 			throw std::invalid_argument("Dear ImGui checkbox labels cannot be null");
 		}
@@ -666,31 +666,31 @@ namespace mngl
 		{
 			return;
 		}
-		if (!owner->frame_active)
+		if (!owner->frame_active) [[unlikely]]
 		{
 			throw std::logic_error("An ImGui image must be submitted inside an active frame");
 		}
-		if (!source.valid())
+		if (!source.valid()) [[unlikely]]
 		{
 			throw std::invalid_argument("Cannot display an invalid MNGL texture in Dear ImGui");
 		}
 
 		const gpu::texture& gpu_texture = source.raw_gpu_texture();
-		if (!gpu_texture.has_usage(gpu::texture::usage_flags::sampler))
+		if (!gpu_texture.has_usage(gpu::texture::usage_flags::sampler)) [[unlikely]]
 		{
 			throw std::invalid_argument("Dear ImGui requires a sampleable MNGL texture");
 		}
-		if (source.rendering() || gpu_texture.is_swapchain_texture())
+		if (source.rendering() || gpu_texture.is_swapchain_texture()) [[unlikely]]
 		{
 			throw std::logic_error("Cannot display a texture while it is being rendered to");
 		}
-		if (!owner->attached_window || gpu_texture.device_raw() != owner->attached_window->gpu_device().raw())
+		if (!owner->attached_window || gpu_texture.device_raw() != owner->attached_window->gpu_device().raw()) [[unlikely]]
 		{
 			throw std::invalid_argument(
 			    "The MNGL texture and Dear ImGui context must use the same GPU device");
 		}
 		if (!std::isfinite(display_size.x) || !std::isfinite(display_size.y) || display_size.x <= 0.0f ||
-		    display_size.y <= 0.0f)
+		    display_size.y <= 0.0f) [[unlikely]]
 		{
 			throw std::invalid_argument("Dear ImGui image dimensions must be finite and positive");
 		}
@@ -703,7 +703,7 @@ namespace mngl
 	inline imgui_context::font_scope imgui_context::window_scope::use_font(imgui_compat::font_role role,
 	                                                                       float size_pixels) const
 	{
-		if (!owner || !owner->context || !owner->frame_active)
+		if (!owner || !owner->context || !owner->frame_active) [[unlikely]]
 		{
 			throw std::logic_error("An ImGui font must be selected inside an active frame");
 		}
@@ -723,11 +723,11 @@ namespace mngl
 	inline imgui_context::font_scope::font_scope(imgui_context& owner, ImFont* font, float size_pixels)
 	    : owner(&owner)
 	{
-		if (!font)
+		if (!font) [[unlikely]]
 		{
 			throw std::logic_error("Cannot select an uninitialized Dear ImGui font");
 		}
-		if (!std::isfinite(size_pixels) || size_pixels <= 0.0f)
+		if (!std::isfinite(size_pixels) || size_pixels <= 0.0f) [[unlikely]]
 		{
 			throw std::invalid_argument("Dear ImGui font size must be finite and positive");
 		}
@@ -755,20 +755,31 @@ namespace mngl
 
 	inline imgui_context::main_menu_bar_scope imgui_context::frame_scope::main_menu_bar() const
 	{
-		if (!owner)
+		if (!owner) [[unlikely]]
 		{
 			throw std::logic_error("Cannot create a menu bar from an inactive frame scope");
 		}
 		return main_menu_bar_scope(*owner);
 	}
 
-	inline imgui_context::window_scope imgui_context::frame_scope::window(std::string_view title) const
+	inline imgui_context::window_scope imgui_context::frame_scope::window(
+	    std::string_view title, const imgui_compat::window_options& options) const
 	{
-		if (!owner)
+		if (!owner) [[unlikely]]
 		{
 			throw std::logic_error("Cannot create an ImGui window from an inactive frame scope");
 		}
-		return window_scope(*owner, title);
+		return window_scope(*owner, title, options);
+	}
+
+	inline imgui_context::window_scope imgui_context::frame_scope::window(
+	    std::string_view title, bool& open, const imgui_compat::window_options& options) const
+	{
+		if (!owner) [[unlikely]]
+		{
+			throw std::logic_error("Cannot create an ImGui window from an inactive frame scope");
+		}
+		return window_scope(*owner, title, options, std::nullopt, &open);
 	}
 
 	inline imgui_context::menu_scope imgui_context::main_menu_bar_scope::menu(std::string_view label) const

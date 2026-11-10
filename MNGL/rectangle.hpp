@@ -1,8 +1,12 @@
 #pragma once
 
 #include <cstddef>
-#include "utilities.hpp"
+#include <SDL3/SDL_rect.h>
+#include <SDL3/SDL_stdinc.h>
+#include <glm/glm.hpp>
+
 #include "line.hpp"
+#include "proxy.hpp"
 #include <span>
 namespace mngl
 {

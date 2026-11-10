@@ -1,6 +1,8 @@
 #pragma once
 
 #include "common.hpp"
+#include "../../gpu_optimizations.hpp"
+
 #include <cstdint>
 #include <initializer_list>
 #include <span>
@@ -13,6 +15,22 @@ namespace mngl::detail
 
 namespace mngl::two_d
 {
+	inline void enable_scene_culling() noexcept { ::mngl::gpu::enable_scene_culling(); }
+	inline void disable_scene_culling() noexcept { ::mngl::gpu::disable_scene_culling(); }
+
+	[[nodiscard]] inline bool scene_culling_enabled() noexcept
+	{
+		return ::mngl::gpu::scene_culling_enabled();
+	}
+
+	inline void enable_dirty_region_updates() noexcept { ::mngl::gpu::enable_dirty_region_updates(); }
+	inline void disable_dirty_region_updates() noexcept { ::mngl::gpu::disable_dirty_region_updates(); }
+
+	[[nodiscard]] inline bool dirty_region_updates_enabled() noexcept
+	{
+		return ::mngl::gpu::dirty_region_updates_enabled();
+	}
+
 	struct texture_handle
 	{
 		constexpr static std::uint32_t invalid_value = std::numeric_limits<std::uint32_t>::max();
@@ -34,7 +52,7 @@ namespace mngl::two_d
 	public:
 		explicit texture_store(const gpu::device& device) : m_device(device)
 		{
-			if (!m_device.raw())
+			if (!m_device.raw()) [[unlikely]]
 			{
 				throw std::invalid_argument("Cannot create a 2D texture store with a null GPU device");
 			}
@@ -49,15 +67,15 @@ namespace mngl::two_d
 
 		[[nodiscard]] texture_handle add(::mngl::texture&& page)
 		{
-			if (!page.valid())
+			if (!page.valid()) [[unlikely]]
 			{
 				throw std::invalid_argument("Cannot register an invalid 2D texture");
 			}
-			if (page.raw_gpu_texture().device_raw() != m_device.raw())
+			if (page.raw_gpu_texture().device_raw() != m_device.raw()) [[unlikely]]
 			{
 				throw std::invalid_argument("2D texture page belongs to a different GPU device");
 			}
-			if (m_pages.size() >= texture_handle::invalid_value)
+			if (m_pages.size() >= texture_handle::invalid_value) [[unlikely]]
 			{
 				throw std::length_error("2D texture store exhausted its 32-bit handle space");
 			}
@@ -73,7 +91,7 @@ namespace mngl::two_d
 			if (!std::isfinite(uv_bounds.x) || !std::isfinite(uv_bounds.y) || !std::isfinite(uv_bounds.z) ||
 			    !std::isfinite(uv_bounds.w) || uv_bounds.x < 0.0f || uv_bounds.x > 1.0f ||
 			    uv_bounds.y < 0.0f || uv_bounds.y > 1.0f || uv_bounds.z < 0.0f || uv_bounds.z > 1.0f ||
-			    uv_bounds.w < 0.0f || uv_bounds.w > 1.0f)
+			    uv_bounds.w < 0.0f || uv_bounds.w > 1.0f) [[unlikely]]
 			{
 				throw std::invalid_argument("2D texture region UVs must be finite and normalized");
 			}
@@ -87,7 +105,7 @@ namespace mngl::two_d
 
 		[[nodiscard]] const ::mngl::texture& resolve(texture_handle page) const
 		{
-			if (!page.valid() || page.value >= m_pages.size())
+			if (!page.valid() || page.value >= m_pages.size()) [[unlikely]]
 			{
 				throw std::out_of_range("Invalid 2D texture handle");
 			}
@@ -96,7 +114,7 @@ namespace mngl::two_d
 
 		[[nodiscard]] ::mngl::texture& resolve(texture_handle page)
 		{
-			if (!page.valid() || page.value >= m_pages.size())
+			if (!page.valid() || page.value >= m_pages.size()) [[unlikely]]
 			{
 				throw std::out_of_range("Invalid 2D texture handle");
 			}
@@ -110,11 +128,11 @@ namespace mngl::two_d
 		{
 			std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface(
 			    SDL_CreateSurface(1, 1, SDL_PIXELFORMAT_RGBA32), &SDL_DestroySurface);
-			if (!surface)
+			if (!surface) [[unlikely]]
 			{
-				throw ::sdl_error("Failed to create the built-in white texture: ");
+				throw ::mngl::sdl_error("Failed to create the built-in white texture: ");
 			}
-			if (!surface->pixels || surface->pitch < 4)
+			if (!surface->pixels || surface->pitch < 4) [[unlikely]]
 			{
 				throw std::runtime_error("SDL created an invalid surface for the built-in white texture");
 			}
@@ -347,6 +365,7 @@ namespace mngl::two_d
 		::mngl::rectangle bounds{};
 		color tint{1.0f, 1.0f, 1.0f, 1.0f};
 		::mngl::two_d::transform transform{};
+		gpu::sprite_blend_mode blend = gpu::sprite_blend_mode::alpha;
 
 	private:
 		friend class frame_2d;
@@ -401,6 +420,148 @@ namespace mngl::two_d
 	private:
 		friend class frame_2d;
 		void draw(frame_2d& frame) const override;
+	};
+
+	class prepared_vertex_array : public ::mngl::drawable
+	{
+	public:
+		// Stores a validated, immutable triangle-list snapshot of the source geometry.
+		explicit prepared_vertex_array(const vertex_array& source);
+
+		[[nodiscard]] std::span<const glm::vec2> triangle_vertices() const noexcept
+		{
+			return std::span<const glm::vec2>(m_triangles);
+		}
+
+		color tint{1.0f, 1.0f, 1.0f, 1.0f};
+		gpu::sprite_blend_mode blend = gpu::sprite_blend_mode::alpha;
+		::mngl::two_d::transform transform{};
+
+	private:
+		friend class frame_2d;
+		void draw(frame_2d& frame) const override;
+
+		std::vector<glm::vec2> m_triangles;
+	};
+
+	class mesh : public ::mngl::drawable
+	{
+	public:
+		struct block_update
+		{
+			std::size_t index = 0;
+			std::span<const glm::vec2> vertices;
+		};
+
+		// Uploads a fixed triangle-list mesh into a persistent GPU vertex buffer.
+		mesh(const gpu::device& device, gpu::command_buffer& command_buffer,
+		     std::span<const glm::vec2> triangle_vertices);
+		mesh(const gpu::device& device, gpu::command_buffer& command_buffer,
+		     const vertex_array& source);
+		mesh(const gpu::device& device, gpu::command_buffer& command_buffer,
+		     const prepared_vertex_array& source);
+		mesh(const mesh&) = delete;
+		mesh& operator=(const mesh&) = delete;
+		mesh(mesh&&) noexcept = default;
+		mesh& operator=(mesh&&) noexcept = default;
+		~mesh() override = default;
+
+		[[nodiscard]] std::uint32_t vertex_count() const noexcept;
+		[[nodiscard]] std::size_t block_count() const noexcept;
+		[[nodiscard]] std::uint32_t block_first_vertex(std::size_t index) const;
+		[[nodiscard]] std::uint32_t block_vertex_count(std::size_t index) const;
+
+		// Each update replaces one existing block; topology and vertex count stay fixed.
+		void update_block(gpu::command_buffer& command_buffer, std::size_t index,
+		                  std::span<const glm::vec2> vertices);
+		void update_blocks(gpu::command_buffer& command_buffer, std::span<const block_update> updates);
+
+		color tint{1.0f, 1.0f, 1.0f, 1.0f};
+		gpu::sprite_blend_mode blend = gpu::sprite_blend_mode::alpha;
+		::mngl::two_d::transform transform{};
+
+	private:
+		friend class frame_2d;
+		friend class renderer;
+		void draw(frame_2d& frame) const override;
+
+		std::shared_ptr<detail::resident_mesh_storage> m_storage;
+	};
+
+	class cached_layer : public ::mngl::drawable
+	{
+	public:
+		explicit cached_layer(glm::uvec2 pixel_size,
+		                      gpu::texture_format format = gpu::texture_format::r8g8b8a8_unorm,
+		                      color clear_color = color(0.0f, 0.0f, 0.0f, 0.0f));
+		cached_layer(const cached_layer&) = delete;
+		cached_layer& operator=(const cached_layer&) = delete;
+		cached_layer(cached_layer&&) = default;
+		cached_layer& operator=(cached_layer&&) = default;
+		~cached_layer() override = default;
+
+		template <typename DrawFunction>
+		    requires std::invocable<DrawFunction, frame_2d&>
+		[[nodiscard]] bool update_if_dirty(DrawFunction&& draw_contents)
+		{
+			if (!dirty())
+			{
+				return false;
+			}
+
+			m_full_dirty = false;
+			m_dirty_regions.clear();
+			try
+			{
+				auto target_frame = m_texture.frame(m_clear_color);
+				target_frame.draw(std::forward<DrawFunction>(draw_contents));
+				target_frame.display();
+			}
+			catch (...)
+			{
+				m_full_dirty = true;
+				m_dirty_regions.clear();
+				throw;
+			}
+			return true;
+		}
+
+		template <typename DrawFunction>
+		    requires std::invocable<DrawFunction&, frame_2d&, const ::mngl::rectangle&>
+		// Runs once per merged dirty region; the callback must redraw every intersecting item in order.
+		[[nodiscard]] bool update_dirty_regions(DrawFunction&& draw_region);
+
+		void invalidate() noexcept
+		{
+			m_full_dirty = true;
+			m_dirty_regions.clear();
+		}
+		// Bounds use the layer's bottom-left-origin content coordinates.
+		void invalidate_region(const ::mngl::rectangle& bounds);
+		[[nodiscard]] bool dirty() const noexcept { return m_full_dirty || !m_dirty_regions.empty(); }
+		[[nodiscard]] glm::uvec2 size() const noexcept { return m_texture.size(); }
+		[[nodiscard]] const ::mngl::texture& image() const noexcept { return m_texture; }
+
+		cached_layer& clear_color(color value) noexcept
+		{
+			m_clear_color = value;
+			invalidate();
+			return *this;
+		}
+
+		::mngl::rectangle destination{};
+		color tint{1.0f, 1.0f, 1.0f, 1.0f};
+		gpu::sprite_blend_mode blend = gpu::sprite_blend_mode::alpha;
+		::mngl::two_d::transform transform{};
+
+	private:
+		friend class frame_2d;
+		void draw(frame_2d& frame) const override;
+
+		::mngl::texture m_texture;
+		color m_clear_color;
+		bool m_full_dirty = true;
+		std::vector<SDL_Rect> m_dirty_regions;
 	};
 
 	class convex_polygon : public ::mngl::drawable

@@ -18,7 +18,7 @@ namespace mngl
 		{
 			if (!std::isfinite(area.pos.x) || !std::isfinite(area.pos.y) || !std::isfinite(area.size.x) ||
 			    !std::isfinite(area.size.y) || !std::isfinite(area.pos.x + area.size.x) ||
-			    !std::isfinite(area.pos.y + area.size.y) || area.size.x <= 0.0f || area.size.y <= 0.0f)
+			    !std::isfinite(area.pos.y + area.size.y) || area.size.x <= 0.0f || area.size.y <= 0.0f) [[unlikely]]
 			{
 				throw std::invalid_argument("A 2D view area must be finite and have positive dimensions");
 			}
@@ -28,7 +28,7 @@ namespace mngl
 
 		[[nodiscard]] rectangle visible_area(glm::uvec2 target_size) const
 		{
-			if (target_size.x == 0 || target_size.y == 0)
+			if (target_size.x == 0 || target_size.y == 0) [[unlikely]]
 			{
 				throw std::invalid_argument("A 2D view requires a target with non-zero dimensions");
 			}
@@ -50,7 +50,7 @@ namespace mngl
 			                       glm::vec2(visible_width, visible_height)};
 			if (!std::isfinite(result.pos.x) || !std::isfinite(result.pos.y) ||
 			    !std::isfinite(result.size.x) || !std::isfinite(result.size.y) ||
-			    !std::isfinite(result.pos.x + result.size.x) || !std::isfinite(result.pos.y + result.size.y))
+			    !std::isfinite(result.pos.x + result.size.x) || !std::isfinite(result.pos.y + result.size.y)) [[unlikely]]
 			{
 				throw std::overflow_error("The target aspect ratio overflows the 2D view area");
 			}
@@ -67,7 +67,7 @@ namespace mngl
 			result[3][1] = -1.0f - 2.0f * visible.pos.y / visible.size.y;
 
 			if (!std::isfinite(result[0][0]) || !std::isfinite(result[1][1]) ||
-			    !std::isfinite(result[3][0]) || !std::isfinite(result[3][1]))
+			    !std::isfinite(result[3][0]) || !std::isfinite(result[3][1])) [[unlikely]]
 			{
 				throw std::overflow_error("The 2D view projection exceeds the supported numeric range");
 			}

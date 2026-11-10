@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include "../container_growth.hpp"
 #include "../../runtime.hpp"
 
 namespace mngl::audio::detail
@@ -558,7 +559,7 @@ namespace mngl::audio::detail
 			// throw after playback has already started.
 			try
 			{
-				voices.reserve(voices.size() + 1);
+				::mngl::detail::reserve_vector_growth(voices, voices.size() + 1);
 			}
 			catch (const std::bad_alloc&)
 			{
@@ -678,7 +679,7 @@ namespace mngl::audio::detail
 
 			try
 			{
-				voices.reserve(voices.size() + 1);
+				::mngl::detail::reserve_vector_growth(voices, voices.size() + 1);
 			}
 			catch (const std::bad_alloc&)
 			{
@@ -804,7 +805,7 @@ namespace mngl::audio::detail
 
 			try
 			{
-				voices.reserve(voices.size() + 1);
+				::mngl::detail::reserve_vector_growth(voices, voices.size() + 1);
 			}
 			catch (const std::bad_alloc&)
 			{

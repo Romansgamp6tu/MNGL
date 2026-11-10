@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "utilities.hpp"
+#include "runtime.hpp"
 #include "color.hpp"
 #include "command_buffer.hpp"
 #include "gpu_buffer.hpp"
@@ -62,11 +62,11 @@ namespace mngl::gpu
 		render_pass(command_buffer& cmd, std::span<const color_attachment> color_targets,
 		            const depth_attachment* depth = nullptr)
 		{
-			if (color_targets.empty() && !depth)
+			if (color_targets.empty() && !depth) [[unlikely]]
 			{
 				throw std::invalid_argument("Render pass requires at least one color or depth target");
 			}
-			if (color_targets.size() > 4)
+			if (color_targets.size() > 4) [[unlikely]]
 			{
 				throw std::invalid_argument("Render pass supports at most four color targets");
 			}
@@ -76,7 +76,7 @@ namespace mngl::gpu
 
 			for (const auto& attachment : color_targets)
 			{
-				if (!attachment.target.has_usage(texture::usage_flags::color_target))
+				if (!attachment.target.has_usage(texture::usage_flags::color_target)) [[unlikely]]
 				{
 					throw std::invalid_argument("Target texture must have color_target usage flag!");
 				}
@@ -97,7 +97,7 @@ namespace mngl::gpu
 			if (depth)
 			{
 				// Исправлено со stencil_target на depth_stencil_target и корректный текст ошибки
-				if (!depth->target.has_usage(texture::usage_flags::stencil_target))
+				if (!depth->target.has_usage(texture::usage_flags::stencil_target)) [[unlikely]]
 				{
 					throw std::invalid_argument(
 					    "Depth target texture must have depth_stencil_target usage flag!");
@@ -117,7 +117,7 @@ namespace mngl::gpu
 			const auto* color_target_data = color_target_count ? sdl_color_targets.data() : nullptr;
 			handle = SDL_BeginGPURenderPass(cmd.raw(), color_target_data, color_target_count, depth_ptr);
 
-			if (!handle)
+			if (!handle) [[unlikely]]
 			{
 				throw sdl_error("Failed to begin GPU render pass: ");
 			}
@@ -204,7 +204,7 @@ namespace mngl::gpu
 
 		void bind_vertex_buffer(std::uint32_t slot, const buffer& buffer, std::uint32_t offset = 0) const
 		{
-			if (!buffer.valid() || buffer.usage() != buffer_usage::vertex)
+			if (!buffer.valid() || !has_usage(buffer.usage(), buffer_usage::vertex)) [[unlikely]]
 			{
 				throw std::invalid_argument("Vertex binding requires a valid vertex-usage GPU buffer");
 			}

@@ -3,9 +3,7 @@
 Минимальный пример: загрузить изображение сразу в текстуру и рисовать её в окне.
 
 ```cpp
-#include "input.hpp"
-#include "render_window.hpp"
-#include "texture.hpp"
+#include <MNGL/mngl.hpp>
 
 int main()
 {
@@ -13,7 +11,7 @@ int main()
 	mngl::texture image("assets/image.png");
 	mngl::sprite image_sprite{image, mngl::rectangle{0.1f, 0.1f, 0.5f, 0.5f}};
 
-	while (mngl::input::continue_work())
+	while (mngl::input::next_frame())
 	{
 		auto frame = window.frame();
 		frame.draw(image_sprite);

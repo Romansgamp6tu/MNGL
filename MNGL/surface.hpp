@@ -1,8 +1,11 @@
 #pragma once
 
 #include <cstddef>
-#include "utilities.hpp"
 #include "iupdate.h"
+#include "runtime.hpp"
+
+#include <SDL3_image/SDL_image.h>
+
 #include <string>
 #include <fstream>
 #include <functional>

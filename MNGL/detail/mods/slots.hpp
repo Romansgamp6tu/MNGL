@@ -34,7 +34,7 @@ namespace mngl::mods
 		{
 			detail::require_id(mod_id, "mod_id");
 			callback callable(std::forward<F>(function));
-			if (!callable)
+			if (!callable) [[unlikely]]
 				throw registry_error(error_code::invalid_value, "Replacement callback is empty", m_id,
 				                     mod_id);
 
@@ -43,7 +43,7 @@ namespace mngl::mods
 
 			for (const auto& existing : m_state->replacements)
 			{
-				if (existing->mod_id == registration->mod_id)
+				if (existing->mod_id == registration->mod_id) [[unlikely]]
 					throw registry_error(error_code::duplicate_registration,
 					                     "Mod already registered a replacement for this slot", m_id,
 					                     registration->mod_id);
@@ -74,7 +74,7 @@ namespace mngl::mods
 		{
 			detail::require_id(mod_id, "mod_id");
 			around_callback callable(std::forward<F>(function));
-			if (!callable)
+			if (!callable) [[unlikely]]
 				throw registry_error(error_code::invalid_value, "Around callback is empty", m_id, mod_id);
 
 			auto registration =
@@ -82,7 +82,7 @@ namespace mngl::mods
 			std::lock_guard lock(m_state->mutex);
 
 			if (std::any_of(m_state->around.begin(), m_state->around.end(),
-			                [&](const auto& item) { return item->mod_id == registration->mod_id; }))
+			                [&](const auto& item) { return item->mod_id == registration->mod_id; })) [[unlikely]]
 				throw registry_error(error_code::duplicate_registration,
 				                     "Mod already registered an around callback for this slot", m_id,
 				                     registration->mod_id);
@@ -188,7 +188,7 @@ namespace mngl::mods
 		              std::shared_ptr<detail::diagnostic_store> diagnostics)
 		    : m_id(std::move(id)), m_state(std::make_shared<state>())
 		{
-			if (!fallback)
+			if (!fallback) [[unlikely]]
 				throw registry_error(error_code::invalid_value,
 				                     "Function slot requires a default implementation", m_id);
 			m_state->fallback = std::move(fallback);
@@ -215,7 +215,7 @@ namespace mngl::mods
 
 			next_callback next = [&](Args... next_args) -> R
 			{
-				if (next_called)
+				if (next_called) [[unlikely]]
 					throw std::logic_error("around next callback may only be called once");
 				next_called = true;
 				if constexpr (std::is_void_v<R>)
@@ -453,11 +453,11 @@ namespace mngl::mods
 		{
 			if (m_scope == property_scope::instance)
 			{
-				if (!handle || !m_handle_is_valid(handle))
+				if (!handle || !m_handle_is_valid(handle)) [[unlikely]]
 					throw registry_error(error_code::invalid_instance, "A live instance handle is required",
 					                     m_id);
 			}
-			else if (handle)
+			else if (handle) [[unlikely]]
 				throw registry_error(error_code::invalid_instance,
 				                     "This property does not accept an instance handle", m_id);
 		}
@@ -540,11 +540,11 @@ namespace mngl::mods
 		{
 			detail::require_id(implementation_id, "implementation_id");
 			factory create(std::forward<F>(make));
-			if (!create)
+			if (!create) [[unlikely]]
 				throw registry_error(error_code::invalid_value, "Class factory is empty", m_id);
 
 			std::lock_guard lock(m_mutex);
-			if (m_implementations.contains(implementation_id))
+			if (m_implementations.contains(implementation_id)) [[unlikely]]
 				throw registry_error(error_code::duplicate_extension,
 				                     "Implementation ID is already registered", implementation_id);
 			m_implementations.emplace(std::move(implementation_id),
@@ -558,7 +558,7 @@ namespace mngl::mods
 			detail::require_id(mod_id, "mod_id");
 			detail::require_id(implementation_id, "implementation_id");
 			factory create(std::forward<F>(make));
-			if (!create)
+			if (!create) [[unlikely]]
 				throw registry_error(error_code::invalid_value, "Class factory is empty", m_id, mod_id);
 
 			std::lock_guard lock(m_mutex);
@@ -580,7 +580,7 @@ namespace mngl::mods
 			detail::require_id(mod_id, "mod_id");
 			detail::require_id(implementation_id, "implementation_id");
 			factory create(std::forward<F>(make));
-			if (!create)
+			if (!create) [[unlikely]]
 				throw registry_error(error_code::invalid_value, "Class factory is empty", implementation_id,
 				                     mod_id);
 
@@ -595,7 +595,7 @@ namespace mngl::mods
 
 			for (const auto& existing : implementation->second.replacements)
 			{
-				if (existing->mod_id == mod_id)
+				if (existing->mod_id == mod_id) [[unlikely]]
 					throw registry_error(error_code::duplicate_registration,
 					                     "Mod already replaced this implementation factory",
 					                     implementation_id, mod_id);
@@ -629,7 +629,7 @@ namespace mngl::mods
 			{
 				std::lock_guard lock(m_mutex);
 				const auto implementation = m_implementations.find(std::string(implementation_id));
-				if (implementation == m_implementations.end())
+				if (implementation == m_implementations.end()) [[unlikely]]
 					throw registry_error(error_code::unknown_extension, "Unknown class implementation",
 					                     std::string(implementation_id));
 

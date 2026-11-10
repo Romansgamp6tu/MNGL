@@ -7,7 +7,7 @@ mngl::render_window window("MNGL 2D", {800, 600});
 mngl::texture scene(800, 600);
 mngl::sprite scene_sprite{scene, mngl::rectangle{0.0f, 0.0f, 4.0f / 3.0f, 1.0f}};
 
-while (mngl::input::continue_work())
+while (mngl::input::next_frame())
 {
 	auto scene_frame = scene.frame();
 	scene_frame.draw(

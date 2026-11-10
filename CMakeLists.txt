@@ -14,6 +14,7 @@ option(MNGL_CUSTOM_MIXER_INTERFACE
 option(MNGL_BUILD_WINDOWS_DEVEL_PACKAGE "Create a Windows x64 MNGL development ZIP" OFF)
 option(MNGL_BUILD_LINUX_DEVEL_PACKAGE "Create a Linux x64 MNGL development tarball" OFF)
 option(MNGL_BUILD_MACOS_DEVEL_PACKAGE "Create a macOS MNGL development tarball" OFF)
+option(MNGL_BUILD_2D_BENCHMARK "Build the interactive 2D profiling scene" OFF)
 
 execute_process(
 	COMMAND git branch --show-current
@@ -255,6 +256,37 @@ if(MNGL_HAS_SDL3_MIXER)
 	)
 endif()
 target_link_libraries(mngl_demo PRIVATE mngl)
+
+if(MNGL_BUILD_2D_BENCHMARK)
+	add_executable(mngl_2d_benchmark examples/2d-benchmark/main.cpp)
+	target_link_libraries(mngl_2d_benchmark PRIVATE mngl)
+	if(MSVC)
+		target_compile_options(mngl_2d_benchmark PRIVATE /utf-8)
+	endif()
+	add_custom_command(TARGET mngl_2d_benchmark POST_BUILD
+		COMMAND "${CMAKE_COMMAND}" -E copy_directory
+			"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/shaders"
+			"$<TARGET_FILE_DIR:mngl_2d_benchmark>/shaders"
+		VERBATIM
+	)
+	if(WIN32)
+		add_custom_command(TARGET mngl_2d_benchmark POST_BUILD
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+				"$<TARGET_FILE:mngl_imgui>"
+				"${MNGL_LIBRARY_DIRECTORY}/SDL3.dll"
+				"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.dll"
+				"${MNGL_LIBRARY_DIRECTORY}/freetype.dll"
+				"$<TARGET_FILE_DIR:mngl_2d_benchmark>"
+			VERBATIM
+		)
+		if(MNGL_HAS_SDL3_MIXER)
+			add_custom_command(TARGET mngl_2d_benchmark POST_BUILD
+				COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+					"$<TARGET_FILE:SDL3_mixer-shared>" "$<TARGET_FILE_DIR:mngl_2d_benchmark>"
+				VERBATIM)
+		endif()
+	endif()
+endif()
 
 if(BUILD_TESTING)
 	find_package(Threads REQUIRED)

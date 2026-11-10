@@ -46,10 +46,17 @@ namespace mngl::two_d
 		    requires std::invocable<DrawFunction, frame_2d&>
 		void draw(DrawFunction&& draw_function)
 		{
-			ensure_active();
 			ensure_recording_allowed();
 			std::invoke(std::forward<DrawFunction>(draw_function), *this);
 		}
+		// The callback's draws may be reordered by render state during frame submission.
+		template <typename DrawFunction>
+		    requires std::invocable<DrawFunction, frame_2d&>
+		void draw_order_independent(DrawFunction&& draw_function);
+		// Runs the callback only when the supplied world-space AABB can intersect the current view.
+		template <typename DrawFunction>
+		    requires std::invocable<DrawFunction, frame_2d&>
+		bool draw_if_visible(const ::mngl::rectangle& bounds, DrawFunction&& draw_function);
 
 		void prepare(const ::mngl::drawable& value);
 		void prepare(font& typeface, std::string_view text);
@@ -65,12 +72,15 @@ namespace mngl::two_d
 	private:
 		friend class renderer;
 		friend class recording_context;
+		friend class cached_layer;
 		friend struct ::mngl::sprite;
 		friend struct circle;
 		friend struct ellipse;
 		friend struct rounded_rectangle;
 		friend class rectangle_shape;
 		friend class vertex_array;
+		friend class prepared_vertex_array;
+		friend class mesh;
 		friend class convex_polygon;
 		friend class text;
 
@@ -80,6 +90,8 @@ namespace mngl::two_d
 		void submit_rounded_rectangle(const rounded_rectangle& value);
 		void submit_rectangle_shape(const rectangle_shape& value);
 		void submit_vertex_array(const vertex_array& value);
+		void submit_prepared_vertex_array(const prepared_vertex_array& value);
+		void submit_mesh(const mesh& value);
 		void submit_convex_polygon(const convex_polygon& value);
 		void submit_text(const text& value);
 		void prepare_shader_sprite(const ::mngl::sprite& value);
@@ -99,6 +111,9 @@ namespace mngl::two_d
 
 		void ensure_active() const;
 		void ensure_recording_allowed() const;
+		template <typename DrawFunction>
+		    requires std::invocable<DrawFunction, frame_2d&>
+		void draw_scissored(SDL_Rect pixel_bounds, DrawFunction&& draw_function);
 		void cancel() noexcept;
 		void detach() noexcept
 		{
@@ -131,8 +146,10 @@ namespace mngl::two_d
 		      m_hit_test_items(std::move(other.m_hit_test_items)),
 		      m_used_fonts(std::move(other.m_used_fonts)),
 		      m_view_projection(std::move(other.m_view_projection)), m_view(std::move(other.m_view)),
+		      m_scissor(std::move(other.m_scissor)),
 		      m_registered(std::exchange(other.m_registered, false)),
-		      m_finished(std::exchange(other.m_finished, false))
+		      m_finished(std::exchange(other.m_finished, false)),
+		      m_order_independent(std::exchange(other.m_order_independent, false))
 		{
 		}
 
@@ -150,8 +167,10 @@ namespace mngl::two_d
 				m_used_fonts = std::move(other.m_used_fonts);
 				m_view_projection = std::move(other.m_view_projection);
 				m_view = std::move(other.m_view);
+				m_scissor = std::move(other.m_scissor);
 				m_registered = std::exchange(other.m_registered, false);
 				m_finished = std::exchange(other.m_finished, false);
+				m_order_independent = std::exchange(other.m_order_independent, false);
 			}
 			return *this;
 		}
@@ -171,7 +190,6 @@ namespace mngl::two_d
 		    requires std::invocable<DrawFunction, frame_2d&>
 		void draw(DrawFunction&& draw_function)
 		{
-			ensure_active();
 			auto frame = frame_view();
 			frame.draw(std::forward<DrawFunction>(draw_function));
 		}
@@ -185,10 +203,11 @@ namespace mngl::two_d
 		recording_context(std::shared_ptr<detail::renderer_frame_control> control,
 		                  std::shared_ptr<detail::renderer_frame_state> recording_state, std::uint64_t token,
 		                  gpu::batcher2d::recording_context batcher_context,
-		                  std::optional<glm::mat4> view_projection, std::optional<::mngl::view> view) noexcept
+		                  std::optional<glm::mat4> view_projection, std::optional<::mngl::view> view,
+		                  std::optional<SDL_Rect> scissor) noexcept
 		    : m_control(std::move(control)), m_recording_state(std::move(recording_state)), m_token(token),
 		      m_batcher_context(std::move(batcher_context)), m_view_projection(std::move(view_projection)),
-		      m_view(std::move(view))
+		      m_view(std::move(view)), m_scissor(std::move(scissor))
 		{
 		}
 
@@ -207,7 +226,9 @@ namespace mngl::two_d
 		std::vector<font*> m_used_fonts;
 		std::optional<glm::mat4> m_view_projection;
 		std::optional<::mngl::view> m_view;
+		std::optional<SDL_Rect> m_scissor;
 		bool m_registered = false;
 		bool m_finished = false;
+		bool m_order_independent = false;
 	};
 } // namespace mngl::two_d

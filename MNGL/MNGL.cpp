@@ -115,7 +115,7 @@ static int run_demo()
 	std::string username;
 	const std::regex username_pattern(R"([A-Za-z0-9_]*)");
 
-	while (mngl::input::continue_work())
+	while (mngl::input::next_frame())
 	{
 		const auto keyboards = mngl::input::keyboards();
 		const auto mice = mngl::input::mice();

@@ -72,7 +72,7 @@ namespace mngl
 		static void ensure()
 		{
 			auto& current = instance();
-			if (!current.running())
+			if (!current.running()) [[unlikely]]
 				throw sdl_error::from_message(current.content());
 		}
 

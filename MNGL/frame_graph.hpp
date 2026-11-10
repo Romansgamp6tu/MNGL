@@ -184,7 +184,7 @@ namespace mngl::gpu
 
 		explicit frame_graph(const device& target_device = device::global()) : m_device(target_device)
 		{
-			if (!m_device.raw())
+			if (!m_device.raw()) [[unlikely]]
 			{
 				throw std::invalid_argument("A frame graph requires a valid GPU device");
 			}
@@ -212,7 +212,7 @@ namespace mngl::gpu
 		[[nodiscard]] buffer_handle create_buffer(std::uint32_t size, buffer_usage usage)
 		{
 			ensure_mutable();
-			if (size == 0)
+			if (size == 0) [[unlikely]]
 			{
 				throw std::invalid_argument("A frame-graph buffer must have a non-zero size");
 			}
@@ -227,7 +227,7 @@ namespace mngl::gpu
 
 		[[nodiscard]] texture_handle import_texture(drawable_texture& value)
 		{
-			if (!value.valid())
+			if (!value.valid()) [[unlikely]]
 			{
 				throw std::invalid_argument("Cannot import an invalid texture into a frame graph");
 			}
@@ -242,11 +242,11 @@ namespace mngl::gpu
 		[[nodiscard]] buffer_handle import_buffer(gpu_buffer& value)
 		{
 			ensure_mutable();
-			if (!value.valid())
+			if (!value.valid()) [[unlikely]]
 			{
 				throw std::invalid_argument("Cannot import an invalid buffer into a frame graph");
 			}
-			if (value.device_raw() != m_device.raw())
+			if (value.device_raw() != m_device.raw()) [[unlikely]]
 			{
 				throw std::invalid_argument("Imported frame-graph buffer belongs to a different GPU device");
 			}
@@ -270,7 +270,7 @@ namespace mngl::gpu
 		[[nodiscard]] ::mngl::texture& texture(texture_handle handle)
 		{
 			auto& resource = checked_resource(handle, resource_kind::texture);
-			if (!resource.high_level_texture)
+			if (!resource.high_level_texture) [[unlikely]]
 			{
 				throw std::logic_error(
 				    "Imported low-level GPU textures are available through gpu_texture_resource()");
@@ -281,7 +281,7 @@ namespace mngl::gpu
 		[[nodiscard]] const ::mngl::texture& texture(texture_handle handle) const
 		{
 			const auto& resource = checked_resource(handle, resource_kind::texture);
-			if (!resource.high_level_texture)
+			if (!resource.high_level_texture) [[unlikely]]
 			{
 				throw std::logic_error(
 				    "Imported low-level GPU textures are available through gpu_texture_resource()");
@@ -327,11 +327,11 @@ namespace mngl::gpu
 
 		void execute()
 		{
-			if (m_executing)
+			if (m_executing) [[unlikely]]
 			{
 				throw std::logic_error("A frame graph cannot execute recursively");
 			}
-			if (m_execution_failed)
+			if (m_execution_failed) [[unlikely]]
 			{
 				throw std::logic_error("A frame graph cannot be reused after a pass failed during execution");
 			}
@@ -385,7 +385,7 @@ namespace mngl::gpu
 
 		[[nodiscard]] static std::string checked_name(std::string_view name)
 		{
-			if (name.empty())
+			if (name.empty()) [[unlikely]]
 			{
 				throw std::invalid_argument("A frame-graph pass requires a name");
 			}
@@ -394,11 +394,11 @@ namespace mngl::gpu
 
 		void ensure_mutable() const
 		{
-			if (m_executing)
+			if (m_executing) [[unlikely]]
 			{
 				throw std::logic_error("A frame graph cannot be modified while it is executing");
 			}
-			if (m_execution_failed)
+			if (m_execution_failed) [[unlikely]]
 			{
 				throw std::logic_error(
 				    "A frame graph cannot be modified after a pass failed during execution");
@@ -407,7 +407,7 @@ namespace mngl::gpu
 
 		std::uint32_t add_resource(resource_entry resource)
 		{
-			if (m_resources.size() >= invalid_index)
+			if (m_resources.size() >= invalid_index) [[unlikely]]
 			{
 				throw std::length_error("Frame graph exhausted its resource handle space");
 			}
@@ -419,11 +419,11 @@ namespace mngl::gpu
 		[[nodiscard]] texture_handle import_texture(gpu_texture& value, drawable_texture* high_level)
 		{
 			ensure_mutable();
-			if (!value.valid())
+			if (!value.valid()) [[unlikely]]
 			{
 				throw std::invalid_argument("Cannot import an invalid texture into a frame graph");
 			}
-			if (value.device_raw() != m_device.raw())
+			if (value.device_raw() != m_device.raw()) [[unlikely]]
 			{
 				throw std::invalid_argument("Imported frame-graph texture belongs to a different GPU device");
 			}
@@ -451,7 +451,7 @@ namespace mngl::gpu
 
 		[[nodiscard]] pass_builder add_pass_node(pass_node pass)
 		{
-			if (m_passes.size() >= invalid_index)
+			if (m_passes.size() >= invalid_index) [[unlikely]]
 			{
 				throw std::length_error("Frame graph exhausted its pass handle space");
 			}
@@ -463,7 +463,7 @@ namespace mngl::gpu
 		std::uint32_t resource_index(texture_handle handle) const
 		{
 			if (handle.m_owner != this || handle.m_index >= m_resources.size() ||
-			    m_resources[handle.m_index].kind != resource_kind::texture)
+			    m_resources[handle.m_index].kind != resource_kind::texture) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "Frame-graph texture handle is invalid or belongs to another graph");
@@ -474,7 +474,7 @@ namespace mngl::gpu
 		std::uint32_t resource_index(buffer_handle handle) const
 		{
 			if (handle.m_owner != this || handle.m_index >= m_resources.size() ||
-			    m_resources[handle.m_index].kind != resource_kind::buffer)
+			    m_resources[handle.m_index].kind != resource_kind::buffer) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "Frame-graph buffer handle is invalid or belongs to another graph");
@@ -484,7 +484,7 @@ namespace mngl::gpu
 
 		std::uint32_t pass_index(pass_handle handle) const
 		{
-			if (handle.m_owner != this || handle.m_index >= m_passes.size())
+			if (handle.m_owner != this || handle.m_index >= m_passes.size()) [[unlikely]]
 			{
 				throw std::invalid_argument("Frame-graph pass handle is invalid or belongs to another graph");
 			}
@@ -511,7 +511,7 @@ namespace mngl::gpu
 		resource_entry& checked_resource(texture_handle handle, resource_kind kind)
 		{
 			auto& resource = checked_resource(handle);
-			if (resource.kind != kind)
+			if (resource.kind != kind) [[unlikely]]
 			{
 				throw std::invalid_argument("Frame-graph resource handle has the wrong type");
 			}
@@ -521,7 +521,7 @@ namespace mngl::gpu
 		const resource_entry& checked_resource(texture_handle handle, resource_kind kind) const
 		{
 			const auto& resource = checked_resource(handle);
-			if (resource.kind != kind)
+			if (resource.kind != kind) [[unlikely]]
 			{
 				throw std::invalid_argument("Frame-graph resource handle has the wrong type");
 			}
@@ -531,7 +531,7 @@ namespace mngl::gpu
 		resource_entry& checked_resource(buffer_handle handle, resource_kind kind)
 		{
 			auto& resource = checked_resource(handle);
-			if (resource.kind != kind)
+			if (resource.kind != kind) [[unlikely]]
 			{
 				throw std::invalid_argument("Frame-graph resource handle has the wrong type");
 			}
@@ -541,7 +541,7 @@ namespace mngl::gpu
 		const resource_entry& checked_resource(buffer_handle handle, resource_kind kind) const
 		{
 			const auto& resource = checked_resource(handle);
-			if (resource.kind != kind)
+			if (resource.kind != kind) [[unlikely]]
 			{
 				throw std::invalid_argument("Frame-graph resource handle has the wrong type");
 			}
@@ -566,7 +566,7 @@ namespace mngl::gpu
 			                                   { return use.resource_index == resource; });
 			if (existing != uses.end())
 			{
-				if (existing->mode != mode)
+				if (existing->mode != mode) [[unlikely]]
 				{
 					throw std::invalid_argument("Declare a frame-graph resource as read_write instead of "
 					                            "adding separate read and write uses");
@@ -602,13 +602,13 @@ namespace mngl::gpu
 
 		void validate_context_resource(std::size_t pass, std::uint32_t resource) const
 		{
-			if (pass >= m_passes.size())
+			if (pass >= m_passes.size()) [[unlikely]]
 			{
 				throw std::logic_error("Frame-graph pass context is no longer valid");
 			}
 			const auto& uses = m_passes[pass].resources;
 			if (std::none_of(uses.begin(), uses.end(),
-			                 [resource](const resource_use& use) { return use.resource_index == resource; }))
+			                 [resource](const resource_use& use) { return use.resource_index == resource; })) [[unlikely]]
 			{
 				throw std::logic_error("Frame-graph pass accessed a resource it did not declare");
 			}
@@ -659,7 +659,7 @@ namespace mngl::gpu
 					{
 						for (const auto& use : m_passes[pass].resources)
 						{
-							if (use.resource_index == resource_index && use.mode != access::write)
+							if (use.resource_index == resource_index && use.mode != access::write) [[unlikely]]
 							{
 								throw std::logic_error("Transient frame-graph resource " +
 								                       std::to_string(resource_index) +
@@ -760,7 +760,7 @@ namespace mngl::gpu
 				}
 			}
 
-			if (order.size() != pass_count)
+			if (order.size() != pass_count) [[unlikely]]
 			{
 				throw std::logic_error("Frame graph contains a dependency cycle");
 			}
@@ -782,7 +782,7 @@ namespace mngl::gpu
 					auto& pass = m_passes[pass_index];
 					pass_context context(*this, pass_index, commands);
 					pass.callback(context);
-					if (!commands.valid())
+					if (!commands.valid()) [[unlikely]]
 					{
 						throw std::logic_error(
 						    "Frame-graph passes must not submit or cancel the graph's command buffer");

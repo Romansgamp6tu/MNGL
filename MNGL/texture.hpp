@@ -34,6 +34,7 @@ namespace mngl
 		class frame_2d;
 		class recording_context;
 		class renderer;
+		class cached_layer;
 	} // namespace two_d
 
 	namespace detail
@@ -142,7 +143,7 @@ namespace mngl
 		explicit texture(const std::string& path, std::uint32_t usg = default_upload_usage)
 		{
 			detail::surface_ptr image(IMG_Load(path.c_str()));
-			if (!image)
+			if (!image) [[unlikely]]
 			{
 				throw sdl_error("Failed to load image from " + path + ": ");
 			}
@@ -178,7 +179,7 @@ namespace mngl
 		void load_from_surface(const gpu::device& dev, gpu::command_buffer& cmd, SDL_Surface* surface,
 		                       std::uint32_t usg = default_upload_usage)
 		{
-			if (rendering())
+			if (rendering()) [[unlikely]]
 			{
 				throw std::logic_error("Cannot replace a texture while it is being rendered to");
 			}
@@ -197,24 +198,24 @@ namespace mngl
 		// Updates an RGBA8 texture from a same-sized SDL surface.
 		void update_from_surface(gpu::command_buffer& cmd, SDL_Surface* surface)
 		{
-			if (rendering())
+			if (rendering()) [[unlikely]]
 			{
 				throw std::logic_error("Cannot update a texture while it is being rendered to");
 			}
-			if (!valid())
+			if (!valid()) [[unlikely]]
 			{
 				throw std::logic_error("Cannot update an invalid texture from SDL_Surface");
 			}
 
 			auto converted = convert_surface(surface);
-			if (m_gpu_tex.format() != pixel_format::r8g8b8a8_unorm)
+			if (m_gpu_tex.format() != pixel_format::r8g8b8a8_unorm) [[unlikely]]
 			{
 				throw std::invalid_argument("Updating from SDL_Surface requires an RGBA8 texture");
 			}
 
 			const std::uint32_t width = static_cast<std::uint32_t>(converted->w);
 			const std::uint32_t height = static_cast<std::uint32_t>(converted->h);
-			if (m_gpu_tex.width() != width || m_gpu_tex.height() != height)
+			if (m_gpu_tex.width() != width || m_gpu_tex.height() != height) [[unlikely]]
 			{
 				throw std::invalid_argument("SDL_Surface dimensions must match the texture dimensions");
 			}
@@ -231,11 +232,11 @@ namespace mngl
 
 		void update_from_surface(const gpu::device& dev, SDL_Surface* surface)
 		{
-			if (!valid())
+			if (!valid()) [[unlikely]]
 			{
 				throw std::logic_error("Cannot update an invalid texture from SDL_Surface");
 			}
-			if (m_gpu_tex.device_raw() != dev.raw())
+			if (m_gpu_tex.device_raw() != dev.raw()) [[unlikely]]
 			{
 				throw std::invalid_argument("Texture and GPU device do not match");
 			}
@@ -252,7 +253,7 @@ namespace mngl
 
 		void update_from_surface(SDL_Surface* surface)
 		{
-			if (!valid())
+			if (!valid()) [[unlikely]]
 			{
 				throw std::logic_error("Cannot update an invalid texture from SDL_Surface");
 			}
@@ -271,11 +272,11 @@ namespace mngl
 
 		template <typename T> void update_pixels(const gpu::device& dev, std::span<const T> pixels)
 		{
-			if (!valid())
+			if (!valid()) [[unlikely]]
 			{
 				throw std::logic_error("Cannot update an invalid texture");
 			}
-			if (m_gpu_tex.device_raw() != dev.raw())
+			if (m_gpu_tex.device_raw() != dev.raw()) [[unlikely]]
 			{
 				throw std::invalid_argument("Texture and GPU device do not match");
 			}
@@ -287,7 +288,7 @@ namespace mngl
 
 		template <typename T> void update_pixels(std::span<const T> pixels)
 		{
-			if (!valid())
+			if (!valid()) [[unlikely]]
 			{
 				throw std::logic_error("Cannot update an invalid texture");
 			}
@@ -330,7 +331,7 @@ namespace mngl
 
 		void set_view(const view& value)
 		{
-			if (rendering())
+			if (rendering()) [[unlikely]]
 			{
 				throw std::logic_error("Cannot change a texture view while the texture is being rendered to");
 			}
@@ -339,7 +340,7 @@ namespace mngl
 
 		void reset_view()
 		{
-			if (rendering())
+			if (rendering()) [[unlikely]]
 			{
 				throw std::logic_error("Cannot reset a texture view while the texture is being rendered to");
 			}
@@ -351,11 +352,11 @@ namespace mngl
 
 		void enable_hit_testing(bool enabled = true)
 		{
-			if (rendering())
+			if (rendering()) [[unlikely]]
 			{
 				throw std::logic_error("Cannot change hit testing while the texture is being rendered to");
 			}
-			if (enabled && !can_render_to())
+			if (enabled && !can_render_to()) [[unlikely]]
 			{
 				throw std::invalid_argument("Hit testing requires a color-target texture");
 			}
@@ -371,11 +372,11 @@ namespace mngl
 		// The position is in target pixels, with the origin at the bottom-left.
 		[[nodiscard]] std::optional<hit_test_result> hit_test(glm::vec2 pixel_position) const
 		{
-			if (!m_hit_testing_enabled)
+			if (!m_hit_testing_enabled) [[unlikely]]
 			{
 				throw std::logic_error("Enable hit testing before rendering to this texture");
 			}
-			if (!m_hit_test_frame)
+			if (!m_hit_test_frame) [[unlikely]]
 			{
 				throw std::logic_error("No completed hit-test frame is available for this texture");
 			}
@@ -439,15 +440,16 @@ namespace mngl
 		private:
 			friend class texture;
 
-			explicit frame_scope(texture& owner, const color& clear_color) : m_owner(&owner)
+			explicit frame_scope(texture& owner, const color& clear_color, bool preserve_contents)
+			    : m_owner(&owner)
 			{
-				owner.clear(clear_color);
+				owner.begin_render(clear_color, preserve_contents);
 				m_generation = owner.m_active_frame_generation;
 			}
 
 			void ensure_active() const
 			{
-				if (!m_owner || m_generation == 0 || m_owner->m_active_frame_generation != m_generation)
+				if (!m_owner || m_generation == 0 || m_owner->m_active_frame_generation != m_generation) [[unlikely]]
 				{
 					throw std::logic_error("Texture frame scope is no longer active");
 				}
@@ -467,13 +469,21 @@ namespace mngl
 
 		[[nodiscard]] frame_scope frame(const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f))
 		{
-			return frame_scope(*this, clear_color);
+			return frame_scope(*this, clear_color, false);
 		}
 
 	private:
 		friend class render_window;
 		friend class imgui_context;
 		friend class two_d::renderer;
+		friend class two_d::cached_layer;
+		// Preserves existing target pixels; cached layers redraw only their dirty regions.
+		[[nodiscard]] frame_scope frame_preserving(
+		    const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f))
+		{
+			return frame_scope(*this, clear_color, true);
+		}
+		void begin_render(const color& clear_color, bool preserve_contents);
 
 		static std::uint64_t next_hit_test_identity() noexcept
 		{
@@ -500,19 +510,19 @@ namespace mngl
 
 		static detail::surface_ptr convert_surface(SDL_Surface* surface)
 		{
-			if (!surface)
+			if (!surface) [[unlikely]]
 			{
 				throw std::invalid_argument("Cannot create texture from null SDL_Surface!");
 			}
 
 			// RGBA32 keeps byte order R,G,B,A regardless of endianness.
 			detail::surface_ptr converted(SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32));
-			if (!converted)
+			if (!converted) [[unlikely]]
 			{
 				throw sdl_error("Failed to convert surface format: ");
 			}
 			if (converted->w <= 0 || converted->h <= 0 || !converted->pixels ||
-			    converted->pitch < converted->w * 4)
+			    converted->pitch < converted->w * 4) [[unlikely]]
 			{
 				throw std::invalid_argument("SDL_Surface has invalid dimensions or pixel data");
 			}
@@ -521,7 +531,7 @@ namespace mngl
 
 		void begin_external_render()
 		{
-			if (rendering())
+			if (rendering()) [[unlikely]]
 			{
 				throw std::logic_error("Texture is already being rendered to");
 			}
@@ -532,7 +542,7 @@ namespace mngl
 
 		static std::uint32_t checked_size(std::size_t size)
 		{
-			if (size > std::numeric_limits<std::uint32_t>::max())
+			if (size > std::numeric_limits<std::uint32_t>::max()) [[unlikely]]
 			{
 				throw std::length_error("Texture data exceeds SDL's 32-bit size limit");
 			}
@@ -550,24 +560,24 @@ namespace mngl
 		static void upload_rows(gpu::texture& tex, gpu::command_buffer& cmd, const void* data,
 		                        std::size_t row_bytes, std::size_t src_stride, std::size_t rows)
 		{
-			if (!tex.valid())
+			if (!tex.valid()) [[unlikely]]
 			{
 				throw std::logic_error("Cannot upload pixels to an invalid texture");
 			}
-			if (!cmd.valid())
+			if (!cmd.valid()) [[unlikely]]
 			{
 				throw std::invalid_argument("Cannot upload texture data with an invalid command buffer");
 			}
 			SDL_GPUDevice* device_raw = tex.device_raw();
-			if (cmd.device_raw() != device_raw)
+			if (cmd.device_raw() != device_raw) [[unlikely]]
 			{
 				throw std::invalid_argument("Texture and command buffer belong to different GPU devices");
 			}
-			if (!data)
+			if (!data) [[unlikely]]
 			{
 				throw std::invalid_argument("Texture pixel data is null");
 			}
-			if (src_stride < row_bytes)
+			if (src_stride < row_bytes) [[unlikely]]
 			{
 				throw std::invalid_argument("Texture row stride is smaller than row size");
 			}
@@ -575,7 +585,7 @@ namespace mngl
 			const std::uint32_t expected = SDL_CalculateGPUTextureFormatSize(
 			    static_cast<SDL_GPUTextureFormat>(tex.format()), tex.width(), tex.height(), 1);
 			const std::size_t total = row_bytes * rows;
-			if (expected == 0 || total != expected)
+			if (expected == 0 || total != expected) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "Texture pixel data size does not match texture dimensions and format");
@@ -587,14 +597,14 @@ namespace mngl
 			transfer_info.size = data_size;
 
 			SDL_GPUTransferBuffer* transfer_buf = SDL_CreateGPUTransferBuffer(device_raw, &transfer_info);
-			if (!transfer_buf)
+			if (!transfer_buf) [[unlikely]]
 			{
 				throw sdl_error("Failed to create transfer buffer for texture: ");
 			}
 			detail::transfer_buffer_guard guard(device_raw, transfer_buf);
 
 			void* mapped = SDL_MapGPUTransferBuffer(device_raw, transfer_buf, false);
-			if (!mapped)
+			if (!mapped) [[unlikely]]
 			{
 				throw sdl_error("Failed to map transfer buffer: ");
 			}
@@ -615,7 +625,7 @@ namespace mngl
 			SDL_UnmapGPUTransferBuffer(device_raw, transfer_buf);
 
 			SDL_GPUCopyPass* copy_pass = SDL_BeginGPUCopyPass(cmd.raw());
-			if (!copy_pass)
+			if (!copy_pass) [[unlikely]]
 			{
 				throw sdl_error("Failed to begin copy pass for texture upload: ");
 			}
@@ -694,7 +704,7 @@ namespace mngl
 			}
 
 			SDL_Surface* current_frame = m_source.raw();
-			if (!current_frame)
+			if (!current_frame) [[unlikely]]
 			{
 				throw std::logic_error("Animated texture has no current frame");
 			}
@@ -702,7 +712,7 @@ namespace mngl
 			{
 				return;
 			}
-			if (m_texture.rendering())
+			if (m_texture.rendering()) [[unlikely]]
 			{
 				throw std::logic_error("Cannot update an animated texture while it is being rendered to");
 			}
@@ -751,7 +761,7 @@ namespace mngl
 
 	inline const texture& animated_texture::as_texture() const
 	{
-		if (!m_state)
+		if (!m_state) [[unlikely]]
 		{
 			throw std::logic_error("Cannot access a moved-from animated texture");
 		}

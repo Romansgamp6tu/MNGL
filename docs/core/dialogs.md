@@ -21,7 +21,7 @@ options.filters = {{"Images", "png;jpg;jpeg"}, {"All files", "*"}};
 
 auto request = mngl::dialog::open_file(std::move(options));
 bool finished = false;
-while (!finished && mngl::input::continue_work())
+while (!finished && mngl::input::next_frame())
 {
 	const auto result = request.result();
 	switch (result.status)
@@ -89,7 +89,7 @@ MNGL копирует результат в защищённое состоян�
 нужен, callback сам освобождает внутреннее состояние.
 
 В Linux системный диалог может использовать XDG Portal и требует работающий
-цикл событий SDL. `input::continue_work()` обрабатывает события MNGL; не
+цикл событий SDL. `input::next_frame()` обрабатывает события MNGL; не
 запускайте дополнительный цикл `SDL_PollEvent()`. Само открытие диалога и
 чтение готового результата не требуют отдельного `update()`.
 

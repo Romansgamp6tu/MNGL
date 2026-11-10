@@ -24,11 +24,11 @@ namespace mngl::clipboard
 	{
 		inline void validate_mime_type(std::string_view mime_type)
 		{
-			if (mime_type.empty())
+			if (mime_type.empty()) [[unlikely]]
 			{
 				throw std::invalid_argument("clipboard MIME type cannot be empty");
 			}
-			if (mime_type.find('\0') != std::string_view::npos)
+			if (mime_type.find('\0') != std::string_view::npos) [[unlikely]]
 			{
 				throw std::invalid_argument("clipboard MIME type cannot contain a null character");
 			}
@@ -36,7 +36,7 @@ namespace mngl::clipboard
 
 		inline void validate_text(std::string_view text)
 		{
-			if (text.find('\0') != std::string_view::npos)
+			if (text.find('\0') != std::string_view::npos) [[unlikely]]
 			{
 				throw std::invalid_argument("clipboard text cannot contain a null character");
 			}
@@ -114,7 +114,7 @@ namespace mngl::clipboard
 	{
 		detail::validate_text(text);
 		const std::string terminated(text);
-		if (!SDL_SetClipboardText(terminated.c_str()))
+		if (!SDL_SetClipboardText(terminated.c_str())) [[unlikely]]
 		{
 			throw sdl_error("failed to set clipboard text: ");
 		}
@@ -123,7 +123,7 @@ namespace mngl::clipboard
 	[[nodiscard]] inline std::string get_text()
 	{
 		std::unique_ptr<char, detail::sdl_free_deleter> text(SDL_GetClipboardText());
-		if (!text)
+		if (!text) [[unlikely]]
 		{
 			throw sdl_error("failed to get clipboard text: ");
 		}
@@ -143,7 +143,7 @@ namespace mngl::clipboard
 		{
 			detail::validate_text(text);
 			const std::string terminated(text);
-			if (!SDL_SetPrimarySelectionText(terminated.c_str()))
+			if (!SDL_SetPrimarySelectionText(terminated.c_str())) [[unlikely]]
 			{
 				throw sdl_error("failed to set primary selection text: ");
 			}
@@ -152,7 +152,7 @@ namespace mngl::clipboard
 		[[nodiscard]] inline std::string get_text()
 		{
 			std::unique_ptr<char, detail::sdl_free_deleter> text(SDL_GetPrimarySelectionText());
-			if (!text)
+			if (!text) [[unlikely]]
 			{
 				throw sdl_error("failed to get primary selection text: ");
 			}
@@ -170,7 +170,7 @@ namespace mngl::clipboard
 	{
 		std::size_t count = 0;
 		std::unique_ptr<char*, detail::sdl_free_deleter> types(SDL_GetClipboardMimeTypes(&count));
-		if (!types)
+		if (!types) [[unlikely]]
 		{
 			throw sdl_error("failed to get clipboard MIME types: ");
 		}
@@ -197,7 +197,7 @@ namespace mngl::clipboard
 		const std::string terminated(mime_type);
 		std::size_t size = 0;
 		std::unique_ptr<void, detail::sdl_free_deleter> data(SDL_GetClipboardData(terminated.c_str(), &size));
-		if (!data)
+		if (!data) [[unlikely]]
 		{
 			throw sdl_error("failed to get clipboard data: ");
 		}
@@ -210,11 +210,11 @@ namespace mngl::clipboard
 	// is requested and remains alive until SDL invokes its cleanup callback.
 	inline void set_data(std::vector<std::string> mime_types, data_provider provide)
 	{
-		if (mime_types.empty())
+		if (mime_types.empty()) [[unlikely]]
 		{
 			throw std::invalid_argument("clipboard offer must provide at least one MIME type");
 		}
-		if (!provide)
+		if (!provide) [[unlikely]]
 		{
 			throw std::invalid_argument("clipboard data provider cannot be empty");
 		}
@@ -222,7 +222,7 @@ namespace mngl::clipboard
 		{
 			detail::validate_mime_type(mime_types[index]);
 			if (std::find(mime_types.begin(), mime_types.begin() + index, mime_types[index]) !=
-			    mime_types.begin() + index)
+			    mime_types.begin() + index) [[unlikely]]
 			{
 				throw std::invalid_argument("clipboard offer contains a duplicate MIME type");
 			}
@@ -240,7 +240,7 @@ namespace mngl::clipboard
 		}
 
 		if (!SDL_SetClipboardData(detail::provide_data, detail::cleanup_offer, state.get(),
-		                          mime_type_names.data(), mime_type_names.size()))
+		                          mime_type_names.data(), mime_type_names.size())) [[unlikely]]
 		{
 			throw sdl_error("failed to set clipboard data: ");
 		}
@@ -249,7 +249,7 @@ namespace mngl::clipboard
 
 	inline void clear()
 	{
-		if (!SDL_ClearClipboardData())
+		if (!SDL_ClearClipboardData()) [[unlikely]]
 		{
 			throw sdl_error("failed to clear clipboard: ");
 		}

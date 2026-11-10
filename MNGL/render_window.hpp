@@ -67,7 +67,7 @@ namespace mngl
 
 		void set_view(const ::mngl::view& value)
 		{
-			if (m_frame || m_command_buffer)
+			if (m_frame || m_command_buffer) [[unlikely]]
 			{
 				throw std::logic_error("Cannot change the render_window view during an active frame");
 			}
@@ -76,7 +76,7 @@ namespace mngl
 
 		void reset_view()
 		{
-			if (m_frame || m_command_buffer)
+			if (m_frame || m_command_buffer) [[unlikely]]
 			{
 				throw std::logic_error("Cannot reset the render_window view during an active frame");
 			}
@@ -88,7 +88,7 @@ namespace mngl
 
 		void enable_hit_testing(bool enabled = true)
 		{
-			if (m_frame || m_command_buffer)
+			if (m_frame || m_command_buffer) [[unlikely]]
 			{
 				throw std::logic_error("Cannot change hit testing during an active frame");
 			}
@@ -104,11 +104,11 @@ namespace mngl
 		// The position is in logical window coordinates, with the origin at the top-left.
 		[[nodiscard]] std::optional<hit_test_result> hit_test(glm::vec2 window_position) const
 		{
-			if (!m_hit_testing_enabled)
+			if (!m_hit_testing_enabled) [[unlikely]]
 			{
 				throw std::logic_error("Enable hit testing before drawing to the render window");
 			}
-			if (!m_hit_test_frame)
+			if (!m_hit_test_frame) [[unlikely]]
 			{
 				throw std::logic_error("No completed hit-test frame is available for this window");
 			}
@@ -169,7 +169,7 @@ namespace mngl
 
 		void display()
 		{
-			if (!m_frame || !m_command_buffer)
+			if (!m_frame || !m_command_buffer) [[unlikely]]
 			{
 				throw std::logic_error("Cannot display a render_window without an active frame");
 			}
@@ -274,7 +274,7 @@ namespace mngl
 
 			void ensure_active() const
 			{
-				if (!m_owner || m_generation == 0 || m_owner->m_active_frame_generation != m_generation)
+				if (!m_owner || m_generation == 0 || m_owner->m_active_frame_generation != m_generation) [[unlikely]]
 				{
 					throw std::logic_error("Render-window frame scope is no longer active");
 				}
@@ -306,7 +306,7 @@ namespace mngl
 		// The returned texture is borrowed and remains valid only until display().
 		[[nodiscard]] const ::mngl::texture& swapchain_texture() const
 		{
-			if (!m_frame || !m_swapchain_texture)
+			if (!m_frame || !m_swapchain_texture) [[unlikely]]
 			{
 				throw std::logic_error(
 				    "The swapchain texture is only available during an active window frame");
@@ -368,7 +368,7 @@ namespace mngl
 
 		void attach_overlay(detail::render_window_overlay& overlay)
 		{
-			if (m_overlay)
+			if (m_overlay) [[unlikely]]
 			{
 				throw std::logic_error("A render_window can only have one active overlay");
 			}
@@ -386,7 +386,7 @@ namespace mngl
 		[[nodiscard]] gpu::texture_format swapchain_format() const
 		{
 			const auto format = gpu_device().swapchain_texture_format(*this);
-			if (format == gpu::texture_format::invalid)
+			if (format == gpu::texture_format::invalid) [[unlikely]]
 			{
 				throw std::runtime_error("The render_window must be claimed by its GPU device");
 			}
@@ -395,7 +395,7 @@ namespace mngl
 
 		void begin_target_frame(::mngl::texture* target, const color& clear_color)
 		{
-			if (m_frame || m_command_buffer)
+			if (m_frame || m_command_buffer) [[unlikely]]
 			{
 				throw std::logic_error("A render_window frame is already active");
 			}
@@ -443,12 +443,12 @@ namespace mngl
 
 		[[nodiscard]] two_d::renderer& renderer_for(::mngl::texture& target)
 		{
-			if (!target.valid() || !target.can_render_to() || target.rendering())
+			if (!target.valid() || !target.can_render_to() || target.rendering()) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "render_window target must be a valid, idle color-target texture");
 			}
-			if (target.raw_gpu_texture().device_raw() != gpu_device().raw())
+			if (target.raw_gpu_texture().device_raw() != gpu_device().raw()) [[unlikely]]
 			{
 				throw std::invalid_argument("render_window target belongs to a different GPU device");
 			}
@@ -482,7 +482,7 @@ namespace mngl
 
 		[[nodiscard]] two_d::frame_2d& active_frame()
 		{
-			if (!m_frame)
+			if (!m_frame) [[unlikely]]
 			{
 				throw std::logic_error("Call clear() before drawing to a render_window");
 			}
@@ -529,7 +529,7 @@ namespace mngl
 		                                                 texture::usage::color_target)
 		    : m_window(window), m_format(format), m_usage(usage)
 		{
-			if ((usage & texture::usage::color_target) == 0)
+			if ((usage & texture::usage::color_target) == 0) [[unlikely]]
 			{
 				throw std::invalid_argument("A resizable texture must have color_target usage");
 			}
@@ -543,7 +543,7 @@ namespace mngl
 		[[nodiscard]] texture& target()
 		{
 			synchronize_texture();
-			if (!m_target.valid())
+			if (!m_target.valid()) [[unlikely]]
 			{
 				throw std::logic_error(
 				    "Cannot access a resizable texture while its window has zero pixel size");
@@ -576,7 +576,7 @@ namespace mngl
 			{
 				return;
 			}
-			if (m_target.rendering())
+			if (m_target.rendering()) [[unlikely]]
 			{
 				throw std::logic_error("Cannot resize a texture while it is being rendered to");
 			}

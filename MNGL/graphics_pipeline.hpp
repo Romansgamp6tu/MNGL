@@ -2,8 +2,11 @@
 
 #include <cstdint>
 #include <optional>
+#include <sstream>
+#include <source_location>
+#include <string>
 
-#include "utilities.hpp"
+#include "runtime.hpp"
 #include "graphics_shader.hpp"
 #include "vertex_layout.hpp"
 #include "device.hpp"
@@ -112,26 +115,38 @@ namespace mngl::gpu
 	public:
 		graphics_pipeline_builder() = default;
 
-		graphics_pipeline_builder& set_vertex_shader(SDL_GPUShader* shader) noexcept
+		graphics_pipeline_builder& set_debug_name(std::string_view name)
 		{
-			m_vert_shader = shader;
+			m_debug_name.assign(name);
 			return *this;
 		}
 
-		graphics_pipeline_builder& set_vertex_shader(const graphics_shader& shader) noexcept
+		graphics_pipeline_builder& set_vertex_shader(SDL_GPUShader* shader) noexcept
 		{
-			return set_vertex_shader(shader.raw());
+			m_vert_shader = shader;
+			m_vertex_shader_name.clear();
+			return *this;
+		}
+
+		graphics_pipeline_builder& set_vertex_shader(const graphics_shader& shader)
+		{
+			set_vertex_shader(shader.raw());
+			m_vertex_shader_name.assign(shader.debug_name());
+			return *this;
 		}
 
 		graphics_pipeline_builder& set_fragment_shader(SDL_GPUShader* shader) noexcept
 		{
 			m_frag_shader = shader;
+			m_fragment_shader_name.clear();
 			return *this;
 		}
 
-		graphics_pipeline_builder& set_fragment_shader(const graphics_shader& shader) noexcept
+		graphics_pipeline_builder& set_fragment_shader(const graphics_shader& shader)
 		{
-			return set_fragment_shader(shader.raw());
+			set_fragment_shader(shader.raw());
+			m_fragment_shader_name.assign(shader.debug_name());
+			return *this;
 		}
 
 		graphics_pipeline_builder& set_vertex_layout(const vertex_layout& layout)
@@ -225,13 +240,14 @@ namespace mngl::gpu
 			return set_depth_stencil_format(static_cast<SDL_GPUTextureFormat>(format));
 		}
 
-		graphics_pipeline build(SDL_GPUDevice* device) const
+		graphics_pipeline build(
+		    SDL_GPUDevice* device, std::source_location location = std::source_location::current()) const
 		{
-			if (!device)
+			if (!device) [[unlikely]]
 			{
 				throw std::runtime_error("Cannot build graphics_pipeline with null device");
 			}
-			if (!m_vert_shader || !m_frag_shader)
+			if (!m_vert_shader || !m_frag_shader) [[unlikely]]
 			{
 				throw std::runtime_error("Graphics pipeline requires both vertex and fragment shaders");
 			}
@@ -280,26 +296,87 @@ namespace mngl::gpu
 			    .depth_stencil_format = m_depth_stencil_format,
 			    .has_depth_stencil_target = m_has_depth_target};
 
+			SDL_ClearError();
 			SDL_GPUGraphicsPipeline* handle = SDL_CreateGPUGraphicsPipeline(device, &info);
-			if (!handle)
+			if (!handle) [[unlikely]]
 			{
-				throw sdl_error("Failed to create SDL_GPUGraphicsPipeline: ");
+				throw sdl_error(describe_failure(device), location);
 			}
 
 			return graphics_pipeline{device, handle};
 		}
 
-		graphics_pipeline build(const mngl::gpu::device& dev) const
+		graphics_pipeline build(
+		    const mngl::gpu::device& dev, std::source_location location = std::source_location::current()) const
 		{
-			auto result = build(dev.raw());
+			auto result = build(dev.raw(), location);
 			result.m_device_owner = dev;
 			return result;
 		}
 
 	private:
+		[[nodiscard]] std::string describe_failure(SDL_GPUDevice* device) const
+		{
+			std::ostringstream message;
+			const char* driver = SDL_GetGPUDeviceDriver(device);
+			message << "Failed to create GPU graphics pipeline"
+			        << "\n  pipeline: " << (m_debug_name.empty() ? "<unnamed>" : m_debug_name)
+			        << "\n  driver: " << (driver ? driver : "<unknown>")
+			        << "\n  vertex shader: "
+			        << (m_vertex_shader_name.empty() ? "<raw or unnamed shader>" : m_vertex_shader_name)
+			        << "\n  fragment shader: "
+			        << (m_fragment_shader_name.empty() ? "<raw or unnamed shader>" : m_fragment_shader_name)
+			        << "\n  primitive type: " << static_cast<unsigned int>(m_primitive_type)
+			        << "\n  cull/front/fill: " << static_cast<unsigned int>(m_cull_mode) << '/'
+			        << static_cast<unsigned int>(m_front_face) << '/' << static_cast<unsigned int>(m_fill_mode)
+			        << "\n  depth test/write/compare: " << m_enable_depth_test << '/' << m_enable_depth_write << '/'
+			        << static_cast<unsigned int>(m_depth_compare_op)
+			        << "\n  vertex buffers:";
+			if (m_layout.buffers().empty())
+			{
+				message << " <none>";
+			}
+			for (const auto& buffer : m_layout.buffers())
+			{
+				message << "\n    slot=" << buffer.slot << " stride=" << buffer.pitch
+				        << " rate=" << static_cast<unsigned int>(buffer.input_rate)
+				        << " step=" << buffer.instance_step_rate;
+			}
+
+			message << "\n  vertex attributes:";
+			if (m_layout.attributes().empty())
+			{
+				message << " <none>";
+			}
+			for (const auto& attribute : m_layout.attributes())
+			{
+				message << "\n    location=" << attribute.location << " buffer=" << attribute.buffer_slot
+				        << " format=" << static_cast<unsigned int>(attribute.format)
+				        << " offset=" << attribute.offset;
+			}
+
+			message << "\n  color targets:";
+			if (m_color_targets.empty())
+			{
+				message << " <none>";
+			}
+			for (std::size_t index = 0; index < m_color_targets.size(); ++index)
+			{
+				message << "\n    " << index << ": format="
+				        << static_cast<unsigned int>(m_color_targets[index].format)
+				        << " blend=" << m_color_targets[index].blend_state.enable_blend;
+			}
+			message << "\n  depth target format: " << static_cast<unsigned int>(m_depth_stencil_format)
+			        << " (enabled=" << m_has_depth_target << ')';
+			return message.str();
+		}
+
 		SDL_GPUShader* m_vert_shader = nullptr;
 		SDL_GPUShader* m_frag_shader = nullptr;
 		vertex_layout m_layout;
+		std::string m_debug_name;
+		std::string m_vertex_shader_name;
+		std::string m_fragment_shader_name;
 
 		primitive_type m_primitive_type = primitive_type::triangle_list;
 		cull_mode m_cull_mode = cull_mode::none;

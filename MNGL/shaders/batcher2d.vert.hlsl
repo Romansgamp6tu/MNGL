@@ -26,6 +26,16 @@ struct VertexOutput
 VertexOutput main(VertexInput input)
 {
     VertexOutput output;
+    if (isnan(input.effect_parameters.y))
+    {
+        output.position = float4(2.0f, 2.0f, 0.0f, 1.0f);
+        output.uv = input.uv_bounds.xy;
+        output.tint = input.tint;
+        output.local_uv = input.corner;
+        output.effect_parameters = input.effect_parameters;
+        return output;
+    }
+
     const float2 world_xy =
         input.transform_x * input.corner.x +
         input.transform_y * input.corner.y +

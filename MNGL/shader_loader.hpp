@@ -1,7 +1,8 @@
 #pragma once
 
 #include "graphics_shader.hpp"
-#include "utilities.hpp"
+#include "file_io.hpp"
+#include "runtime.hpp"
 
 #include <algorithm>
 #include <array>
@@ -14,11 +15,15 @@
 #include <format>
 #include <iterator>
 #include <regex>
+#include <sstream>
+#include <source_location>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
+
+#include <glm/glm.hpp>
 
 #if defined(_WIN32)
 #include <Windows.h>
@@ -67,7 +72,7 @@ namespace mngl::gpu
 		static graphics_shader_asset compile(const std::filesystem::path& source_path,
 		                                     const shader_compile_options& options = {})
 		{
-			if (!valid_graphics_shader_stage(options.stage))
+			if (!valid_graphics_shader_stage(options.stage)) [[unlikely]]
 			{
 				throw std::invalid_argument("shader_loader::compile accepts only vertex and fragment "
 				                            "shaders; use compile_compute for compute shaders");
@@ -83,7 +88,7 @@ namespace mngl::gpu
 			asset.resources = options.resources;
 			asset.debug_name = source_path.filename().string();
 			apply_uniform_reflection(asset, options, reflected_uniforms);
-			if (!asset.valid())
+			if (!asset.valid()) [[unlikely]]
 			{
 				throw std::runtime_error("Shader compilation produced an invalid graphics shader asset");
 			}
@@ -116,7 +121,7 @@ namespace mngl::gpu
 			{
 				options.reflect_uniforms = true;
 			}
-			if (options.source_language == shader_source_language::glsl && options.reflect_uniforms)
+			if (options.source_language == shader_source_language::glsl && options.reflect_uniforms) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "MNGL named uniform/resource reflection currently supports HLSL compute shaders only");
@@ -134,7 +139,7 @@ namespace mngl::gpu
 			asset.debug_name = source_path.filename().string();
 			asset.threadgroup_size = threadgroup_size;
 			apply_uniform_reflection(asset, options, reflected_uniforms);
-			if (!asset.valid())
+			if (!asset.valid()) [[unlikely]]
 			{
 				throw std::runtime_error("Shader compilation produced an invalid compute shader asset");
 			}
@@ -146,14 +151,14 @@ namespace mngl::gpu
 		                                         const shader_compile_options& options = {})
 		{
 			if (!valid_graphics_shader_stage(options.stage) || !valid_shader_format(options.format) ||
-			    !valid_entrypoint(options.entrypoint))
+			    !valid_entrypoint(options.entrypoint)) [[unlikely]]
 			{
 				throw std::invalid_argument("Cannot load shader bytecode with invalid shader options");
 			}
 			validate_source_file(bytecode_path);
 
 			auto bytes = read_binary_file(bytecode_path);
-			if (bytes.empty())
+			if (bytes.empty()) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    std::format("Shader bytecode is empty: '{}'", bytecode_path.string()));
@@ -162,7 +167,7 @@ namespace mngl::gpu
 			uniform_reflection reflected_uniforms{};
 			if (options.reflect_uniforms)
 			{
-				if (reflection_source.empty())
+				if (reflection_source.empty()) [[unlikely]]
 				{
 					throw std::invalid_argument(
 					    "Named-uniform reflection requires the matching HLSL source path");
@@ -184,7 +189,7 @@ namespace mngl::gpu
 		                                                const std::filesystem::path& reflection_source = {},
 		                                                const shader_compile_options& options = {})
 		{
-			if (!valid_shader_format(options.format) || !valid_entrypoint(options.entrypoint))
+			if (!valid_shader_format(options.format) || !valid_entrypoint(options.entrypoint)) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "Cannot load compute shader bytecode with invalid shader options");
@@ -192,7 +197,7 @@ namespace mngl::gpu
 			validate_source_file(bytecode_path);
 
 			auto bytes = read_binary_file(bytecode_path);
-			if (bytes.empty())
+			if (bytes.empty()) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    std::format("Shader bytecode is empty: '{}'", bytecode_path.string()));
@@ -201,14 +206,14 @@ namespace mngl::gpu
 			glm::uvec3 threadgroup_size = options.compute_threadgroup_size;
 			if (threadgroup_size.x == 0 && threadgroup_size.y == 0 && threadgroup_size.z == 0)
 			{
-				if (reflection_source.empty())
+				if (reflection_source.empty()) [[unlikely]]
 				{
 					throw std::invalid_argument("Loading compute bytecode requires compute_threadgroup_size "
 					                            "or the matching source file");
 				}
 				threadgroup_size = resolve_compute_threadgroup_size(reflection_source, options);
 			}
-			else if (threadgroup_size.x == 0 || threadgroup_size.y == 0 || threadgroup_size.z == 0)
+			else if (threadgroup_size.x == 0 || threadgroup_size.y == 0 || threadgroup_size.z == 0) [[unlikely]]
 			{
 				throw std::invalid_argument("Compute threadgroup dimensions must all be non-zero");
 			}
@@ -216,7 +221,7 @@ namespace mngl::gpu
 			uniform_reflection reflected_uniforms{};
 			if (options.reflect_uniforms)
 			{
-				if (reflection_source.empty())
+				if (reflection_source.empty()) [[unlikely]]
 				{
 					throw std::invalid_argument(
 					    "Named-uniform reflection requires the matching HLSL source path");
@@ -234,7 +239,7 @@ namespace mngl::gpu
 			asset.debug_name = bytecode_path.filename().string();
 			asset.threadgroup_size = threadgroup_size;
 			apply_uniform_reflection(asset, options, reflected_uniforms);
-			if (!asset.valid())
+			if (!asset.valid()) [[unlikely]]
 			{
 				throw std::runtime_error("Loaded bytecode produced an invalid compute shader asset");
 			}

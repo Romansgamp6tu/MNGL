@@ -30,7 +30,7 @@ auto frag = mngl::gpu::shader_loader::compile_fragment("waves.hlsl");
 
 mngl::sprite fullscreen(win.size(), frag);
 
-while (mngl::input::continue_work())
+while (mngl::input::next_frame())
 {
 	win.clear();
 	win.draw(fullscreen);

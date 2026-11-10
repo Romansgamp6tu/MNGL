@@ -5,8 +5,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
-#include <numbers>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -45,7 +45,7 @@ namespace mngl::two_d::detail
 
 	inline void validate_points(std::span<const glm::vec2> points, const char* message)
 	{
-		if (std::ranges::any_of(points, [](glm::vec2 point) { return !finite(point); }))
+		if (std::ranges::any_of(points, [](glm::vec2 point) { return !finite(point); })) [[unlikely]]
 		{
 			throw std::invalid_argument(message);
 		}
@@ -67,11 +67,10 @@ namespace mngl::two_d::detail
 	inline void append_polyline(triangle_vertices& output, std::span<const glm::vec2> source, float thickness,
 	                            bool closed, tessellation_scratch& scratch)
 	{
-		if (!std::isfinite(thickness) || thickness < 0.0f)
+		if (!std::isfinite(thickness) || thickness < 0.0f) [[unlikely]]
 		{
 			throw std::invalid_argument("Geometry line width must be finite and non-negative");
 		}
-		validate_points(source, "Geometry vertices must be finite");
 		if (thickness == 0.0f || source.size() < 2)
 		{
 			return;
@@ -156,9 +155,13 @@ namespace mngl::two_d::detail
 		}
 	}
 
-	inline void tessellate(const vertex_array& value, tessellation_scratch& scratch)
+	[[nodiscard]] inline std::span<const glm::vec2> tessellate(const vertex_array& value,
+	                                                           tessellation_scratch& scratch)
 	{
-		validate_points(value.vertices, "Geometry vertices must be finite");
+		if (value.primitive != primitive_type::triangles)
+		{
+			validate_points(value.vertices, "Geometry vertices must be finite");
+		}
 		auto& output = scratch.triangles;
 		output.clear();
 		const auto vertices = std::span<const glm::vec2>(value.vertices);
@@ -166,13 +169,13 @@ namespace mngl::two_d::detail
 		switch (value.primitive)
 		{
 		case primitive_type::points:
-			if (!std::isfinite(value.point_size) || value.point_size < 0.0f)
+			if (!std::isfinite(value.point_size) || value.point_size < 0.0f) [[unlikely]]
 			{
 				throw std::invalid_argument("Geometry point size must be finite and non-negative");
 			}
 			if (value.point_size == 0.0f)
 			{
-				return;
+				return output;
 			}
 			for (const auto point : vertices)
 			{
@@ -185,17 +188,17 @@ namespace mngl::two_d::detail
 			break;
 
 		case primitive_type::lines:
-			if (!std::isfinite(value.line_width) || value.line_width < 0.0f)
+			if (!std::isfinite(value.line_width) || value.line_width < 0.0f) [[unlikely]]
 			{
 				throw std::invalid_argument("Geometry line width must be finite and non-negative");
 			}
-			if (vertices.size() % 2 != 0)
+			if (vertices.size() % 2 != 0) [[unlikely]]
 			{
 				throw std::invalid_argument("A line-list vertex array requires an even number of vertices");
 			}
 			if (value.line_width == 0.0f)
 			{
-				return;
+				return output;
 			}
 			for (std::size_t vertex = 0; vertex < vertices.size(); vertex += 2)
 			{
@@ -208,18 +211,18 @@ namespace mngl::two_d::detail
 			break;
 
 		case primitive_type::triangles:
-			if (vertices.size() % 3 != 0)
+			if (vertices.size() % 3 != 0) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "A triangle-list vertex array requires a multiple of three vertices");
 			}
-			output.assign(vertices.begin(), vertices.end());
-			break;
+			// The batcher validates and transforms these directly into its staging buffer.
+			return vertices;
 
 		case primitive_type::triangle_strip:
 			if (vertices.size() < 3)
 			{
-				return;
+				return output;
 			}
 			output.reserve((vertices.size() - 2) * 3);
 			for (std::size_t vertex = 2; vertex < vertices.size(); ++vertex)
@@ -238,7 +241,7 @@ namespace mngl::two_d::detail
 		case primitive_type::triangle_fan:
 			if (vertices.size() < 3)
 			{
-				return;
+				return output;
 			}
 			output.reserve((vertices.size() - 2) * 3);
 			for (std::size_t vertex = 2; vertex < vertices.size(); ++vertex)
@@ -250,6 +253,7 @@ namespace mngl::two_d::detail
 		default:
 			throw std::invalid_argument("Unsupported 2D geometry primitive type");
 		}
+		return output;
 	}
 
 	inline void tessellate(const convex_polygon& value, tessellation_scratch& scratch)
@@ -258,7 +262,7 @@ namespace mngl::two_d::detail
 		output.clear();
 		const auto points = std::span<const glm::vec2>(value.points);
 		validate_points(points, "Polygon points must be finite");
-		if (!std::isfinite(value.outline_thickness) || value.outline_thickness < 0.0f)
+		if (!std::isfinite(value.outline_thickness) || value.outline_thickness < 0.0f) [[unlikely]]
 		{
 			throw std::invalid_argument("Polygon outline thickness must be finite and non-negative");
 		}
@@ -266,44 +270,84 @@ namespace mngl::two_d::detail
 		{
 			return;
 		}
-		if (points.size() < 3)
+		if (points.size() < 3) [[unlikely]]
 		{
 			throw std::invalid_argument("A convex polygon requires at least three points");
 		}
 
 		int winding = 0;
-		double turn_sum = 0.0;
+		std::int64_t revolutions = 0;
+		glm::dvec2 first_direction{};
+		glm::dvec2 previous_direction{};
+		bool has_direction = false;
+		auto angular_half = [](glm::dvec2 direction) noexcept
+		{
+			return direction.y > 0.0 || (direction.y == 0.0 && direction.x >= 0.0) ? 0 : 1;
+		};
+		// Consistent turn signs plus crossings of +X detect multi-winding contours without atan2.
+		auto validate_turn = [&](glm::dvec2 first, glm::dvec2 second)
+		{
+			const double cross = first.x * second.y - first.y * second.x;
+			const double dot = first.x * second.x + first.y * second.y;
+			const double relative_tolerance = std::numeric_limits<double>::epsilon() * 16.0;
+			const double cross_tolerance_squared =
+			    relative_tolerance * relative_tolerance *
+			    (first.x * first.x + first.y * first.y) * (second.x * second.x + second.y * second.y);
+			if (cross * cross <= cross_tolerance_squared)
+			{
+				if (dot < 0.0) [[unlikely]]
+				{
+					throw std::invalid_argument("Polygon points must describe a convex contour in order");
+				}
+			}
+			else
+			{
+				const int current_winding = cross > 0.0 ? 1 : -1;
+				if (winding != 0 && winding != current_winding) [[unlikely]]
+				{
+					throw std::invalid_argument("Polygon points must describe a convex contour in order");
+				}
+				winding = current_winding;
+			}
+
+			if (cross > 0.0 && angular_half(first) == 1 && angular_half(second) == 0)
+			{
+				++revolutions;
+			}
+			else if (cross < 0.0 && angular_half(first) == 0 && angular_half(second) == 1)
+			{
+				--revolutions;
+			}
+		};
 		for (std::size_t point = 0; point < points.size(); ++point)
 		{
-			const auto first_start = points[point];
-			const auto first_end = points[(point + 1) % points.size()];
-			const auto second_end = points[(point + 2) % points.size()];
-			const double first_x = static_cast<double>(first_end.x) - first_start.x;
-			const double first_y = static_cast<double>(first_end.y) - first_start.y;
-			const double second_x = static_cast<double>(second_end.x) - first_end.x;
-			const double second_y = static_cast<double>(second_end.y) - first_end.y;
-			const double cross = first_x * second_y - first_y * second_x;
-			const double dot = first_x * second_x + first_y * second_y;
-			const double cross_tolerance = std::numeric_limits<double>::epsilon() *
-			                               std::hypot(first_x, first_y) * std::hypot(second_x, second_y) *
-			                               16.0;
-			turn_sum += std::atan2(cross, dot);
-			if (std::abs(cross) <= cross_tolerance)
+			const auto start = points[point];
+			const auto end = points[(point + 1) % points.size()];
+			const glm::dvec2 direction{static_cast<double>(end.x) - start.x,
+			                           static_cast<double>(end.y) - start.y};
+			if (direction.x == 0.0 && direction.y == 0.0)
 			{
 				continue;
 			}
-			const int current_winding = cross > 0.0 ? 1 : -1;
-			if (winding != 0 && winding != current_winding)
+			if (!has_direction)
 			{
-				throw std::invalid_argument("Polygon points must describe a convex contour in order");
+				first_direction = direction;
+				previous_direction = direction;
+				has_direction = true;
+				continue;
 			}
-			winding = current_winding;
+			validate_turn(previous_direction, direction);
+			previous_direction = direction;
 		}
-		if (winding == 0)
+		if (has_direction)
+		{
+			validate_turn(previous_direction, first_direction);
+		}
+		if (winding == 0) [[unlikely]]
 		{
 			throw std::invalid_argument("A convex polygon must enclose a non-zero area");
 		}
-		if (std::abs(std::abs(turn_sum) - 2.0 * std::numbers::pi) > 1e-3)
+		if (revolutions != winding) [[unlikely]]
 		{
 			throw std::invalid_argument("Polygon points must describe a convex contour in order");
 		}

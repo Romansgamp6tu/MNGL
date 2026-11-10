@@ -39,7 +39,7 @@ namespace mngl::storage
 	{
 		inline std::string validate_relative_path(std::string_view path, bool allow_root = false)
 		{
-			if (path.find('\0') != std::string_view::npos)
+			if (path.find('\0') != std::string_view::npos) [[unlikely]]
 			{
 				throw std::invalid_argument("storage path cannot contain a null character");
 			}
@@ -54,7 +54,7 @@ namespace mngl::storage
 			if (path.front() == '/' || path.find('\\') != std::string_view::npos ||
 			    (path.size() >= 2 &&
 			     ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
-			     path[1] == ':'))
+			     path[1] == ':')) [[unlikely]]
 			{
 				throw std::invalid_argument("storage paths must be relative and use '/' separators");
 			}
@@ -80,7 +80,7 @@ namespace mngl::storage
 				const auto component_end = separator == std::string::npos ? normalized.size() : separator;
 				const auto component =
 				    std::string_view(normalized).substr(component_begin, component_end - component_begin);
-				if (component.empty() || component == "." || component == "..")
+				if (component.empty() || component == "." || component == "..") [[unlikely]]
 				{
 					throw std::invalid_argument("storage paths cannot contain empty, '.' or '..' components");
 				}
@@ -97,7 +97,7 @@ namespace mngl::storage
 		{
 			const auto encoded = path.u8string();
 			std::string result(reinterpret_cast<const char*>(encoded.data()), encoded.size());
-			if (result.find('\0') != std::string::npos)
+			if (result.find('\0') != std::string::npos) [[unlikely]]
 			{
 				throw std::invalid_argument("storage root cannot contain a null character");
 			}
@@ -180,7 +180,7 @@ namespace mngl::storage
 				return;
 			}
 			auto* storage = std::exchange(m_storage, nullptr);
-			if (!SDL_CloseStorage(storage))
+			if (!SDL_CloseStorage(storage)) [[unlikely]]
 			{
 				throw sdl_error("failed to close storage: ");
 			}
@@ -191,17 +191,17 @@ namespace mngl::storage
 			ensure_ready();
 			const auto path = detail::validate_relative_path(relative_path);
 			Uint64 length = 0;
-			if (!SDL_GetStorageFileSize(m_storage, path.c_str(), &length))
+			if (!SDL_GetStorageFileSize(m_storage, path.c_str(), &length)) [[unlikely]]
 			{
 				throw sdl_error("failed to get storage file size: ");
 			}
-			if (length > static_cast<Uint64>(std::numeric_limits<std::size_t>::max()))
+			if (length > static_cast<Uint64>(std::numeric_limits<std::size_t>::max())) [[unlikely]]
 			{
 				throw std::length_error("storage file is too large to fit in memory");
 			}
 
 			std::vector<std::byte> contents(static_cast<std::size_t>(length));
-			if (length > 0 && !SDL_ReadStorageFile(m_storage, path.c_str(), contents.data(), length))
+			if (length > 0 && !SDL_ReadStorageFile(m_storage, path.c_str(), contents.data(), length)) [[unlikely]]
 			{
 				throw sdl_error("failed to read storage file: ");
 			}
@@ -223,13 +223,13 @@ namespace mngl::storage
 		{
 			ensure_ready();
 			const auto path = detail::validate_relative_path(relative_path);
-			if (contents.size() > std::numeric_limits<Uint64>::max())
+			if (contents.size() > std::numeric_limits<Uint64>::max()) [[unlikely]]
 			{
 				throw std::length_error("storage file is too large for SDL");
 			}
 			const std::byte empty_file = {};
 			const void* source = contents.empty() ? &empty_file : contents.data();
-			if (!SDL_WriteStorageFile(m_storage, path.c_str(), source, static_cast<Uint64>(contents.size())))
+			if (!SDL_WriteStorageFile(m_storage, path.c_str(), source, static_cast<Uint64>(contents.size()))) [[unlikely]]
 			{
 				throw sdl_error("failed to write storage file: ");
 			}
@@ -254,7 +254,7 @@ namespace mngl::storage
 				SDL_PathInfo info{};
 				if (SDL_GetStoragePathInfo(m_storage, current_path.c_str(), &info))
 				{
-					if (info.type != SDL_PATHTYPE_DIRECTORY)
+					if (info.type != SDL_PATHTYPE_DIRECTORY) [[unlikely]]
 					{
 						throw std::runtime_error("storage path already exists and is not a directory: " +
 						                         current_path);
@@ -265,7 +265,7 @@ namespace mngl::storage
 					// A missing path is expected here; discard that query error so a
 					// later mkdir failure reports its own SDL error.
 					SDL_ClearError();
-					if (!SDL_CreateStorageDirectory(m_storage, current_path.c_str()))
+					if (!SDL_CreateStorageDirectory(m_storage, current_path.c_str())) [[unlikely]]
 					{
 						throw sdl_error("failed to create storage directory: ");
 					}
@@ -300,7 +300,7 @@ namespace mngl::storage
 			{
 				const auto full_path = directory.empty() ? name : directory + "/" + name;
 				SDL_PathInfo info{};
-				if (!SDL_GetStoragePathInfo(m_storage, full_path.c_str(), &info))
+				if (!SDL_GetStoragePathInfo(m_storage, full_path.c_str(), &info)) [[unlikely]]
 				{
 					throw sdl_error("failed to get storage entry information: ");
 				}
@@ -312,7 +312,7 @@ namespace mngl::storage
 	private:
 		explicit store(SDL_Storage* storage, std::string_view open_error) : m_storage(storage)
 		{
-			if (!m_storage)
+			if (!m_storage) [[unlikely]]
 			{
 				throw sdl_error(std::string(open_error));
 			}
@@ -320,11 +320,11 @@ namespace mngl::storage
 
 		void ensure_ready() const
 		{
-			if (!m_storage)
+			if (!m_storage) [[unlikely]]
 			{
 				throw std::logic_error("storage is closed");
 			}
-			if (!SDL_StorageReady(m_storage))
+			if (!SDL_StorageReady(m_storage)) [[unlikely]]
 			{
 				throw std::logic_error("storage is not ready; poll ready() before accessing files");
 			}
@@ -362,7 +362,7 @@ namespace mngl::storage
 
 		static SDL_Storage* open_override(const std::filesystem::path& root_override)
 		{
-			if (root_override.empty())
+			if (root_override.empty()) [[unlikely]]
 			{
 				throw std::invalid_argument("title storage root override cannot be empty");
 			}
@@ -384,7 +384,7 @@ namespace mngl::storage
 		static SDL_Storage* open_user(const std::string& organization, const std::string& application)
 		{
 			if (organization.empty() || application.empty() || organization.find('\0') != std::string::npos ||
-			    application.find('\0') != std::string::npos)
+			    application.find('\0') != std::string::npos) [[unlikely]]
 			{
 				throw std::invalid_argument("user storage organization and application names must be "
 				                            "non-empty and contain no null characters");
@@ -404,7 +404,7 @@ namespace mngl::storage
 	private:
 		static SDL_Storage* open_file(const std::filesystem::path& root)
 		{
-			if (root.empty())
+			if (root.empty()) [[unlikely]]
 			{
 				throw std::invalid_argument("file storage root cannot be empty");
 			}

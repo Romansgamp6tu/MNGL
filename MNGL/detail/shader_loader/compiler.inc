@@ -58,17 +58,49 @@
 
 		static void run_compiler(const std::filesystem::path& executable,
 		                         const std::vector<std::filesystem::path>& args, std::string_view tool_name,
-		                         const std::filesystem::path& source_path)
+		                         const std::filesystem::path& source_path,
+		                         std::source_location location = std::source_location::current())
 		{
 			const auto result = run_process(executable, args);
-			if (result.exit_code != 0)
+			if (result.exit_code != 0) [[unlikely]]
 			{
-				throw std::runtime_error(std::format("{} failed for '{}' (exit code {}):\n"
-				                                     "----------------------------------------\n"
-				                                     "{}\n"
-				                                     "----------------------------------------",
-				                                     tool_name, source_path.string(), result.exit_code,
-				                                     result.output.empty() ? "<no output>" : result.output));
+				std::ostringstream command;
+				command << executable.string();
+				for (const auto& argument : args)
+				{
+					command << "\n    " << argument.string();
+				}
+
+				std::string exit_hint;
+#if defined(_WIN32)
+				switch (static_cast<std::uint32_t>(result.exit_code))
+				{
+				case 0xC0000135u:
+					exit_hint = "Windows loader: STATUS_DLL_NOT_FOUND; a DLL required by the compiler is missing "
+					            "or its directory is absent from PATH.";
+					break;
+				case 0xC000007Bu:
+					exit_hint = "Windows loader: STATUS_INVALID_IMAGE_FORMAT; check the compiler and DLL bitness.";
+					break;
+				case 0xC0000139u:
+					exit_hint = "Windows loader: STATUS_ENTRYPOINT_NOT_FOUND; the compiler and its DLL versions "
+					            "may not match.";
+					break;
+				default:
+					break;
+				}
+#endif
+
+				const std::string output = !exit_hint.empty()
+				                              ? exit_hint + (result.output.empty() ? "" : "\n" + result.output)
+				                              : (result.output.empty() ? "<no output>" : result.output);
+				const auto message = std::format(
+				    "{} failed for '{}' (exit code {}, status 0x{:08X})\n"
+				    "  command:\n    {}\n"
+				    "  output:\n{}",
+				    tool_name, source_path.string(), result.exit_code,
+				    static_cast<std::uint32_t>(result.exit_code), command.str(), output);
+				throw std::runtime_error(::mngl::detail::attach_error_trace(message, location));
 			}
 		}
 
@@ -77,7 +109,7 @@
 		                                                    const std::filesystem::path& source_path)
 		{
 			auto bytes = read_binary_file(path);
-			if (bytes.empty())
+			if (bytes.empty()) [[unlikely]]
 			{
 				throw std::runtime_error(
 				    std::format("{} produced an empty shader for '{}'", tool_name, source_path.string()));
@@ -91,12 +123,12 @@
 		{
 			const auto output_format = output_format_for(options.format);
 			const auto stage_name = stage_name_for(stage);
-			if (!valid_entrypoint(options.entrypoint))
+			if (!valid_entrypoint(options.entrypoint)) [[unlikely]]
 			{
 				throw std::invalid_argument("Shader entrypoint must be a valid identifier");
 			}
 			if (options.source_language != shader_source_language::hlsl &&
-			    options.source_language != shader_source_language::glsl)
+			    options.source_language != shader_source_language::glsl) [[unlikely]]
 			{
 				throw std::invalid_argument("Unsupported shader source language");
 			}

@@ -8,7 +8,7 @@
 
 Рисуемые объекты реализуют `mngl::drawable`, поэтому для окна, текстуры и `frame_2d` используется одна перегрузка `draw(const drawable&)`. `mngl::rectangle` описывает только геометрию; для заливки используйте drawable `mngl::two_d::rectangle_shape`.
 
-Для пользовательской геометрии доступны `vertex_array`, `convex_polygon` и контуры. Описание примитивов и правила их заполнения находятся в разделе [Произвольная геометрия](geometry.md).
+Для пользовательской геометрии доступны `vertex_array`, `prepared_vertex_array`, постоянный GPU-ресурс `mesh`, `convex_polygon` и контуры. Для редко меняющихся сцен доступен `cached_layer`, который выводит заранее отрисованную текстуру. Описание геометрии находится в разделе [Произвольная геометрия](geometry.md), кэша слоёв — в [Кэшированных слоях](cached-layers.md).
 
 ```cpp
 auto frame = window.frame();
@@ -72,7 +72,10 @@ frame.display();
 - [Рендер в текстуру](render-to-texture.md)
 - [Координаты и view](coordinates-and-view.md)
 - [Произвольная геометрия](geometry.md)
+- [Кэшированные слои](cached-layers.md)
+- [Профилирование и benchmark](benchmarking.md)
 - [Трансформации](transforms.md)
 - [Попадания и локальные координаты мыши](hit-testing.md)
 - [Рендер текста и большие документы](text-rendering.md)
 - [Параллельная запись кадра](parallel-recording.md)
+- [Расширенный рендеринг](advanced-rendering.md)

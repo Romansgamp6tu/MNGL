@@ -2,7 +2,10 @@
 
 #include <cstdint>
 
-#include "utilities.hpp"
+#include "runtime.hpp"
+
+#include <glm/glm.hpp>
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -192,7 +195,7 @@ namespace mngl
 
 	public:
 		// Initialized from this joystick's SDL handle, then updated from events
-		// for this joystick ID during each continue_work() frame.
+		// for this joystick ID during each next_frame() frame.
 		[[nodiscard]] SDL_JoystickID id() const noexcept { return m_id; }
 		[[nodiscard]] std::string name() const;
 		[[nodiscard]] bool connected() const;
@@ -234,7 +237,7 @@ namespace mngl
 
 	public:
 		// Initialized from this gamepad's SDL handle, then updated from events
-		// for this gamepad ID during each continue_work() frame.
+		// for this gamepad ID during each next_frame() frame.
 		[[nodiscard]] SDL_JoystickID id() const noexcept { return m_id; }
 		[[nodiscard]] std::string name() const;
 		[[nodiscard]] std::string path() const;

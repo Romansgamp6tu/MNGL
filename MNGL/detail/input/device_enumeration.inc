@@ -2,7 +2,7 @@
 		{
 			int count = 0;
 			auto* raw_ids = SDL_GetKeyboards(&count);
-			if (!raw_ids)
+			if (!raw_ids) [[unlikely]]
 				throw sdl_error("failed to enumerate keyboards: ");
 
 			std::unique_ptr<SDL_KeyboardID, decltype(&SDL_free)> ids(raw_ids, &SDL_free);
@@ -20,7 +20,7 @@
 		{
 			int count = 0;
 			auto* raw_ids = SDL_GetMice(&count);
-			if (!raw_ids)
+			if (!raw_ids) [[unlikely]]
 				throw sdl_error("failed to enumerate mice: ");
 
 			std::unique_ptr<SDL_MouseID, decltype(&SDL_free)> ids(raw_ids, &SDL_free);
@@ -38,7 +38,7 @@
 		{
 			int count = 0;
 			auto* raw_ids = SDL_GetTouchDevices(&count);
-			if (!raw_ids)
+			if (!raw_ids) [[unlikely]]
 				throw sdl_error("failed to enumerate touch devices: ");
 
 			std::unique_ptr<SDL_TouchID, decltype(&SDL_free)> ids(raw_ids, &SDL_free);
@@ -56,7 +56,7 @@
 		{
 			int count = 0;
 			auto* raw_ids = SDL_GetJoysticks(&count);
-			if (!raw_ids)
+			if (!raw_ids) [[unlikely]]
 				throw sdl_error("failed to enumerate joysticks: ");
 
 			std::unique_ptr<SDL_JoystickID, decltype(&SDL_free)> ids(raw_ids, &SDL_free);
@@ -79,14 +79,14 @@
 
 			std::unique_ptr<SDL_Joystick, decltype(&SDL_CloseJoystick)> handle(SDL_OpenJoystick(id),
 			                                                                   &SDL_CloseJoystick);
-			if (!handle)
+			if (!handle) [[unlikely]]
 				throw sdl_error("failed to open joystick: ");
 
 			const int button_count = SDL_GetNumJoystickButtons(handle.get());
 			const int axis_count = SDL_GetNumJoystickAxes(handle.get());
 			const int hat_count = SDL_GetNumJoystickHats(handle.get());
 			const int ball_count = SDL_GetNumJoystickBalls(handle.get());
-			if (button_count < 0 || axis_count < 0 || hat_count < 0 || ball_count < 0)
+			if (button_count < 0 || axis_count < 0 || hat_count < 0 || ball_count < 0) [[unlikely]]
 				throw sdl_error("failed to query joystick controls: ");
 
 			const char* name = SDL_GetJoystickName(handle.get());
@@ -111,7 +111,7 @@
 		{
 			int count = 0;
 			auto* raw_ids = SDL_GetGamepads(&count);
-			if (!raw_ids)
+			if (!raw_ids) [[unlikely]]
 				throw sdl_error("failed to enumerate gamepads: ");
 
 			std::unique_ptr<SDL_JoystickID, decltype(&SDL_free)> ids(raw_ids, &SDL_free);
@@ -132,7 +132,7 @@
 
 			std::unique_ptr<SDL_Gamepad, decltype(&SDL_CloseGamepad)> handle(SDL_OpenGamepad(id),
 			                                                                 &SDL_CloseGamepad);
-			if (!handle)
+			if (!handle) [[unlikely]]
 				throw sdl_error("failed to open gamepad: ");
 
 			for (std::size_t i = 0; i < state.buttons.size(); ++i)

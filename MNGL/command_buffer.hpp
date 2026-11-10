@@ -1,15 +1,26 @@
 #pragma once
-#include "utilities.hpp"
+#include "runtime.hpp"
 #include "device.hpp"
 #include "gpu_texture.hpp"
 
-#include <stdexcept>
+#include <glm/glm.hpp>
+
+#include <memory>
 #include <optional>
+#include <stdexcept>
 #include <thread>
 #include <utility>
+#include <vector>
+
+namespace mngl::two_d
+{
+	class mesh;
+}
 
 namespace mngl::gpu
 {
+	class batcher2d;
+
 	class command_buffer
 	{
 	public:
@@ -41,7 +52,8 @@ namespace mngl::gpu
 		// Command buffer may only be moved on the thread that acquired it.
 		command_buffer(command_buffer&& o)
 		    : owner_thread(require_owner_thread(o)), m_device_owner(std::move(o.m_device_owner)),
-		      handle(std::exchange(o.handle, nullptr)), dev(std::exchange(o.dev, nullptr))
+		      handle(std::exchange(o.handle, nullptr)), dev(std::exchange(o.dev, nullptr)),
+		      m_retained_resources(std::move(o.m_retained_resources))
 		{
 			o.m_device_owner.reset();
 		}
@@ -57,6 +69,7 @@ namespace mngl::gpu
 				o.m_device_owner.reset();
 				handle = std::exchange(o.handle, nullptr);
 				dev = std::exchange(o.dev, nullptr);
+				m_retained_resources = std::move(o.m_retained_resources);
 			}
 			return *this;
 		}
@@ -95,6 +108,7 @@ namespace mngl::gpu
 				dev = nullptr;
 				::mngl::check_sdl(SDL_SubmitGPUCommandBuffer(pending));
 				m_device_owner.reset();
+				m_retained_resources.clear();
 			}
 		}
 
@@ -107,26 +121,27 @@ namespace mngl::gpu
 				dev = nullptr;
 				::mngl::check_sdl(SDL_CancelGPUCommandBuffer(pending));
 				m_device_owner.reset();
+				m_retained_resources.clear();
 			}
 		}
 
 		texture acquire_swapchain_texture(window& win)
 		{
 			ensure_owner_thread();
-			if (!SDL_IsMainThread())
+			if (!SDL_IsMainThread()) [[unlikely]]
 			{
 				throw std::logic_error(
 				    "Swapchain textures must be acquired on the thread that created the window");
 			}
-			if (!handle)
+			if (!handle) [[unlikely]]
 			{
 				throw std::logic_error("Cannot acquire a swapchain texture without a valid command buffer");
 			}
-			if (!dev)
+			if (!dev) [[unlikely]]
 			{
 				throw std::logic_error("Cannot acquire a swapchain texture without its GPU device");
 			}
-			if (!m_device_owner)
+			if (!m_device_owner) [[unlikely]]
 			{
 				throw std::logic_error(
 				    "Cannot create an owned swapchain texture from a borrowed command buffer");
@@ -135,12 +150,29 @@ namespace mngl::gpu
 			SDL_GPUTexture* tex_handle = nullptr;
 			glm::uvec2 size = {0, 0};
 			::mngl::check_sdl(
-			    SDL_AcquireGPUSwapchainTexture(handle, win.raw(), &tex_handle, &size.x, &size.y));
+			    SDL_WaitAndAcquireGPUSwapchainTexture(handle, win.raw(), &tex_handle, &size.x, &size.y));
 			auto fmt = static_cast<texture_format>(SDL_GetGPUSwapchainTextureFormat(dev, win.raw()));
 			return texture(*m_device_owner, tex_handle, fmt, size);
 		}
 
 	private:
+		friend class batcher2d;
+		friend class ::mngl::two_d::mesh;
+
+		template <typename T>
+		void retain_resource(std::shared_ptr<T> resource)
+		{
+			ensure_owner_thread();
+			if (!handle) [[unlikely]]
+			{
+				throw std::logic_error("Cannot retain a GPU resource on an inactive command buffer");
+			}
+			if (resource)
+			{
+				m_retained_resources.emplace_back(std::move(resource));
+			}
+		}
+
 		static std::thread::id require_owner_thread(const command_buffer& cmd)
 		{
 			cmd.ensure_owner_thread();
@@ -154,7 +186,7 @@ namespace mngl::gpu
 
 		void ensure_owner_thread() const
 		{
-			if (!on_owner_thread())
+			if (!on_owner_thread()) [[unlikely]]
 			{
 				throw std::logic_error("GPU command buffer may only be used on the thread that acquired it");
 			}
@@ -188,5 +220,6 @@ namespace mngl::gpu
 		std::optional<device> m_device_owner;
 		SDL_GPUCommandBuffer* handle = nullptr;
 		SDL_GPUDevice* dev = nullptr;
+		std::vector<std::shared_ptr<void>> m_retained_resources;
 	};
 } // namespace mngl::gpu

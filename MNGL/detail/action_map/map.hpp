@@ -18,7 +18,7 @@
 
 namespace mngl
 {
-	// Mouse motion and wheel axes are sampled once per input::continue_work() frame.
+	// Mouse motion and wheel axes are sampled once per input::next_frame() frame.
 	enum class mouse_axis : std::uint8_t
 	{
 		delta_x,
@@ -132,22 +132,22 @@ namespace mngl
 
 		static void validate_action_name(std::string_view name)
 		{
-			if (name.empty())
+			if (name.empty()) [[unlikely]]
 				throw std::invalid_argument("action name cannot be empty");
 		}
 
 		static void validate_scale(float scale)
 		{
-			if (!std::isfinite(scale) || scale == 0.0f)
+			if (!std::isfinite(scale) || scale == 0.0f) [[unlikely]]
 				throw std::invalid_argument("action binding scale must be finite and non-zero");
 		}
 
 		static void validate_axis_parameters(float scale, float dead_zone, float threshold)
 		{
 			validate_scale(scale);
-			if (!std::isfinite(dead_zone) || dead_zone < 0.0f || dead_zone >= 1.0f)
+			if (!std::isfinite(dead_zone) || dead_zone < 0.0f || dead_zone >= 1.0f) [[unlikely]]
 				throw std::invalid_argument("axis dead zone must be in [0, 1)");
-			if (!std::isfinite(threshold) || threshold <= 0.0f || threshold > 1.0f)
+			if (!std::isfinite(threshold) || threshold <= 0.0f || threshold > 1.0f) [[unlikely]]
 				throw std::invalid_argument("axis action threshold must be in (0, 1]");
 		}
 
@@ -166,7 +166,7 @@ namespace mngl
 		{
 			validate_scale(scale);
 			[[maybe_unused]] std::size_t index{};
-			if (!input::key_index(code, index))
+			if (!input::key_index(code, index)) [[unlikely]]
 				throw std::invalid_argument("invalid keyboard scancode");
 			append(action, key_binding{code, keyboard, scale});
 		}
@@ -176,7 +176,7 @@ namespace mngl
 		{
 			validate_scale(scale);
 			[[maybe_unused]] std::size_t index{};
-			if (!input::mouse_button_index(button, index))
+			if (!input::mouse_button_index(button, index)) [[unlikely]]
 				throw std::invalid_argument("invalid mouse button");
 			append(action, mouse_button_binding{button, mouse, scale});
 		}
@@ -186,7 +186,7 @@ namespace mngl
 		                     std::optional<SDL_MouseID> mouse = std::nullopt)
 		{
 			validate_axis_parameters(scale, dead_zone, threshold);
-			if (static_cast<std::uint8_t>(axis) > static_cast<std::uint8_t>(mouse_axis::scroll_y))
+			if (static_cast<std::uint8_t>(axis) > static_cast<std::uint8_t>(mouse_axis::scroll_y)) [[unlikely]]
 				throw std::invalid_argument("invalid mouse axis");
 			append(action, mouse_axis_binding{axis, mouse, scale, dead_zone, threshold});
 		}
@@ -203,7 +203,7 @@ namespace mngl
 		{
 			validate_scale(scale);
 			[[maybe_unused]] std::size_t index{};
-			if (!input::gamepad_button_index(button, index))
+			if (!input::gamepad_button_index(button, index)) [[unlikely]]
 				throw std::invalid_argument("invalid gamepad button");
 			append(action, gamepad_button_binding{button, gamepad, scale});
 		}
@@ -227,7 +227,7 @@ namespace mngl
 		{
 			validate_scale(scale);
 			const auto index = static_cast<std::size_t>(button);
-			if (index < 1 || index > 5)
+			if (index < 1 || index > 5) [[unlikely]]
 				throw std::invalid_argument("pen button must be button1 through button5");
 			append(action, pen_button_binding{index, pen_device, scale});
 		}
@@ -246,7 +246,7 @@ namespace mngl
 		{
 			validate_axis_parameters(scale, dead_zone, threshold);
 			[[maybe_unused]] std::size_t index{};
-			if (!input::gamepad_axis_index(axis, index))
+			if (!input::gamepad_axis_index(axis, index)) [[unlikely]]
 				throw std::invalid_argument("invalid gamepad axis");
 			append(action, gamepad_axis_binding{axis, gamepad, scale, dead_zone, threshold});
 		}
@@ -265,7 +265,7 @@ namespace mngl
 		{
 			validate_axis_parameters(scale, dead_zone, threshold);
 			[[maybe_unused]] std::size_t index{};
-			if (!input::pen_axis_index(axis, index))
+			if (!input::pen_axis_index(axis, index)) [[unlikely]]
 				throw std::invalid_argument("invalid pen axis");
 			append(action, pen_axis_binding{axis, pen_device, scale, dead_zone, threshold});
 		}

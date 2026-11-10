@@ -77,9 +77,9 @@ namespace mngl
 		}
 		color(std::string hex) // #RRGGBBAA or #RRGGBB
 		{
-			if (hex.size() != 7 && hex.size() != 9)
+			if (hex.size() != 7 && hex.size() != 9) [[unlikely]]
 				throw std::invalid_argument("hex color must be in format #RRGGBBAA or #RRGGBB");
-			if (hex[0] != '#')
+			if (hex[0] != '#') [[unlikely]]
 				throw std::invalid_argument("hex color must start with #");
 			std::uint32_t rgba = std::stoul(hex.substr(1), nullptr, 16);
 			if (hex.size() == 7)

@@ -1,13 +1,15 @@
 #pragma once
 
 #include <cstdint>
-#include "utilities.hpp"
+#include "runtime.hpp"
+#include "logger.hpp"
 #include "pixel_format.hpp"
 #include "rectangle.hpp"
 #include "surface.hpp"
 #include "event.hpp"
 
 #include <cmath>
+#include <format>
 #include <unordered_map>
 #include <vector>
 #include <shared_mutex>
@@ -15,6 +17,8 @@
 #include <string>
 #include <string_view>
 #include <memory>
+
+#include <glm/glm.hpp>
 
 namespace mngl
 {
@@ -53,7 +57,7 @@ namespace mngl
 		{
 			std::shared_lock lg(mut);
 			auto prnt = SDL_GetWindowParent(win);
-			if (!prnt)
+			if (!prnt) [[unlikely]]
 				throw sdl_error("window does not have a parent!");
 			return *elements.at(SDL_GetWindowID(prnt));
 		}
@@ -63,7 +67,7 @@ namespace mngl
 			std::shared_lock lg(mut);
 			auto win = SDL_GetWindowFromID(id);
 			auto prnt = SDL_GetWindowParent(win);
-			if (!prnt)
+			if (!prnt) [[unlikely]]
 				throw sdl_error("window does not have a parent!");
 			return *elements.at(SDL_GetWindowID(prnt));
 		}
@@ -117,7 +121,7 @@ namespace mngl
 			int cnt = 0;
 			std::unique_ptr<SDL_DisplayID[], decltype(&SDL_free)> guard(SDL_GetDisplays(&cnt), &SDL_free);
 			auto* d = guard.get();
-			if (d == nullptr)
+			if (d == nullptr) [[unlikely]]
 				throw sdl_error("error getting displays: ");
 			std::vector<display> res;
 			res.reserve(cnt);
@@ -132,7 +136,7 @@ namespace mngl
 		{
 			std::lock_guard lg(mut);
 			auto d = SDL_GetPrimaryDisplay();
-			if (d == 0)
+			if (d == 0) [[unlikely]]
 				throw sdl_error("failed to get primary display: ");
 			return d;
 		}
@@ -140,7 +144,7 @@ namespace mngl
 		[[nodiscard]] std::string_view name() const
 		{
 			auto* n = SDL_GetDisplayName(disp);
-			if (!n)
+			if (!n) [[unlikely]]
 				throw sdl_error("failed to get display name: ");
 			return n;
 		}
@@ -148,7 +152,7 @@ namespace mngl
 		[[nodiscard]] mngl::rectangle bounds() const
 		{
 			mngl::rectangle rect;
-			if (!SDL_GetDisplayBounds(disp, mngl::rectangle_proxy(rect, mngl::proxy_mode::output)))
+			if (!SDL_GetDisplayBounds(disp, mngl::rectangle_proxy(rect, mngl::proxy_mode::output))) [[unlikely]]
 				throw sdl_error("failed to get display bounds: ");
 			return rect;
 		}
@@ -156,7 +160,7 @@ namespace mngl
 		[[nodiscard]] mngl::rectangle usable_bounds() const
 		{
 			mngl::rectangle rect;
-			if (!SDL_GetDisplayUsableBounds(disp, mngl::rectangle_proxy(rect, mngl::proxy_mode::output)))
+			if (!SDL_GetDisplayUsableBounds(disp, mngl::rectangle_proxy(rect, mngl::proxy_mode::output))) [[unlikely]]
 				throw sdl_error("failed to get display bounds: ");
 			return rect;
 		}
@@ -164,7 +168,7 @@ namespace mngl
 		[[nodiscard]] float scale() const
 		{
 			float s = SDL_GetDisplayContentScale(disp);
-			if (s == 0.0f)
+			if (s == 0.0f) [[unlikely]]
 				throw sdl_error("failed to get content scale of display: ");
 			return s;
 		}
@@ -174,7 +178,7 @@ namespace mngl
 			mngl::display_orientation orient =
 			    static_cast<mngl::display_orientation>(SDL_GetNaturalDisplayOrientation(disp));
 #ifdef MNGL_DISPLAYORIENTATION_UNKNOWS_IS_ERROR
-			if (orient == mngl::display_orientation::unknown)
+			if (orient == mngl::display_orientation::unknown) [[unlikely]]
 				throw std::runtime_error("display orientation is unavailable!");
 #endif
 			return orient;
@@ -189,8 +193,8 @@ namespace mngl
 			std::lock_guard lg(mut);
 			SDL_Point point{pnt.x, pnt.y}; // Безопасное создание структуры вместо reinterpret_cast
 			auto d = SDL_GetDisplayForPoint(&point);
-			if (!d)
-				throw sdl_error("failed to find such display for point " + to_string(pnt) + ": ");
+			if (!d) [[unlikely]]
+				throw sdl_error(std::format("failed to find such display for point ({}, {}): ", pnt.x, pnt.y));
 			return d;
 		}
 
@@ -198,9 +202,10 @@ namespace mngl
 		{
 			std::lock_guard lg(mut);
 			auto d = SDL_GetDisplayForRect(mngl::rectangle_proxy(rect, mngl::proxy_mode::input));
-			if (!d)
-				throw sdl_error("failed to find such display for rectangle at position " +
-				                to_string(rect.pos) + " and size " + to_string(rect.size) + ": ");
+			if (!d) [[unlikely]]
+				throw sdl_error(std::format("failed to find such display for rectangle at position ({}, {}) "
+				                            "and size ({}, {}): ",
+				                            rect.pos.x, rect.pos.y, rect.size.x, rect.size.y));
 			return d;
 		}
 
@@ -252,7 +257,7 @@ namespace mngl
 	inline mngl::display_mode display::current_mode() const
 	{
 		const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(disp);
-		if (!mode)
+		if (!mode) [[unlikely]]
 			throw sdl_error("failed to get display mode: ");
 		return *mode;
 	}
@@ -269,7 +274,7 @@ namespace mngl
 		std::unique_ptr<SDL_DisplayMode*, decltype(deleter)> modes(raw, deleter);
 		std::vector<mngl::display_mode> view;
 		view.reserve(cnt);
-		if (!modes && cnt > 0)
+		if (!modes && cnt > 0) [[unlikely]]
 			throw sdl_error("error getting fullscreen modes: ");
 		for (auto i = modes.get(); i < modes.get() + cnt; i++)
 		{
@@ -282,7 +287,7 @@ namespace mngl
 	inline mngl::display_mode display::closest_mode(glm::ivec2 size, float fps, bool include_hdpi) const
 	{
 		SDL_DisplayMode out;
-		if (!SDL_GetClosestFullscreenDisplayMode(disp, size.x, size.y, fps, include_hdpi, &out))
+		if (!SDL_GetClosestFullscreenDisplayMode(disp, size.x, size.y, fps, include_hdpi, &out)) [[unlikely]]
 			throw sdl_error("error finding closest display mode: ");
 		return out;
 	}
@@ -408,7 +413,7 @@ namespace mngl
 		window(const std::string& name, glm::uvec2 size, flags f)
 		{
 			win = SDL_CreateWindow(name.data(), size.x, size.y, f);
-			if (!win)
+			if (!win) [[unlikely]]
 				throw sdl_error("failed to create window: ");
 			::mngl::log.debug("created window with parameters: title = ", name, "; size = {", size.x, ",",
 			                  size.y, "}; flags = ", SDL_WindowFlags(f));
@@ -477,7 +482,7 @@ namespace mngl
 		[[nodiscard]] std::string title() const
 		{
 			auto* title = SDL_GetWindowTitle(win);
-			if (!title)
+			if (!title) [[unlikely]]
 				throw sdl_error("failed to get window title: ");
 			return title;
 		}
@@ -485,7 +490,7 @@ namespace mngl
 		void title(const std::string& new_title)
 		{
 			// SDL reports failure as false.
-			if (!SDL_SetWindowTitle(win, new_title.data()))
+			if (!SDL_SetWindowTitle(win, new_title.data())) [[unlikely]]
 				throw sdl_error("failed to set window title: ");
 			::mngl::log.debug("changed window ", win, " title to ", new_title);
 		}
@@ -494,14 +499,14 @@ namespace mngl
 		[[nodiscard]] glm::uvec2 size() const
 		{
 			int w, h;
-			if (!SDL_GetWindowSize(win, &w, &h))
+			if (!SDL_GetWindowSize(win, &w, &h)) [[unlikely]]
 				throw sdl_error("failed to get window size: ");
 			return {static_cast<unsigned int>(w), static_cast<unsigned int>(h)};
 		}
 
 		void size(glm::uvec2 new_size)
 		{
-			if (!SDL_SetWindowSize(win, new_size.x, new_size.y))
+			if (!SDL_SetWindowSize(win, new_size.x, new_size.y)) [[unlikely]]
 				throw sdl_error("failed to set window size: ");
 			::mngl::log.debug("changed window ", win, " size to {", new_size.x, ",", new_size.y, "}");
 		}
@@ -510,14 +515,14 @@ namespace mngl
 		[[nodiscard]] glm::ivec2 position() const
 		{
 			int x, y;
-			if (!SDL_GetWindowPosition(win, &x, &y))
+			if (!SDL_GetWindowPosition(win, &x, &y)) [[unlikely]]
 				throw sdl_error("failed to get window position: ");
 			return {x, y};
 		}
 
 		void position(glm::ivec2 new_pos)
 		{
-			if (!SDL_SetWindowPosition(win, new_pos.x, new_pos.y))
+			if (!SDL_SetWindowPosition(win, new_pos.x, new_pos.y)) [[unlikely]]
 				throw sdl_error("failed to set window position: ");
 			::mngl::log.debug("changed window ", win, " position to {", new_pos.x, ",", new_pos.y, "}");
 		}
@@ -532,14 +537,14 @@ namespace mngl
 		[[nodiscard]] glm::uvec2 min_size() const
 		{
 			int w, h;
-			if (!SDL_GetWindowMinimumSize(win, &w, &h))
+			if (!SDL_GetWindowMinimumSize(win, &w, &h)) [[unlikely]]
 				throw sdl_error("failed to get window minimum size: ");
 			return {static_cast<unsigned int>(w), static_cast<unsigned int>(h)};
 		}
 
 		void min_size(glm::uvec2 new_min_size)
 		{
-			if (!SDL_SetWindowMinimumSize(win, new_min_size.x, new_min_size.y))
+			if (!SDL_SetWindowMinimumSize(win, new_min_size.x, new_min_size.y)) [[unlikely]]
 				throw sdl_error("failed to set window minimum size: ");
 			::mngl::log.debug("changed window ", win, " minimum size to {", new_min_size.x, ",",
 			                  new_min_size.y, "}");
@@ -548,14 +553,14 @@ namespace mngl
 		[[nodiscard]] glm::uvec2 max_size() const
 		{
 			int w, h;
-			if (!SDL_GetWindowMaximumSize(win, &w, &h))
+			if (!SDL_GetWindowMaximumSize(win, &w, &h)) [[unlikely]]
 				throw sdl_error("failed to get window maximum size: ");
 			return {static_cast<unsigned int>(w), static_cast<unsigned int>(h)};
 		}
 
 		void max_size(glm::uvec2 new_max_size)
 		{
-			if (!SDL_SetWindowMaximumSize(win, new_max_size.x, new_max_size.y))
+			if (!SDL_SetWindowMaximumSize(win, new_max_size.x, new_max_size.y)) [[unlikely]]
 				throw sdl_error("failed to set window maximum size: ");
 			::mngl::log.debug("changed window ", win, " maximum size to {", new_max_size.x, ",",
 			                  new_max_size.y, "}");
@@ -572,7 +577,7 @@ namespace mngl
 		[[nodiscard]] window_borders borders() const
 		{
 			window_borders res;
-			if (!SDL_GetWindowBordersSize(win, &res.top, &res.left, &res.bottom, &res.right))
+			if (!SDL_GetWindowBordersSize(win, &res.top, &res.left, &res.bottom, &res.right)) [[unlikely]]
 				throw sdl_error("failed to get window borders size: ");
 			return res;
 		}
@@ -582,42 +587,42 @@ namespace mngl
 
 		void show()
 		{
-			if (!SDL_ShowWindow(win))
+			if (!SDL_ShowWindow(win)) [[unlikely]]
 				throw sdl_error("failed to show window: ");
 			::mngl::log.debug("shown window ", win);
 		}
 
 		void hide()
 		{
-			if (!SDL_HideWindow(win))
+			if (!SDL_HideWindow(win)) [[unlikely]]
 				throw sdl_error("failed to hide windows: ");
 			::mngl::log.debug("hidden window ", win);
 		}
 
 		void raise()
 		{
-			if (!SDL_RaiseWindow(win))
+			if (!SDL_RaiseWindow(win)) [[unlikely]]
 				throw sdl_error("failed to raise window: ");
 			::mngl::log.debug("raised window ", win);
 		}
 
 		void maximize()
 		{
-			if (!SDL_MaximizeWindow(win))
+			if (!SDL_MaximizeWindow(win)) [[unlikely]]
 				throw sdl_error("failed to maximize window: ");
 			::mngl::log.debug("maximized window ", win);
 		}
 
 		void minimize()
 		{
-			if (!SDL_MinimizeWindow(win))
+			if (!SDL_MinimizeWindow(win)) [[unlikely]]
 				throw sdl_error("failed to minimize window: ");
 			::mngl::log.debug("minimized window ", win);
 		}
 
 		void restore()
 		{
-			if (!SDL_RestoreWindow(win))
+			if (!SDL_RestoreWindow(win)) [[unlikely]]
 				throw sdl_error("failed to restore window: ");
 			::mngl::log.debug("restored window ", win);
 		}
@@ -625,7 +630,7 @@ namespace mngl
 		// полный экран
 		void fullscreen(bool to = true)
 		{
-			if (!SDL_SetWindowFullscreen(win, to ? SDL_WINDOW_FULLSCREEN : 0))
+			if (!SDL_SetWindowFullscreen(win, to ? SDL_WINDOW_FULLSCREEN : 0)) [[unlikely]]
 				throw sdl_error("failed to set window fullscreen state: ");
 			::mngl::log.debug((to ? "enabled" : "disabled"), " fullscreen for window ", win);
 		}
@@ -641,14 +646,14 @@ namespace mngl
 		mngl::rectangle safe_area() const
 		{
 			mngl::rectangle res;
-			if (!SDL_GetWindowSafeArea(win, mngl::rectangle_proxy(res, mngl::proxy_mode::output)))
+			if (!SDL_GetWindowSafeArea(win, mngl::rectangle_proxy(res, mngl::proxy_mode::output))) [[unlikely]]
 				throw sdl_error("failed to get safe area for window: ");
 			return res;
 		}
 
 		void parent(const window& other)
 		{
-			if (!SDL_SetWindowParent(win, other.win))
+			if (!SDL_SetWindowParent(win, other.win)) [[unlikely]]
 				throw sdl_error("failed to set parent for window: ");
 		}
 
@@ -658,7 +663,7 @@ namespace mngl
 
 		void modal(bool to)
 		{
-			if (!SDL_SetWindowModal(win, to))
+			if (!SDL_SetWindowModal(win, to)) [[unlikely]]
 				throw sdl_error("failed to set window modality to " + std::to_string(to) + ": ");
 		}
 
@@ -666,7 +671,7 @@ namespace mngl
 		[[nodiscard]] glm::uvec2 pixel_size() const
 		{
 			int w, h;
-			if (!SDL_GetWindowSizeInPixels(win, &w, &h))
+			if (!SDL_GetWindowSizeInPixels(win, &w, &h)) [[unlikely]]
 				throw sdl_error("failed to get window pixel size: ");
 			return {static_cast<unsigned int>(w), static_cast<unsigned int>(h)};
 		}
@@ -683,13 +688,13 @@ namespace mngl
 
 		void aspect_ratio(float min_aspect, float max_aspect)
 		{
-			if (!SDL_SetWindowAspectRatio(win, min_aspect, max_aspect))
+			if (!SDL_SetWindowAspectRatio(win, min_aspect, max_aspect)) [[unlikely]]
 				throw sdl_error("failed to set window aspect ratio: ");
 		}
 
 		void mouse_grab(bool enable)
 		{
-			if (!SDL_SetWindowMouseGrab(win, enable))
+			if (!SDL_SetWindowMouseGrab(win, enable)) [[unlikely]]
 				throw sdl_error("failed to set mouse grab: ");
 		}
 
@@ -700,7 +705,7 @@ namespace mngl
 		[[deprecated("Use mngl::clipboard::set_text() from <MNGL/clipboard.hpp>")]]
 		void clipboard_text(const char* text)
 		{
-			if (!SDL_SetClipboardText(text))
+			if (!SDL_SetClipboardText(text)) [[unlikely]]
 				throw sdl_error("failed to set clipboard text: ");
 		}
 
@@ -717,7 +722,7 @@ namespace mngl
 
 		void flash(bool enable = true)
 		{
-			if (!SDL_FlashWindow(win, enable ? SDL_FLASH_UNTIL_FOCUSED : SDL_FLASH_BRIEFLY))
+			if (!SDL_FlashWindow(win, enable ? SDL_FLASH_UNTIL_FOCUSED : SDL_FLASH_BRIEFLY)) [[unlikely]]
 				throw sdl_error("failed to flash window: ");
 		}
 
@@ -725,21 +730,21 @@ namespace mngl
 		{
 			// ФИКС БАГА С ПРИОРИТЕТОМ: разделили вызов функции и проверку на ошибку
 			float val = SDL_GetWindowOpacity(win);
-			if (val < 0.0f)
+			if (val < 0.0f) [[unlikely]]
 				throw sdl_error("failed to get window opacity: ");
 			return val;
 		}
 
 		void opacity(float factor)
 		{
-			if (!SDL_SetWindowOpacity(win, factor))
+			if (!SDL_SetWindowOpacity(win, factor)) [[unlikely]]
 				throw sdl_error("failed to set window opacity: ");
 			::mngl::log.debug("changed window ", win, " opacity to ", factor);
 		}
 
 		void icon(mngl::surface& icon)
 		{
-			if (!SDL_SetWindowIcon(win, icon.raw()))
+			if (!SDL_SetWindowIcon(win, icon.raw())) [[unlikely]]
 				throw sdl_error("failed to set icon!");
 
 			if (icon.animated())
@@ -747,7 +752,7 @@ namespace mngl
 				SDL_Window* raw_win = this->win;
 				icon.on_frame_changed = [raw_win](SDL_Surface* new_frame)
 				{
-					if (!SDL_SetWindowIcon(raw_win, new_frame))
+					if (!SDL_SetWindowIcon(raw_win, new_frame)) [[unlikely]]
 						throw sdl_error("failed to set icon frame!");
 				};
 			}
@@ -758,7 +763,7 @@ namespace mngl
 		void borderless(bool enable)
 		{
 			// В SDL3 передаем !enable, так как функция ожидает параметр "bordered" (наличие рамки)
-			if (!SDL_SetWindowBordered(win, !enable))
+			if (!SDL_SetWindowBordered(win, !enable)) [[unlikely]]
 				throw sdl_error("failed to set window borderless state: ");
 			::mngl::log.debug((enable ? "enabled" : "disabled"), " borderless mode for window ", win);
 		}
@@ -776,7 +781,7 @@ namespace mngl
 	{
 		std::lock_guard lg(mut);
 		auto d = SDL_GetDisplayForWindow(win.raw());
-		if (!d)
+		if (!d) [[unlikely]]
 			throw sdl_error("failed to find display for window " +
 			                std::to_string(reinterpret_cast<uintptr_t>(win.raw())) + ": ");
 		return d;

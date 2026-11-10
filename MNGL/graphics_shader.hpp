@@ -1,7 +1,7 @@
 #pragma once
 
 #include "device.hpp"
-#include "utilities.hpp"
+#include "runtime.hpp"
 
 #include <vector>
 #include <string>
@@ -20,6 +20,8 @@
 #include <utility>
 #include <limits>
 #include <ranges>
+#include <format>
+#include <source_location>
 
 namespace mngl
 {
@@ -322,7 +324,7 @@ namespace mngl::gpu
 		// Numeric indices are zero-based field positions in the reflected cbuffer declaration.
 		[[nodiscard]] uniform_setter operator[](std::size_t index)
 		{
-			if (index >= m_uniform_storage.declaration_order.size())
+			if (index >= m_uniform_storage.declaration_order.size()) [[unlikely]]
 			{
 				throw std::out_of_range("Shader uniform index is outside the reflected cbuffer layout");
 			}
@@ -385,7 +387,7 @@ namespace mngl::gpu
 		void set_uniform_layout(std::uint32_t block_size,
 		                        const std::vector<shader_uniform_field_layout>& fields)
 		{
-			if (block_size == 0 || block_size % 16 != 0)
+			if (block_size == 0 || block_size % 16 != 0) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "Reflected shader uniform block size must be a non-zero multiple of 16");
@@ -417,12 +419,12 @@ namespace mngl::gpu
 				    field.byte_offset > block_size || field.element_size != expected_element_size ||
 				    field.array_stride != expected_array_stride || !array_size_valid ||
 				    field.storage_size != expected_storage_size ||
-				    field.storage_size > block_size - field.byte_offset)
+				    field.storage_size > block_size - field.byte_offset) [[unlikely]]
 				{
 					throw std::invalid_argument(
 					    "Reflected shader uniform layout contains an invalid or duplicate field");
 				}
-				if (!m_uniform_storage.layout.emplace(field.name, field).second)
+				if (!m_uniform_storage.layout.emplace(field.name, field).second) [[unlikely]]
 				{
 					throw std::invalid_argument(
 					    "Reflected shader uniform layout contains an invalid or duplicate field");
@@ -437,7 +439,7 @@ namespace mngl::gpu
 			for (const auto& field : fields)
 			{
 				if (field.name.empty() ||
-				    !m_uniform_storage.resource_layout_by_name.emplace(field.name, field).second)
+				    !m_uniform_storage.resource_layout_by_name.emplace(field.name, field).second) [[unlikely]]
 				{
 					throw std::invalid_argument(
 					    "Reflected shader resource layout contains an invalid or duplicate field");
@@ -450,7 +452,7 @@ namespace mngl::gpu
 		{
 			using value_type = std::remove_cvref_t<T>;
 			const auto field = m_uniform_storage.layout.find(std::string(name));
-			if (field == m_uniform_storage.layout.end())
+			if (field == m_uniform_storage.layout.end()) [[unlikely]]
 			{
 				throw std::invalid_argument("Shader has no reflected uniform named '" + std::string(name) +
 				                            "'");
@@ -494,7 +496,7 @@ namespace mngl::gpu
 		                                      std::uint8_t columns, Getter&& get_component,
 		                                      std::uint8_t* destination)
 		{
-			if (rows != field.rows || columns != field.columns)
+			if (rows != field.rows || columns != field.columns) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "Shader uniform value dimensions do not match its reflected declaration");
@@ -581,7 +583,7 @@ namespace mngl::gpu
 			std::uint32_t index = 0;
 			for (const auto& value : values)
 			{
-				if (index >= field.array_count)
+				if (index >= field.array_count) [[unlikely]]
 				{
 					throw std::invalid_argument("Shader array uniform received too many elements");
 				}
@@ -590,7 +592,7 @@ namespace mngl::gpu
 				                         static_cast<std::size_t>(index) * field.array_stride);
 				++index;
 			}
-			if (index != field.array_count)
+			if (index != field.array_count) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "Shader array uniform element count does not match its HLSL declaration");
@@ -602,7 +604,7 @@ namespace mngl::gpu
 		{
 			if constexpr (std::is_integral_v<Source> && !std::is_same_v<Source, bool>)
 			{
-				if (!std::in_range<Target>(value))
+				if (!std::in_range<Target>(value)) [[unlikely]]
 				{
 					throw std::out_of_range(
 					    "Shader integer uniform value is outside the reflected type range");
@@ -707,12 +709,12 @@ namespace mngl::gpu
 			const auto field = m_uniform_storage.resource_layout_by_name.find(std::string(name));
 			if (!source || field == m_uniform_storage.resource_layout_by_name.end() ||
 			    field->second.kind == shader_resource_kind::storage_buffer ||
-			    field->second.kind == shader_resource_kind::read_write_storage_buffer)
+			    field->second.kind == shader_resource_kind::read_write_storage_buffer) [[unlikely]]
 			{
 				throw std::invalid_argument("Shader has no texture resource named '" + std::string(name) +
 				                            "'");
 			}
-			if (field->second.kind != shader_resource_kind::sampled_texture && sampler_state)
+			if (field->second.kind != shader_resource_kind::sampled_texture && sampler_state) [[unlikely]]
 			{
 				throw std::invalid_argument("store textures cannot have a sampler binding");
 			}
@@ -725,7 +727,7 @@ namespace mngl::gpu
 			const auto field = m_uniform_storage.resource_layout_by_name.find(std::string(name));
 			if (field == m_uniform_storage.resource_layout_by_name.end() ||
 			    (field->second.kind != shader_resource_kind::storage_buffer &&
-			     field->second.kind != shader_resource_kind::read_write_storage_buffer))
+			     field->second.kind != shader_resource_kind::read_write_storage_buffer)) [[unlikely]]
 			{
 				throw std::invalid_argument("Shader has no storage buffer resource named '" +
 				                            std::string(name) + "'");
@@ -776,33 +778,47 @@ namespace mngl::gpu
 	public:
 		graphics_shader() noexcept = default;
 
-		graphics_shader(SDL_GPUDevice* device, const graphics_shader_asset& asset) : m_device(device)
+		graphics_shader(SDL_GPUDevice* device, const graphics_shader_asset& asset,
+		                std::source_location location = std::source_location::current())
+		    : m_device(device), m_debug_name(asset.debug_name)
 		{
-			if (!m_device)
+			if (!m_device) [[unlikely]]
 			{
 				throw std::invalid_argument("Cannot create graphics_shader with a null device");
 			}
-			if (!asset.valid())
+			if (!asset.valid()) [[unlikely]]
 			{
 				throw std::invalid_argument("Cannot create graphics_shader from an invalid asset");
 			}
 
 			const auto format = static_cast<SDL_GPUShaderFormat>(asset.code.format);
-			if ((SDL_GetGPUShaderFormats(m_device) & format) == 0)
+			if ((SDL_GetGPUShaderFormats(m_device) & format) == 0) [[unlikely]]
 			{
 				throw std::invalid_argument("GPU device does not support the shader asset's format");
 			}
 
 			auto info = asset.create_info();
+			SDL_ClearError();
 			m_handle = SDL_CreateGPUShader(m_device, &info);
-			if (!m_handle)
+			if (!m_handle) [[unlikely]]
 			{
-				throw sdl_error("Failed to create GPU shader: ");
+				const char* driver = SDL_GetGPUDeviceDriver(m_device);
+				throw sdl_error(std::format(
+				    "Failed to create GPU shader '{}' on driver '{}': stage={}, format={}, bytecode={} bytes, "
+				    "entrypoint='{}', "
+				    "resources[samplers={}, storage_textures={}, storage_buffers={}, uniform_buffers={}]",
+				    m_debug_name.empty() ? "<unnamed>" : m_debug_name,
+				    driver ? driver : "<unknown>",
+				    static_cast<unsigned int>(asset.stage), static_cast<unsigned int>(asset.code.format),
+				    asset.code.bytes.size(), asset.entrypoint, asset.resources.samplers,
+				    asset.resources.storage_textures, asset.resources.storage_buffers,
+				    asset.resources.uniform_buffers), location);
 			}
 		}
 
-		graphics_shader(const device& device, const graphics_shader_asset& asset)
-		    : graphics_shader(device.raw(), asset)
+		graphics_shader(const device& device, const graphics_shader_asset& asset,
+		                std::source_location location = std::source_location::current())
+		    : graphics_shader(device.raw(), asset, location)
 		{
 			m_device_owner = device;
 		}
@@ -813,7 +829,7 @@ namespace mngl::gpu
 		graphics_shader(graphics_shader&& other) noexcept
 		    : m_device_owner(std::move(other.m_device_owner)),
 		      m_device(std::exchange(other.m_device, nullptr)),
-		      m_handle(std::exchange(other.m_handle, nullptr))
+		      m_handle(std::exchange(other.m_handle, nullptr)), m_debug_name(std::move(other.m_debug_name))
 		{
 		}
 
@@ -825,6 +841,7 @@ namespace mngl::gpu
 				m_device_owner = std::move(other.m_device_owner);
 				m_device = std::exchange(other.m_device, nullptr);
 				m_handle = std::exchange(other.m_handle, nullptr);
+				m_debug_name = std::move(other.m_debug_name);
 			}
 			return *this;
 		}
@@ -834,6 +851,7 @@ namespace mngl::gpu
 
 		[[nodiscard]] SDL_GPUShader* raw() const noexcept { return m_handle; }
 		[[nodiscard]] SDL_GPUShader* handle() const noexcept { return raw(); }
+		[[nodiscard]] std::string_view debug_name() const noexcept { return m_debug_name; }
 		[[nodiscard]] bool valid() const noexcept { return m_handle != nullptr; }
 		explicit operator bool() const noexcept { return valid(); }
 
@@ -846,11 +864,13 @@ namespace mngl::gpu
 			m_handle = nullptr;
 			m_device = nullptr;
 			m_device_owner.reset();
+			m_debug_name.clear();
 		}
 
 	private:
 		std::optional<device> m_device_owner;
 		SDL_GPUDevice* m_device = nullptr;
 		SDL_GPUShader* m_handle = nullptr;
+		std::string m_debug_name;
 	};
 } // namespace mngl::gpu

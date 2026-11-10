@@ -145,7 +145,7 @@ namespace mngl::two_d
 			{
 				const std::uint64_t bytes = static_cast<std::uint64_t>(size.x) * size.y * 4u;
 				if (bytes > std::numeric_limits<std::uint32_t>::max() ||
-				    bytes > std::numeric_limits<std::size_t>::max())
+				    bytes > std::numeric_limits<std::size_t>::max()) [[unlikely]]
 				{
 					throw std::length_error("Font atlas page exceeds the supported upload size");
 				}
@@ -178,29 +178,29 @@ namespace mngl::two_d
 		               glm::uvec2 page_size)
 		    : device(device), raster_height_pixels(pixel_height), atlas_size(page_size)
 		{
-			if (!device.raw())
+			if (!device.raw()) [[unlikely]]
 			{
 				throw std::invalid_argument("Cannot create a font with a null GPU device");
 			}
-			if (!std::isfinite(raster_height_pixels) || raster_height_pixels <= 0.0f)
+			if (!std::isfinite(raster_height_pixels) || raster_height_pixels <= 0.0f) [[unlikely]]
 			{
 				throw std::invalid_argument("Font raster height must be finite and positive");
 			}
 			if (atlas_size.x < 8 || atlas_size.y < 8 ||
 			    atlas_size.x > static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ||
-			    atlas_size.y > static_cast<std::uint32_t>(std::numeric_limits<int>::max()))
+			    atlas_size.y > static_cast<std::uint32_t>(std::numeric_limits<int>::max())) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "Font atlas dimensions must be at least 8 and fit in signed integers");
 			}
 
 			std::ifstream stream(file, std::ios::binary | std::ios::ate);
-			if (!stream)
+			if (!stream) [[unlikely]]
 			{
 				throw std::runtime_error("Failed to open font file: " + file.string());
 			}
 			const std::streamoff file_size = stream.tellg();
-			if (file_size <= 0 || static_cast<std::uint64_t>(file_size) > detail::text_max_font_file_size)
+			if (file_size <= 0 || static_cast<std::uint64_t>(file_size) > detail::text_max_font_file_size) [[unlikely]]
 			{
 				throw std::invalid_argument("Font file must be non-empty and no larger than 64 MiB");
 			}
@@ -208,19 +208,19 @@ namespace mngl::two_d
 			font_data.resize(static_cast<std::size_t>(file_size));
 			stream.seekg(0, std::ios::beg);
 			if (!stream.read(reinterpret_cast<char*>(font_data.data()),
-			                 static_cast<std::streamsize>(font_data.size())))
+			                 static_cast<std::streamsize>(font_data.size()))) [[unlikely]]
 			{
 				throw std::runtime_error("Failed to read font file: " + file.string());
 			}
 
 			const int font_offset = stbtt_GetFontOffsetForIndex(font_data.data(), 0);
-			if (font_offset < 0 || !stbtt_InitFont(&font_info, font_data.data(), font_offset))
+			if (font_offset < 0 || !stbtt_InitFont(&font_info, font_data.data(), font_offset)) [[unlikely]]
 			{
 				throw std::invalid_argument("Font file does not contain a supported TrueType font");
 			}
 
 			scale = stbtt_ScaleForPixelHeight(&font_info, raster_height_pixels);
-			if (!std::isfinite(scale) || scale <= 0.0f)
+			if (!std::isfinite(scale) || scale <= 0.0f) [[unlikely]]
 			{
 				throw std::invalid_argument("Font has invalid vertical metrics");
 			}
@@ -230,7 +230,7 @@ namespace mngl::two_d
 			stbtt_GetFontVMetrics(&font_info, &ascent_units, &descent_units, &line_gap_units);
 			ascent_pixels = static_cast<float>(ascent_units) * scale;
 			descent_pixels = static_cast<float>(descent_units) * scale;
-			if (!std::isfinite(ascent_pixels) || !std::isfinite(descent_pixels))
+			if (!std::isfinite(ascent_pixels) || !std::isfinite(descent_pixels)) [[unlikely]]
 			{
 				throw std::invalid_argument("Font has invalid vertical metrics");
 			}
@@ -297,7 +297,7 @@ namespace mngl::two_d
 			const std::int64_t width = static_cast<std::int64_t>(x1) - x0;
 			const std::int64_t height = static_cast<std::int64_t>(y1) - y0;
 			if (width < 0 || width > std::numeric_limits<int>::max() || height < 0 ||
-			    height > std::numeric_limits<int>::max())
+			    height > std::numeric_limits<int>::max()) [[unlikely]]
 			{
 				throw std::length_error("Font glyph metrics exceed the supported range");
 			}
@@ -317,13 +317,13 @@ namespace mngl::two_d
 			}
 			if (glyph.width < 0 || glyph.height < 0 ||
 			    static_cast<std::uint32_t>(glyph.width) + 2 > atlas_size.x ||
-			    static_cast<std::uint32_t>(glyph.height) + 2 > atlas_size.y)
+			    static_cast<std::uint32_t>(glyph.height) + 2 > atlas_size.y) [[unlikely]]
 			{
 				throw std::length_error("A font glyph is larger than its atlas page");
 			}
 
 			const std::uint64_t bitmap_size = static_cast<std::uint64_t>(glyph.width) * glyph.height;
-			if (bitmap_size > std::numeric_limits<std::size_t>::max())
+			if (bitmap_size > std::numeric_limits<std::size_t>::max()) [[unlikely]]
 			{
 				throw std::length_error("A font glyph bitmap is too large");
 			}
@@ -375,7 +375,7 @@ namespace mngl::two_d
 				}
 			}
 
-			if (pages.size() >= detail::text_no_atlas_page)
+			if (pages.size() >= detail::text_no_atlas_page) [[unlikely]]
 			{
 				throw std::length_error("Font exhausted its glyph atlas page index space");
 			}
@@ -460,7 +460,7 @@ namespace mngl::two_d
 
 	inline detail::text_glyph font::glyph(std::uint32_t codepoint, bool rasterize)
 	{
-		if (!m_implementation)
+		if (!m_implementation) [[unlikely]]
 		{
 			throw std::logic_error("Cannot use a moved-from font");
 		}
@@ -483,7 +483,7 @@ namespace mngl::two_d
 
 	inline detail::text_glyph font::glyph_prepared(std::uint32_t codepoint) const
 	{
-		if (!m_implementation)
+		if (!m_implementation) [[unlikely]]
 		{
 			throw std::logic_error("Cannot use a moved-from font");
 		}
@@ -503,7 +503,7 @@ namespace mngl::two_d
 			cached = &found->second;
 		}
 
-		if (!cached || !cached->rasterized)
+		if (!cached || !cached->rasterized) [[unlikely]]
 		{
 			throw std::logic_error(
 			    "Glyph was not prepared for parallel text rendering; call font::prepare_glyphs() first");
@@ -512,7 +512,7 @@ namespace mngl::two_d
 		const ::mngl::texture* page = nullptr;
 		if (cached->atlas_page != detail::text_no_atlas_page)
 		{
-			if (cached->atlas_page >= m_implementation->pages.size())
+			if (cached->atlas_page >= m_implementation->pages.size()) [[unlikely]]
 			{
 				throw std::logic_error("Prepared font glyph refers to an invalid atlas page");
 			}
@@ -563,7 +563,7 @@ namespace mngl::two_d
 
 	inline void font::upload_pending(gpu::command_buffer& command_buffer)
 	{
-		if (!m_implementation)
+		if (!m_implementation) [[unlikely]]
 		{
 			throw std::logic_error("Cannot use a moved-from font");
 		}
@@ -631,7 +631,7 @@ namespace mngl::two_d
 
 	inline void text_document::set_line(std::size_t index, std::string_view line_text)
 	{
-		if (line_text.find_first_of("\r\n") != std::string_view::npos)
+		if (line_text.find_first_of("\r\n") != std::string_view::npos) [[unlikely]]
 		{
 			throw std::invalid_argument("A text document line cannot contain a line break");
 		}
@@ -640,7 +640,7 @@ namespace mngl::two_d
 
 	inline void text_document::append_line(std::string_view line_text)
 	{
-		if (line_text.find_first_of("\r\n") != std::string_view::npos)
+		if (line_text.find_first_of("\r\n") != std::string_view::npos) [[unlikely]]
 		{
 			throw std::invalid_argument("A text document line cannot contain a line break");
 		}
@@ -649,7 +649,7 @@ namespace mngl::two_d
 
 	inline void text_document::erase_line(std::size_t index)
 	{
-		if (index >= m_lines.size())
+		if (index >= m_lines.size()) [[unlikely]]
 		{
 			throw std::out_of_range("Text document line index is out of range");
 		}
@@ -750,21 +750,21 @@ namespace mngl::two_d
 
 	inline float font::measure_text_line_width(std::string_view text, float height)
 	{
-		if (!m_implementation)
+		if (!m_implementation) [[unlikely]]
 		{
 			throw std::logic_error("Cannot use a moved-from font");
 		}
-		if (!std::isfinite(height) || height <= 0.0f)
+		if (!std::isfinite(height) || height <= 0.0f) [[unlikely]]
 		{
 			throw std::invalid_argument("Measured text height must be finite and positive");
 		}
-		if (text.find_first_of("\r\n") != std::string_view::npos)
+		if (text.find_first_of("\r\n") != std::string_view::npos) [[unlikely]]
 		{
 			throw std::invalid_argument("Text line measurement does not accept line breaks");
 		}
 
 		const float scale = height / raster_height_pixels();
-		if (!std::isfinite(scale) || scale <= 0.0f)
+		if (!std::isfinite(scale) || scale <= 0.0f) [[unlikely]]
 		{
 			throw std::invalid_argument("Font metrics cannot be scaled to the requested text height");
 		}
@@ -783,7 +783,7 @@ namespace mngl::two_d
 				{
 					pen_x = (std::floor(pen_x / tab_width) + 1.0f) * tab_width;
 				}
-				if (!std::isfinite(pen_x))
+				if (!std::isfinite(pen_x)) [[unlikely]]
 				{
 					throw std::length_error("Measured text exceeds the renderer's coordinate range");
 				}
@@ -797,7 +797,7 @@ namespace mngl::two_d
 				pen_x += kerning(previous_codepoint, metrics.codepoint) * scale;
 			}
 			pen_x += metrics.advance * scale;
-			if (!std::isfinite(pen_x))
+			if (!std::isfinite(pen_x)) [[unlikely]]
 			{
 				throw std::length_error("Measured text exceeds the renderer's coordinate range");
 			}
@@ -809,21 +809,21 @@ namespace mngl::two_d
 
 	inline float font::measure_text_line_width_prepared(std::string_view text, float height) const
 	{
-		if (!m_implementation)
+		if (!m_implementation) [[unlikely]]
 		{
 			throw std::logic_error("Cannot use a moved-from font");
 		}
-		if (!std::isfinite(height) || height <= 0.0f)
+		if (!std::isfinite(height) || height <= 0.0f) [[unlikely]]
 		{
 			throw std::invalid_argument("Measured text height must be finite and positive");
 		}
-		if (text.find_first_of("\r\n") != std::string_view::npos)
+		if (text.find_first_of("\r\n") != std::string_view::npos) [[unlikely]]
 		{
 			throw std::invalid_argument("Text line measurement does not accept line breaks");
 		}
 
 		const float scale = height / raster_height_pixels();
-		if (!std::isfinite(scale) || scale <= 0.0f)
+		if (!std::isfinite(scale) || scale <= 0.0f) [[unlikely]]
 		{
 			throw std::invalid_argument("Font metrics cannot be scaled to the requested text height");
 		}
@@ -842,7 +842,7 @@ namespace mngl::two_d
 				{
 					pen_x = (std::floor(pen_x / tab_width) + 1.0f) * tab_width;
 				}
-				if (!std::isfinite(pen_x))
+				if (!std::isfinite(pen_x)) [[unlikely]]
 				{
 					throw std::length_error("Measured text exceeds the renderer's coordinate range");
 				}
@@ -856,7 +856,7 @@ namespace mngl::two_d
 				pen_x += kerning_prepared(previous_codepoint, metrics.codepoint) * scale;
 			}
 			pen_x += metrics.advance * scale;
-			if (!std::isfinite(pen_x))
+			if (!std::isfinite(pen_x)) [[unlikely]]
 			{
 				throw std::length_error("Measured text exceeds the renderer's coordinate range");
 			}

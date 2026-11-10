@@ -88,7 +88,7 @@ int main()
 	{
 		mngl::runtime::ensure();
 		mngl::window window("My game", {800, 600});
-		while (mngl::input::continue_work())
+		while (mngl::input::next_frame())
 		{
 			for (const auto& keyboard : mngl::input::keyboards())
 			{

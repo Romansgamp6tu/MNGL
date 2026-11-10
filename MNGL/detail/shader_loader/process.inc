@@ -1,7 +1,7 @@
 		static process_result run_process(const std::filesystem::path& executable,
 		                                  const std::vector<std::filesystem::path>& args)
 		{
-			if (executable.empty())
+			if (executable.empty()) [[unlikely]]
 			{
 				throw std::invalid_argument("Shader compiler executable path cannot be empty");
 			}
@@ -92,20 +92,60 @@
 			return quoted;
 		}
 
+		static std::filesystem::path resolve_windows_executable(const std::filesystem::path& executable)
+		{
+			if (executable.has_parent_path() || executable.is_absolute())
+			{
+				return executable;
+			}
+
+			// Resolve app-local tools first so placing one beside the application works from any cwd.
+			std::vector<wchar_t> module_path(32768);
+			const DWORD module_length = GetModuleFileNameW(nullptr, module_path.data(),
+			                                               static_cast<DWORD>(module_path.size()));
+			if (module_length != 0 && module_length < module_path.size())
+			{
+				std::filesystem::path local_name = executable;
+				if (local_name.extension().empty())
+				{
+					local_name += L".exe";
+				}
+				const auto local_executable =
+				    std::filesystem::path(std::wstring(module_path.data(), module_length)).parent_path() /
+				    local_name;
+				std::error_code error;
+				if (std::filesystem::is_regular_file(local_executable, error) && !error)
+				{
+					return local_executable;
+				}
+			}
+
+			// Supplying lpApplicationName to CreateProcessW does not resolve a bare name via PATH.
+			// SearchPathW gives the remaining system directories and PATH a chance before launching.
+			std::vector<wchar_t> buffer(32768);
+			const DWORD length = SearchPathW(nullptr, executable.c_str(), L".exe",
+			                                 static_cast<DWORD>(buffer.size()), buffer.data(), nullptr);
+			if (length == 0 || length >= buffer.size()) [[unlikely]]
+			{
+				return executable;
+			}
+			return std::filesystem::path(std::wstring(buffer.data(), length));
+		}
+
 		static process_result run_process_windows(const std::filesystem::path& executable,
 		                                          const std::vector<std::filesystem::path>& args)
 		{
 			SECURITY_ATTRIBUTES security_attributes{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
 			HANDLE raw_read_pipe = nullptr;
 			HANDLE raw_write_pipe = nullptr;
-			if (!CreatePipe(&raw_read_pipe, &raw_write_pipe, &security_attributes, 0))
+			if (!CreatePipe(&raw_read_pipe, &raw_write_pipe, &security_attributes, 0)) [[unlikely]]
 			{
 				throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
 				                        "Failed to create shader compiler output pipe");
 			}
 			windows_handle read_pipe(raw_read_pipe);
 			windows_handle write_pipe(raw_write_pipe);
-			if (!SetHandleInformation(read_pipe.get(), HANDLE_FLAG_INHERIT, 0))
+			if (!SetHandleInformation(read_pipe.get(), HANDLE_FLAG_INHERIT, 0)) [[unlikely]]
 			{
 				throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
 				                        "Failed to configure shader compiler output pipe");
@@ -114,14 +154,15 @@
 			const HANDLE raw_stdin =
 			    CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &security_attributes,
 				            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-			if (raw_stdin == INVALID_HANDLE_VALUE)
+			if (raw_stdin == INVALID_HANDLE_VALUE) [[unlikely]]
 			{
 				throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
 				                        "Failed to open null input for shader compiler");
 			}
 			windows_handle standard_input(raw_stdin);
 
-			std::wstring command_line = quote_windows_argument(executable.native());
+			const auto resolved_executable = resolve_windows_executable(executable);
+			std::wstring command_line = quote_windows_argument(resolved_executable.native());
 			for (const auto& arg : args)
 			{
 				command_line.push_back(L' ');
@@ -138,8 +179,8 @@
 			startup_info.hStdError = write_pipe.get();
 
 			PROCESS_INFORMATION process_info{};
-			if (!CreateProcessW(executable.c_str(), mutable_command_line.data(), nullptr, nullptr, TRUE,
-			                    CREATE_NO_WINDOW, nullptr, nullptr, &startup_info, &process_info))
+			if (!CreateProcessW(resolved_executable.c_str(), mutable_command_line.data(), nullptr, nullptr, TRUE,
+			                    CREATE_NO_WINDOW, nullptr, nullptr, &startup_info, &process_info)) [[unlikely]]
 			{
 				throw std::system_error(
 				    static_cast<int>(GetLastError()), std::system_category(),
@@ -174,7 +215,7 @@
 			}
 
 			const DWORD wait_result = WaitForSingleObject(child.get(), INFINITE);
-			if (wait_result != WAIT_OBJECT_0)
+			if (wait_result != WAIT_OBJECT_0) [[unlikely]]
 			{
 				throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
 				                        "Failed to wait for shader compiler");
@@ -182,7 +223,7 @@
 			child.mark_completed();
 
 			DWORD exit_code = 0;
-			if (!GetExitCodeProcess(child.get(), &exit_code))
+			if (!GetExitCodeProcess(child.get(), &exit_code)) [[unlikely]]
 			{
 				throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
 				                        "Failed to retrieve shader compiler exit code");
@@ -248,7 +289,7 @@
 			}
 
 			const int duplicate = ::fcntl(descriptor.get(), F_DUPFD, STDERR_FILENO + 1);
-			if (duplicate < 0)
+			if (duplicate < 0) [[unlikely]]
 			{
 				throw std::system_error(errno, std::generic_category(),
 				                        "Failed to duplicate shader compiler output pipe");
@@ -260,7 +301,7 @@
 		                                        const std::vector<std::filesystem::path>& args)
 		{
 			int pipe_descriptors[2]{};
-			if (::pipe(pipe_descriptors) != 0)
+			if (::pipe(pipe_descriptors) != 0) [[unlikely]]
 			{
 				throw std::system_error(errno, std::generic_category(),
 				                        "Failed to create shader compiler output pipe");
@@ -287,7 +328,7 @@
 
 			posix_spawn_file_actions_t actions{};
 			const int init_result = ::posix_spawn_file_actions_init(&actions);
-			if (init_result != 0)
+			if (init_result != 0) [[unlikely]]
 			{
 				throw std::system_error(init_result, std::generic_category(),
 				                        "Failed to initialize shader compiler process");
@@ -300,7 +341,7 @@
 
 			auto check_action = [](int result, const char* operation)
 			{
-				if (result != 0)
+				if (result != 0) [[unlikely]]
 				{
 					throw std::system_error(result, std::generic_category(), operation);
 				}
@@ -317,7 +358,7 @@
 			pid_t pid = 0;
 			const int spawn_result =
 			    ::posix_spawnp(&pid, executable.native().c_str(), &actions, nullptr, argv.data(), environ);
-			if (spawn_result != 0)
+			if (spawn_result != 0) [[unlikely]]
 			{
 				throw std::system_error(
 				    spawn_result, std::generic_category(),
@@ -353,7 +394,7 @@
 			{
 				wait_result = ::waitpid(child.get(), &status, 0);
 			} while (wait_result < 0 && errno == EINTR);
-			if (wait_result < 0)
+			if (wait_result < 0) [[unlikely]]
 			{
 				throw std::system_error(errno, std::generic_category(), "Failed to wait for shader compiler");
 			}

@@ -22,7 +22,7 @@ namespace mngl::mods
 			detail::require_id(id, "extension_id");
 			using holder = detail::function_slot_holder<Signature>;
 			std::lock_guard lock(m_mutex);
-			if (m_functions.contains(id) || m_properties.contains(id))
+			if (m_functions.contains(id) || m_properties.contains(id)) [[unlikely]]
 				throw registry_error(error_code::duplicate_extension, "Extension ID is already registered",
 				                     id);
 			auto value = std::make_shared<holder>(
@@ -40,12 +40,12 @@ namespace mngl::mods
 		                                  typename property_slot<T>::validator validator = {})
 		{
 			detail::require_id(id, "extension_id");
-			if (static_cast<bool>(getter) != static_cast<bool>(setter))
+			if (static_cast<bool>(getter) != static_cast<bool>(setter)) [[unlikely]]
 				throw registry_error(error_code::invalid_value,
 				                     "A property must provide both getter and setter, or neither", id);
 			using holder = detail::property_slot_holder<T>;
 			std::lock_guard lock(m_mutex);
-			if (m_properties.contains(id) || m_functions.contains(id))
+			if (m_properties.contains(id) || m_functions.contains(id)) [[unlikely]]
 				throw registry_error(error_code::duplicate_extension, "Extension ID is already registered",
 				                     id);
 			auto handle_is_valid = [this](instance_handle handle) { return is_live(handle); };
@@ -68,7 +68,7 @@ namespace mngl::mods
 			if (existing != m_classes.end())
 			{
 				auto* typed = dynamic_cast<holder*>(existing->second.get());
-				if (!typed)
+				if (!typed) [[unlikely]]
 					throw registry_error(error_code::type_mismatch,
 					                     "Class ID was already declared with a different base type", id);
 				return typed->classes;
@@ -84,10 +84,10 @@ namespace mngl::mods
 			using holder = detail::function_slot_holder<Signature>;
 			std::lock_guard lock(m_mutex);
 			const auto it = m_functions.find(std::string(id));
-			if (it == m_functions.end())
+			if (it == m_functions.end()) [[unlikely]]
 				throw registry_error(error_code::unknown_extension, "Unknown function slot", std::string(id));
 			auto* typed = dynamic_cast<holder*>(it->second.get());
-			if (!typed)
+			if (!typed) [[unlikely]]
 				throw registry_error(error_code::type_mismatch, "Function slot signature does not match",
 				                     std::string(id));
 			return typed->slot;
@@ -100,10 +100,10 @@ namespace mngl::mods
 			using holder = detail::property_slot_holder<T>;
 			std::lock_guard lock(m_mutex);
 			const auto it = m_properties.find(std::string(id));
-			if (it == m_properties.end())
+			if (it == m_properties.end()) [[unlikely]]
 				throw registry_error(error_code::unknown_extension, "Unknown property", std::string(id));
 			auto* typed = dynamic_cast<holder*>(it->second.get());
-			if (!typed)
+			if (!typed) [[unlikely]]
 				throw registry_error(error_code::type_mismatch, "Property type does not match",
 				                     std::string(id));
 			return typed->slot;
@@ -116,11 +116,11 @@ namespace mngl::mods
 			using holder = detail::class_registry_holder<Base>;
 			std::lock_guard lock(m_mutex);
 			const auto it = m_classes.find(std::string(id));
-			if (it == m_classes.end())
+			if (it == m_classes.end()) [[unlikely]]
 				throw registry_error(error_code::unknown_extension, "Unknown class registry",
 				                     std::string(id));
 			auto* typed = dynamic_cast<holder*>(it->second.get());
-			if (!typed)
+			if (!typed) [[unlikely]]
 				throw registry_error(error_code::type_mismatch, "Class registry base type does not match",
 				                     std::string(id));
 			return typed->classes;
@@ -129,7 +129,7 @@ namespace mngl::mods
 		[[nodiscard]] instance_handle create_instance_handle()
 		{
 			std::lock_guard lock(m_mutex);
-			if (m_next_handle == 0 || m_next_handle == std::numeric_limits<std::uint64_t>::max())
+			if (m_next_handle == 0 || m_next_handle == std::numeric_limits<std::uint64_t>::max()) [[unlikely]]
 				throw std::overflow_error("MNGL mod instance handle space exhausted");
 			const instance_handle handle(m_next_handle++);
 			m_live_handles.insert(handle);
@@ -259,19 +259,19 @@ namespace mngl::mods
 				std::error_code file_error;
 				if (!std::filesystem::exists(path, file_error))
 				{
-					if (file_error)
+					if (file_error) [[unlikely]]
 						throw std::runtime_error("cannot inspect settings file: " + file_error.message());
 					return diagnostics;
 				}
 				constexpr std::uintmax_t max_settings_size = 4 * 1024 * 1024;
-				if (std::filesystem::file_size(path) > max_settings_size)
+				if (std::filesystem::file_size(path) > max_settings_size) [[unlikely]]
 					throw std::runtime_error("settings file exceeds the 4 MiB size limit");
 
 				std::ifstream input(path);
-				if (!input)
+				if (!input) [[unlikely]]
 					throw std::runtime_error("cannot open settings file");
 				std::string line;
-				if (!std::getline(input, line) || line != "MNGL_MOD_SETTINGS\t1")
+				if (!std::getline(input, line) || line != "MNGL_MOD_SETTINGS\t1") [[unlikely]]
 					throw std::runtime_error("unsupported settings file header or version");
 
 				std::size_t line_number = 1;
@@ -288,7 +288,7 @@ namespace mngl::mods
 					const auto third =
 					    second == std::string::npos ? std::string::npos : line.find('\t', second + 1);
 					if (first == std::string::npos || second == std::string::npos ||
-					    third == std::string::npos || line.find('\t', third + 1) != std::string::npos)
+					    third == std::string::npos || line.find('\t', third + 1) != std::string::npos) [[unlikely]]
 						throw std::runtime_error("malformed settings record on line " +
 						                         std::to_string(line_number));
 
@@ -300,14 +300,14 @@ namespace mngl::mods
 					auto value = decode_setting_field(std::string_view(line).substr(third + 1));
 					detail::require_id(mod_id, "mod_id");
 					detail::require_id(property_id, "property_id");
-					if (type.empty())
+					if (type.empty()) [[unlikely]]
 						throw std::runtime_error("empty property type on line " +
 						                         std::to_string(line_number));
 					mod_setting setting{mod_id, property_id, type, value};
-					if (!records.emplace(std::pair(mod_id, property_id), std::move(setting)).second)
+					if (!records.emplace(std::pair(mod_id, property_id), std::move(setting)).second) [[unlikely]]
 						throw std::runtime_error("duplicate setting on line " + std::to_string(line_number));
 				}
-				if (!input.eof())
+				if (!input.eof()) [[unlikely]]
 					throw std::runtime_error("failed while reading settings file");
 			}
 			catch (const std::exception& exception)
@@ -393,7 +393,7 @@ namespace mngl::mods
 			temporary += ".tmp";
 			{
 				std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-				if (!output)
+				if (!output) [[unlikely]]
 					throw std::runtime_error("cannot create temporary settings file: " + temporary.string());
 				output << "MNGL_MOD_SETTINGS\t1\n"
 				       << "# columns: mod_id, property_id, type, value (percent-encoded UTF-8)\n";
@@ -403,7 +403,7 @@ namespace mngl::mods
 					       << encode_setting_field(setting.type) << '\t'
 					       << encode_setting_field(setting.value) << '\n';
 				output.flush();
-				if (!output)
+				if (!output) [[unlikely]]
 					throw std::runtime_error("failed while writing settings file: " + temporary.string());
 			}
 			replace_settings_file(temporary, path);
@@ -459,11 +459,11 @@ namespace mngl::mods
 					result.push_back(value[i]);
 					continue;
 				}
-				if (i + 2 >= value.size())
+				if (i + 2 >= value.size()) [[unlikely]]
 					throw std::runtime_error("invalid percent escape in settings file");
 				const auto high = hex_value(value[i + 1]);
 				const auto low = hex_value(value[i + 2]);
-				if (high < 0 || low < 0)
+				if (high < 0 || low < 0) [[unlikely]]
 					throw std::runtime_error("invalid percent escape in settings file");
 				result.push_back(static_cast<char>((high << 4) | low));
 				i += 2;
@@ -478,7 +478,7 @@ namespace mngl::mods
 			std::filesystem::rename(temporary, target, error);
 			if (!error)
 				return;
-			if (!std::filesystem::exists(target))
+			if (!std::filesystem::exists(target)) [[unlikely]]
 				throw std::runtime_error("cannot replace settings file: " + error.message());
 
 			auto backup = target;
@@ -487,7 +487,7 @@ namespace mngl::mods
 			std::filesystem::remove(backup, ignored);
 			error.clear();
 			std::filesystem::rename(target, backup, error);
-			if (error)
+			if (error) [[unlikely]]
 				throw std::runtime_error("cannot back up existing settings file: " + error.message());
 
 			error.clear();

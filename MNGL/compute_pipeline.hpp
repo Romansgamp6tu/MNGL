@@ -2,11 +2,17 @@
 
 #include "device.hpp"
 #include "graphics_shader.hpp"
-#include "utilities.hpp"
+#include "runtime.hpp"
+
+#include <glm/glm.hpp>
 
 #include <utility>
 #include <stdexcept>
 #include <optional>
+#include <format>
+#include <source_location>
+#include <string>
+#include <string_view>
 
 namespace mngl::gpu
 {
@@ -83,26 +89,33 @@ namespace mngl::gpu
 	class compute_pipeline_builder
 	{
 	public:
+		compute_pipeline_builder& set_debug_name(std::string_view name)
+		{
+			m_debug_name.assign(name);
+			return *this;
+		}
+
 		compute_pipeline_builder& set_compute_shader(const compute_shader_asset& shader) noexcept
 		{
 			m_shader = &shader;
 			return *this;
 		}
 
-		compute_pipeline build(SDL_GPUDevice* device) const
+		compute_pipeline build(
+		    SDL_GPUDevice* device, std::source_location location = std::source_location::current()) const
 		{
-			if (!device)
+			if (!device) [[unlikely]]
 			{
 				throw std::invalid_argument("Cannot create a compute pipeline with a null device");
 			}
-			if (!m_shader || !m_shader->valid())
+			if (!m_shader || !m_shader->valid()) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "Cannot create a compute pipeline without a valid compute shader asset");
 			}
 
 			const auto format = static_cast<SDL_GPUShaderFormat>(m_shader->code.format);
-			if ((SDL_GetGPUShaderFormats(device) & format) == 0)
+			if ((SDL_GetGPUShaderFormats(device) & format) == 0) [[unlikely]]
 			{
 				throw std::invalid_argument("GPU device does not support the compute shader asset's format");
 			}
@@ -122,23 +135,41 @@ namespace mngl::gpu
 			info.threadcount_y = m_shader->threadgroup_size.y;
 			info.threadcount_z = m_shader->threadgroup_size.z;
 
+			SDL_ClearError();
 			auto* handle = SDL_CreateGPUComputePipeline(device, &info);
-			if (!handle)
+			if (!handle) [[unlikely]]
 			{
-				throw sdl_error("Failed to create GPU compute pipeline: ");
+				const auto& resources = m_shader->resources;
+				const char* driver = SDL_GetGPUDeviceDriver(device);
+				throw sdl_error(std::format(
+				    "Failed to create GPU compute pipeline '{}' on driver '{}' from shader '{}': "
+				    "format={}, bytecode={} bytes, "
+				    "entrypoint='{}', threadgroup={}x{}x{}, resources[samplers={}, readonly_textures={}, "
+				    "readonly_buffers={}, readwrite_textures={}, readwrite_buffers={}, uniform_buffers={}]",
+				    m_debug_name.empty() ? "<unnamed>" : m_debug_name,
+				    driver ? driver : "<unknown>",
+				    m_shader->debug_name.empty() ? "<unnamed>" : m_shader->debug_name,
+				    static_cast<unsigned int>(m_shader->code.format), m_shader->code.bytes.size(),
+				    m_shader->entrypoint, m_shader->threadgroup_size.x, m_shader->threadgroup_size.y,
+				    m_shader->threadgroup_size.z, resources.samplers, resources.storage_textures,
+				    resources.storage_buffers, resources.read_write_storage_textures,
+				    resources.read_write_storage_buffers, resources.uniform_buffers), location);
 			}
 
 			return compute_pipeline{device, handle, m_shader->resources, m_shader->threadgroup_size};
 		}
 
-		compute_pipeline build(const mngl::gpu::device& device) const
+		compute_pipeline build(
+		    const mngl::gpu::device& device,
+		    std::source_location location = std::source_location::current()) const
 		{
-			auto result = build(device.raw());
+			auto result = build(device.raw(), location);
 			result.m_device_owner = device;
 			return result;
 		}
 
 	private:
 		const compute_shader_asset* m_shader = nullptr;
+		std::string m_debug_name;
 	};
 } // namespace mngl::gpu

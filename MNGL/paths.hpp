@@ -126,7 +126,7 @@ namespace mngl::paths
 	{
 		inline std::filesystem::path value_or_throw(std::expected<std::filesystem::path, sdl_error> value)
 		{
-			if (!value)
+			if (!value) [[unlikely]]
 				throw value.error();
 			return std::move(*value);
 		}
@@ -141,7 +141,7 @@ namespace mngl::paths
 	}
 	[[nodiscard]] inline std::filesystem::path user_folder_path(user_folder folder)
 	{
-		if (folder < user_folder::home || folder > user_folder::videos)
+		if (folder < user_folder::home || folder > user_folder::videos) [[unlikely]]
 			throw std::invalid_argument("invalid user folder");
 		return detail::value_or_throw(try_user_folder_path(folder));
 	}

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "gpu_optimizations.hpp"
 #include "detail/two_d/implementation.hpp"
 
 namespace mngl::two_d

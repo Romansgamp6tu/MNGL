@@ -6,23 +6,23 @@ namespace mngl
 {
 	inline imgui_context::imgui_context(render_window& window, const imgui_compat::font_config& font_config)
 	{
-		if (!SDL_IsMainThread())
+		if (!SDL_IsMainThread()) [[unlikely]]
 		{
 			throw std::logic_error("Dear ImGui must be initialized on the SDL main thread");
 		}
-		if (ImGui::GetCurrentContext())
+		if (ImGui::GetCurrentContext()) [[unlikely]]
 		{
 			throw std::logic_error("MNGL currently supports one active Dear ImGui context");
 		}
 
 		color_target_format = window.gpu_device().swapchain_texture_format(window);
-		if (color_target_format == gpu::texture_format::invalid)
+		if (color_target_format == gpu::texture_format::invalid) [[unlikely]]
 		{
 			throw std::runtime_error("Cannot initialize Dear ImGui for an invalid swapchain format");
 		}
 
 		context = ImGui::CreateContext();
-		if (!context)
+		if (!context) [[unlikely]]
 		{
 			throw std::runtime_error("Failed to create a Dear ImGui context");
 		}
@@ -38,7 +38,7 @@ namespace mngl
 			imgui_compat::detail::apply_vs_dark_style(m_applied_scale);
 			initialize_fonts(font_config);
 
-			if (!ImGui_ImplSDL3_InitForSDLGPU(window.raw()))
+			if (!ImGui_ImplSDL3_InitForSDLGPU(window.raw())) [[unlikely]]
 			{
 				throw sdl_error("Failed to initialize the Dear ImGui SDL3 backend: ");
 			}
@@ -48,7 +48,7 @@ namespace mngl
 			init_info.Device = window.gpu_device().raw();
 			init_info.ColorTargetFormat = static_cast<SDL_GPUTextureFormat>(color_target_format);
 			init_info.MSAASamples = SDL_GPU_SAMPLECOUNT_1;
-			if (!ImGui_ImplSDLGPU3_Init(&init_info))
+			if (!ImGui_ImplSDLGPU3_Init(&init_info)) [[unlikely]]
 			{
 				throw sdl_error("Failed to initialize the Dear ImGui SDL_GPU backend: ");
 			}
@@ -86,7 +86,7 @@ namespace mngl
 	inline const imgui_context::loaded_font& imgui_context::get_font(imgui_compat::font_role role) const
 	{
 		const auto index = static_cast<std::size_t>(role);
-		if (index >= fonts.size())
+		if (index >= fonts.size()) [[unlikely]]
 		{
 			throw std::invalid_argument("Invalid Dear ImGui font role");
 		}
@@ -117,21 +117,21 @@ namespace mngl
 
 	inline void imgui_context::begin_frame(::mngl::texture* target)
 	{
-		if (!context || !attached_window)
+		if (!context || !attached_window) [[unlikely]]
 		{
 			throw std::logic_error("Cannot begin a frame without an attached render_window");
 		}
-		if (frame_active)
+		if (frame_active) [[unlikely]]
 		{
 			throw std::logic_error("A Dear ImGui frame is already active");
 		}
-		if (!SDL_IsMainThread())
+		if (!SDL_IsMainThread()) [[unlikely]]
 		{
 			throw std::logic_error("Dear ImGui frames must run on the SDL main thread");
 		}
 		if (target)
 		{
-			if (!attached_window->hit_testing_enabled())
+			if (!attached_window->hit_testing_enabled()) [[unlikely]]
 			{
 				throw std::logic_error(
 				    "Enable render_window hit testing before drawing an ImGui surface sprite");
@@ -140,17 +140,17 @@ namespace mngl
 			const auto& gpu_texture = target->raw_gpu_texture();
 			if (!target->valid() || !target->can_render_to() ||
 			    !gpu_texture.has_usage(gpu::texture::usage_flags::sampler) || target->rendering() ||
-			    gpu_texture.is_swapchain_texture())
+			    gpu_texture.is_swapchain_texture()) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "Dear ImGui offscreen output must be an idle, sampleable color-target texture");
 			}
-			if (gpu_texture.device_raw() != attached_window->gpu_device().raw())
+			if (gpu_texture.device_raw() != attached_window->gpu_device().raw()) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "Dear ImGui offscreen output and render_window must use the same GPU device");
 			}
-			if (target->format() != color_target_format)
+			if (target->format() != color_target_format) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "Dear ImGui offscreen output must use the render_window swapchain format");
@@ -308,7 +308,7 @@ namespace mngl
 		}
 		if (requested_render_target)
 		{
-			if (requested_render_target != &target)
+			if (requested_render_target != &target) [[unlikely]]
 			{
 				throw std::logic_error("Dear ImGui frame must be displayed to the texture passed to frame()");
 			}
@@ -317,7 +317,7 @@ namespace mngl
 		{
 			return;
 		}
-		if (!SDL_IsMainThread())
+		if (!SDL_IsMainThread()) [[unlikely]]
 		{
 			throw std::logic_error("Dear ImGui rendering must run on the SDL main thread");
 		}
@@ -330,7 +330,7 @@ namespace mngl
 		{
 			return;
 		}
-		if (target.format() != color_target_format)
+		if (target.format() != color_target_format) [[unlikely]]
 		{
 			throw std::logic_error("Dear ImGui render target format changed; recreate its context");
 		}
@@ -345,7 +345,7 @@ namespace mngl
 
 		SDL_GPURenderPass* render_pass =
 		    SDL_BeginGPURenderPass(raw_command_buffer, &color_target, 1, nullptr);
-		if (!render_pass)
+		if (!render_pass) [[unlikely]]
 		{
 			throw sdl_error("Failed to begin the Dear ImGui GPU render pass: ");
 		}
@@ -410,10 +410,11 @@ namespace mngl
 	}
 
 	inline imgui_context::window_scope::window_scope(imgui_context& owner, std::string_view title,
+	                                                 const imgui_compat::window_options& options,
 	                                                 std::optional<ImGuiID> dockspace_id, bool* open)
-	    : owner(&owner), visible(false)
+	    : owner(&owner), visible(false), end(end_action::window)
 	{
-		if (!owner.context || !owner.frame_active)
+		if (!owner.context || !owner.frame_active) [[unlikely]]
 		{
 			throw std::logic_error("An ImGui window must be created inside an active frame");
 		}
@@ -423,14 +424,21 @@ namespace mngl
 		{
 			ImGui::SetNextWindowDockID(*dockspace_id, ImGuiCond_FirstUseEver);
 		}
-		const std::string terminated_title(title);
-		visible = ImGui::Begin(terminated_title.c_str(), open);
+		const std::string terminated_title = imgui_compat::detail::widget_label(title);
+		visible = ImGui::Begin(terminated_title.c_str(), open,
+		                       imgui_compat::detail::to_imgui_window_flags(options));
+	}
+
+	inline imgui_context::window_scope::window_scope(imgui_context& owner, bool visible,
+	                                                 end_action end) noexcept
+	    : owner(&owner), visible(visible), end(end)
+	{
 	}
 
 	inline imgui_context::main_menu_bar_scope::main_menu_bar_scope(imgui_context& owner)
 	    : owner(&owner), visible(false)
 	{
-		if (!owner.context || !owner.frame_active)
+		if (!owner.context || !owner.frame_active) [[unlikely]]
 		{
 			throw std::logic_error("An ImGui main menu bar must be created inside an active frame");
 		}
@@ -451,11 +459,11 @@ namespace mngl
 	inline imgui_context::menu_scope::menu_scope(imgui_context& owner, std::string_view label)
 	    : owner(&owner), visible(false)
 	{
-		if (!owner.context || !owner.frame_active)
+		if (!owner.context || !owner.frame_active) [[unlikely]]
 		{
 			throw std::logic_error("An ImGui menu must be created inside an active frame");
 		}
-		if (label.find('\0') != std::string_view::npos)
+		if (label.find('\0') != std::string_view::npos) [[unlikely]]
 		{
 			throw std::invalid_argument("Dear ImGui menu labels cannot contain embedded null characters");
 		}
@@ -480,11 +488,11 @@ namespace mngl
 		{
 			return false;
 		}
-		if (!owner->frame_active)
+		if (!owner->frame_active) [[unlikely]]
 		{
 			throw std::logic_error("An ImGui menu item must be submitted inside an active frame");
 		}
-		if (label.find('\0') != std::string_view::npos)
+		if (label.find('\0') != std::string_view::npos) [[unlikely]]
 		{
 			throw std::invalid_argument(
 			    "Dear ImGui menu item labels cannot contain embedded null characters");
@@ -497,11 +505,11 @@ namespace mngl
 
 	inline imgui_context::dockspace_scope imgui_context::window_scope::dockspace(std::string_view id) const
 	{
-		if (!owner || !owner->context || !owner->frame_active)
+		if (!owner || !owner->context || !owner->frame_active) [[unlikely]]
 		{
 			throw std::logic_error("An ImGui dockspace must be created inside an active frame");
 		}
-		if (id.empty() || id.find('\0') != std::string_view::npos)
+		if (id.empty() || id.find('\0') != std::string_view::npos) [[unlikely]]
 		{
 			throw std::invalid_argument(
 			    "Dear ImGui dockspace IDs cannot be empty or contain embedded null characters");
@@ -515,15 +523,17 @@ namespace mngl
 		return dockspace_scope(*owner, dockspace_id);
 	}
 
-	inline imgui_context::window_scope imgui_context::dockspace_scope::window(std::string_view title) const
+	inline imgui_context::window_scope imgui_context::dockspace_scope::window(
+	    std::string_view title, const imgui_compat::window_options& options) const
 	{
-		return window_scope(*owner, title, id);
+		return window_scope(*owner, title, options, id);
 	}
 
 	inline imgui_context::window_scope imgui_context::dockspace_scope::window(std::string_view title,
-	                                                                          bool& open) const
+	                                                                          bool& open,
+	                                                                          const imgui_compat::window_options& options) const
 	{
-		return window_scope(*owner, title, id, &open);
+		return window_scope(*owner, title, options, id, &open);
 	}
 
 	inline imgui_context::window_scope::~window_scope() noexcept
@@ -531,7 +541,20 @@ namespace mngl
 		if (owner && owner->context)
 		{
 			owner->make_current();
-			ImGui::End();
+			switch (end)
+			{
+			case end_action::window: ImGui::End(); break;
+			case end_action::child: ImGui::EndChild(); break;
+			case end_action::combo: ImGui::EndCombo(); break;
+			case end_action::popup: ImGui::EndPopup(); break;
+			case end_action::tab_bar: ImGui::EndTabBar(); break;
+			case end_action::tab_item: ImGui::EndTabItem(); break;
+			case end_action::table: ImGui::EndTable(); break;
+			case end_action::tooltip: ImGui::EndTooltip(); break;
+			case end_action::disabled: ImGui::EndDisabled(); break;
+			case end_action::tree_node: ImGui::TreePop(); break;
+			case end_action::none: break;
+			}
 		}
 	}
 
@@ -549,7 +572,7 @@ namespace mngl
 
 	inline void imgui_context::window_scope::text(const char* value) const
 	{
-		if (!value)
+		if (!value) [[unlikely]]
 		{
 			throw std::invalid_argument("Dear ImGui text cannot be null");
 		}

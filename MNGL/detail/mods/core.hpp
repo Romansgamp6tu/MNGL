@@ -173,7 +173,7 @@ namespace mngl::mods
 			[[nodiscard]] call_lease enter()
 			{
 				std::lock_guard lock(m_mutex);
-				if (!m_accepting)
+				if (!m_accepting) [[unlikely]]
 					throw std::runtime_error("Mod is unloading");
 				++m_active_calls;
 				return call_lease(shared_from_this());
@@ -303,7 +303,7 @@ namespace mngl::mods
 	{
 		if (!lifetime)
 			return;
-		if (m_module_lifetime)
+		if (m_module_lifetime) [[unlikely]]
 			throw std::logic_error("Mod object already has a module lifetime pin");
 		lifetime->pin_object();
 		m_module_lifetime = lifetime;
@@ -376,7 +376,7 @@ namespace mngl::mods
 
 		inline void require_id(std::string_view id, std::string_view kind)
 		{
-			if (!valid_id(id))
+			if (!valid_id(id)) [[unlikely]]
 				throw registry_error(error_code::invalid_id,
 				                     std::string(kind) + " must match [a-z0-9][a-z0-9._-]*", std::string(id));
 		}
@@ -512,7 +512,7 @@ namespace mngl::mods
 					const auto result = std::from_chars(value.data(), value.data() + value.size(), parsed);
 					if (result.ec != std::errc{} || result.ptr != value.data() + value.size() ||
 					    parsed < static_cast<std::int64_t>(std::numeric_limits<T>::min()) ||
-					    parsed > static_cast<std::int64_t>(std::numeric_limits<T>::max()))
+					    parsed > static_cast<std::int64_t>(std::numeric_limits<T>::max())) [[unlikely]]
 						throw std::runtime_error("integer value is out of range or malformed");
 					return static_cast<T>(parsed);
 				}
@@ -521,7 +521,7 @@ namespace mngl::mods
 					std::uint64_t parsed{};
 					const auto result = std::from_chars(value.data(), value.data() + value.size(), parsed);
 					if (result.ec != std::errc{} || result.ptr != value.data() + value.size() ||
-					    parsed > static_cast<std::uint64_t>(std::numeric_limits<T>::max()))
+					    parsed > static_cast<std::uint64_t>(std::numeric_limits<T>::max())) [[unlikely]]
 						throw std::runtime_error("integer value is out of range or malformed");
 					return static_cast<T>(parsed);
 				}
@@ -536,13 +536,13 @@ namespace mngl::mods
 
 			static std::string encode(T value)
 			{
-				if (!std::isfinite(value))
+				if (!std::isfinite(value)) [[unlikely]]
 					throw std::runtime_error("non-finite settings values cannot be saved");
 				char buffer[128]{};
 				const auto result =
 				    std::to_chars(buffer, buffer + sizeof(buffer), value, std::chars_format::general,
 					              std::numeric_limits<T>::max_digits10);
-				if (result.ec != std::errc{})
+				if (result.ec != std::errc{}) [[unlikely]]
 					throw std::runtime_error("could not encode floating-point setting");
 				return std::string(buffer, result.ptr);
 			}
@@ -553,7 +553,7 @@ namespace mngl::mods
 				input.imbue(std::locale::classic());
 				T parsed{};
 				input >> std::noskipws >> parsed;
-				if (!input || input.peek() != std::char_traits<char>::eof() || !std::isfinite(parsed))
+				if (!input || input.peek() != std::char_traits<char>::eof() || !std::isfinite(parsed)) [[unlikely]]
 					throw std::runtime_error("floating-point value is malformed or non-finite");
 				return parsed;
 			}

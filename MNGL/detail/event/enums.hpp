@@ -1,6 +1,7 @@
 #pragma once
 
-#include "../../utilities.hpp"
+#include <SDL3/SDL.h>
+
 #include <cstdint>
 
 namespace mngl

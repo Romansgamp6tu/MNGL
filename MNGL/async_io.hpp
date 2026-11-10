@@ -106,14 +106,14 @@ namespace mngl::async_io
 
 		inline std::string path_to_utf8(const std::filesystem::path& path)
 		{
-			if (path.empty())
+			if (path.empty()) [[unlikely]]
 			{
 				throw std::invalid_argument("async I/O path cannot be empty");
 			}
 
 			const auto encoded = path.u8string();
 			std::string result(reinterpret_cast<const char*>(encoded.data()), encoded.size());
-			if (result.find('\0') != std::string::npos)
+			if (result.find('\0') != std::string::npos) [[unlikely]]
 			{
 				throw std::invalid_argument("async I/O path cannot contain a null character");
 			}
@@ -182,23 +182,23 @@ namespace mngl::async_io
 		// is pending, the queue retains the request state and its buffer.
 		[[nodiscard]] std::vector<std::byte> take_data()
 		{
-			if (!m_state)
+			if (!m_state) [[unlikely]]
 				throw std::logic_error("async request is empty");
 			std::lock_guard lock(m_state->mutex);
-			if (m_state->type != operation::read)
+			if (m_state->type != operation::read) [[unlikely]]
 			{
 				throw std::logic_error("write requests do not have a result buffer");
 			}
-			if (m_state->status == request_status::pending)
+			if (m_state->status == request_status::pending) [[unlikely]]
 			{
 				throw std::logic_error("async read has not completed");
 			}
-			if (m_state->status != request_status::completed)
+			if (m_state->status != request_status::completed) [[unlikely]]
 			{
 				throw std::runtime_error(m_state->error.empty() ? "async read did not complete successfully"
 				                                                : m_state->error);
 			}
-			if (m_state->data_taken)
+			if (m_state->data_taken) [[unlikely]]
 			{
 				throw std::logic_error("async read result has already been taken");
 			}
@@ -286,7 +286,7 @@ namespace mngl::async_io
 	public:
 		queue() : m_identity(std::make_shared<detail::queue_identity>()), m_queue(SDL_CreateAsyncIOQueue())
 		{
-			if (!m_queue)
+			if (!m_queue) [[unlikely]]
 			{
 				throw sdl_error("failed to create async I/O queue: ");
 			}
@@ -306,14 +306,14 @@ namespace mngl::async_io
 
 			const auto utf8_path = detail::path_to_utf8(path);
 			auto* file = SDL_AsyncIOFromFile(utf8_path.c_str(), "r");
-			if (!file)
+			if (!file) [[unlikely]]
 			{
 				throw sdl_error("failed to open file for async reading: ");
 			}
 			detail::async_file_guard file_guard{file, m_queue};
 
 			const auto file_size = SDL_GetAsyncIOSize(file);
-			if (file_size < 0)
+			if (file_size < 0) [[unlikely]]
 			{
 				throw sdl_error("failed to get file size for async reading: ");
 			}
@@ -331,7 +331,7 @@ namespace mngl::async_io
 
 			const auto utf8_path = detail::path_to_utf8(path);
 			auto* file = SDL_AsyncIOFromFile(utf8_path.c_str(), "r");
-			if (!file)
+			if (!file) [[unlikely]]
 			{
 				throw sdl_error("failed to open file for async reading: ");
 			}
@@ -347,7 +347,7 @@ namespace mngl::async_io
 
 			const auto utf8_path = detail::path_to_utf8(path);
 			auto* file = SDL_AsyncIOFromFile(utf8_path.c_str(), "w");
-			if (!file)
+			if (!file) [[unlikely]]
 			{
 				throw sdl_error("failed to open file for async writing: ");
 			}
@@ -366,7 +366,7 @@ namespace mngl::async_io
 
 			const auto utf8_path = detail::path_to_utf8(path);
 			auto* file = SDL_AsyncIOFromFile(utf8_path.c_str(), "r+");
-			if (!file)
+			if (!file) [[unlikely]]
 			{
 				throw sdl_error("failed to open existing file for async range writing: ");
 			}
@@ -423,7 +423,7 @@ namespace mngl::async_io
 		// timeout is a non-blocking check; larger values are clamped to SDL's limit.
 		[[nodiscard]] std::size_t wait(std::chrono::milliseconds timeout)
 		{
-			if (timeout.count() < 0)
+			if (timeout.count() < 0) [[unlikely]]
 			{
 				throw std::invalid_argument("async I/O wait timeout cannot be negative");
 			}
@@ -493,11 +493,11 @@ namespace mngl::async_io
 	private:
 		static void validate_range(std::uint64_t offset, std::uint64_t size)
 		{
-			if (size > std::numeric_limits<std::uint64_t>::max() - offset)
+			if (size > std::numeric_limits<std::uint64_t>::max() - offset) [[unlikely]]
 			{
 				throw std::length_error("async I/O range overflows the file offset type");
 			}
-			if (size > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()))
+			if (size > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) [[unlikely]]
 			{
 				throw std::length_error("async I/O range is too large to fit in memory");
 			}
@@ -505,7 +505,7 @@ namespace mngl::async_io
 
 		void ensure_open() const
 		{
-			if (!m_queue)
+			if (!m_queue) [[unlikely]]
 			{
 				throw std::logic_error("async I/O queue is closed");
 			}

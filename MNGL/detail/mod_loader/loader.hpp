@@ -10,7 +10,7 @@ namespace mngl::mods
 		explicit mod_loader(registry& owner, mod_loader_options options = {})
 		    : m_registry(owner), m_options(std::move(options))
 		{
-			if (m_options.binary_abi.empty())
+			if (m_options.binary_abi.empty()) [[unlikely]]
 				throw std::invalid_argument("mod loader ABI tag cannot be empty");
 		}
 
@@ -448,11 +448,11 @@ namespace mngl::mods
 
 		void validate_manifest(const mod_manifest& manifest) const
 		{
-			if (manifest.required_api.major != m_options.host_api.major)
+			if (manifest.required_api.major != m_options.host_api.major) [[unlikely]]
 				throw std::runtime_error("mod API major version does not match host");
-			if (manifest.required_api.minor > m_options.host_api.minor)
+			if (manifest.required_api.minor > m_options.host_api.minor) [[unlikely]]
 				throw std::runtime_error("mod requires a newer MNGL mod API minor version");
-			if (manifest.binary_abi != m_options.binary_abi)
+			if (manifest.binary_abi != m_options.binary_abi) [[unlikely]]
 				throw std::runtime_error("mod binary_abi does not match host ABI tag '" +
 				                         m_options.binary_abi + "'");
 		}

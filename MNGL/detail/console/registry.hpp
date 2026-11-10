@@ -94,12 +94,12 @@ namespace mngl::console
 		[[nodiscard]] command_result invoke(std::string_view id, std::span<const argument_value> values) const
 		{
 			const auto found = m_commands.find(std::string(id));
-			if (found == m_commands.end())
+			if (found == m_commands.end()) [[unlikely]]
 				throw registry_error(error_code::unknown_command, "Unknown command '" + std::string(id) + "'",
 				                     std::string(id));
 
 			const auto& entry = found->second;
-			if (values.size() != entry.descriptor.arguments.size())
+			if (values.size() != entry.descriptor.arguments.size()) [[unlikely]]
 				throw registry_error(error_code::argument_count_mismatch,
 				                     "Command argument count does not match its declaration",
 				                     entry.descriptor.id);
@@ -114,7 +114,7 @@ namespace mngl::console
 				    (spec.type == argument_type::floating_point &&
 					 std::holds_alternative<double>(values[i])) ||
 				    (spec.type == argument_type::flag && std::holds_alternative<bool>(values[i]));
-				if (!matches)
+				if (!matches) [[unlikely]]
 					throw registry_error(error_code::argument_type_mismatch,
 					                     "Argument '" + spec.name + "' has the wrong type",
 					                     entry.descriptor.id);
@@ -135,12 +135,12 @@ namespace mngl::console
 
 		void register_command(command_descriptor descriptor, erased_handler handler)
 		{
-			if (!detail::is_valid_command_id(descriptor.id))
+			if (!detail::is_valid_command_id(descriptor.id)) [[unlikely]]
 				throw registry_error(error_code::invalid_command_id,
 				                     "Command IDs must contain letters, digits, '_', '-' or '.', "
 				                     "must not start with '-' or contain empty dot-separated segments",
 				                     descriptor.id);
-			if (descriptor.description.empty())
+			if (descriptor.description.empty()) [[unlikely]]
 				throw registry_error(error_code::invalid_command_description,
 				                     "Command description must not be empty", descriptor.id);
 
@@ -148,35 +148,35 @@ namespace mngl::console
 			std::vector<std::string> options;
 			for (const auto& arg : descriptor.arguments)
 			{
-				if (!detail::is_valid_argument_name(arg.name) || arg.description.empty())
+				if (!detail::is_valid_argument_name(arg.name) || arg.description.empty()) [[unlikely]]
 					throw registry_error(
 					    error_code::invalid_argument,
 					    "Argument names must be non-empty and use letters, digits, '_', or '-'; "
 					    "argument descriptions must not be empty",
 					    descriptor.id);
-				if (std::find(names.begin(), names.end(), arg.name) != names.end())
+				if (std::find(names.begin(), names.end(), arg.name) != names.end()) [[unlikely]]
 					throw registry_error(error_code::invalid_argument,
 					                     "Duplicate argument name '" + arg.name + "'", descriptor.id);
 				names.push_back(arg.name);
 
 				if (arg.form == argument_form::flag)
 				{
-					if (arg.name.front() == '-' || arg.name.back() == '-')
+					if (arg.name.front() == '-' || arg.name.back() == '-') [[unlikely]]
 						throw registry_error(error_code::invalid_argument,
 						                     "Flag names must not start or end with '-'", descriptor.id);
-					if (arg.name == "help")
+					if (arg.name == "help") [[unlikely]]
 						throw registry_error(error_code::invalid_argument,
 						                     "The '--help' flag is reserved by the console dispatcher",
 						                     descriptor.id);
-					if (arg.type != argument_type::flag || arg.option_name != "--" + arg.name)
+					if (arg.type != argument_type::flag || arg.option_name != "--" + arg.name) [[unlikely]]
 						throw registry_error(error_code::invalid_argument, "Flag metadata is inconsistent",
 						                     descriptor.id);
-					if (std::find(options.begin(), options.end(), arg.option_name) != options.end())
+					if (std::find(options.begin(), options.end(), arg.option_name) != options.end()) [[unlikely]]
 						throw registry_error(error_code::invalid_argument,
 						                     "Duplicate flag '" + arg.option_name + "'", descriptor.id);
 					options.push_back(arg.option_name);
 				}
-				else if (arg.type == argument_type::flag || !arg.option_name.empty())
+				else if (arg.type == argument_type::flag || !arg.option_name.empty()) [[unlikely]]
 				{
 					throw registry_error(error_code::invalid_argument,
 					                     "Positional arguments cannot be declared as flags", descriptor.id);
@@ -186,7 +186,7 @@ namespace mngl::console
 			const auto command_id = descriptor.id;
 			const auto insert_result =
 			    m_commands.emplace(command_id, command_entry{std::move(descriptor), std::move(handler)});
-			if (!insert_result.second)
+			if (!insert_result.second) [[unlikely]]
 				throw registry_error(error_code::duplicate_command,
 				                     "Command '" + command_id + "' is already registered", command_id);
 		}
@@ -198,7 +198,7 @@ namespace mngl::console
 
 	template <class... Args> template <class F> registry& command_builder<Args...>::handler(F&& callback)
 	{
-		if (!m_owner)
+		if (!m_owner) [[unlikely]]
 			throw std::logic_error("Command builder has already been consumed");
 		auto* owner = m_owner;
 		auto erased = detail::make_handler<Args...>(std::forward<F>(callback));

@@ -70,7 +70,7 @@ namespace mngl::two_d
 			{
 				for (int row = 0; row < 4; ++row)
 				{
-					if (!std::isfinite(value[column][row]))
+					if (!std::isfinite(value[column][row])) [[unlikely]]
 					{
 						throw std::invalid_argument("2D transform matrix must be finite");
 					}
@@ -81,7 +81,7 @@ namespace mngl::two_d
 			    !nearly_equal(value[2][0], 0.0f) || !nearly_equal(value[2][1], 0.0f) ||
 			    !nearly_equal(value[2][2], 1.0f) || !nearly_equal(value[2][3], 0.0f) ||
 			    !nearly_equal(value[3][2], 0.0f) || !nearly_equal(value[0][3], 0.0f) ||
-			    !nearly_equal(value[1][3], 0.0f) || !nearly_equal(value[3][3], 1.0f))
+			    !nearly_equal(value[1][3], 0.0f) || !nearly_equal(value[3][3], 1.0f)) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "2D transform matrix must be an affine transform in the XY plane");

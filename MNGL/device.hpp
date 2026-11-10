@@ -1,5 +1,6 @@
 #pragma once
-#include "utilities.hpp"
+#include "gpu_optimizations.hpp"
+#include "runtime.hpp"
 #include "window.hpp"
 
 #include <SDL3/SDL_gpu.h>
@@ -223,20 +224,23 @@ namespace mngl::gpu
 		void wait() const
 		{
 			auto result = try_wait();
-			if (!result)
+			if (!result) [[unlikely]]
 				throw result.error();
 		}
 
 		device(device&&) noexcept = default;
 		device& operator=(device&&) noexcept = default;
 
-		device(SDL_GPUShaderFormat allowed_formats = -1)
+		// Pass true in optimized builds to request SDL's backend validation/debug layer.
+		device(SDL_GPUShaderFormat allowed_formats = -1, bool enable_debug_mode = debug_mode)
 		{
 			if (allowed_formats == -1)
 				allowed_formats = base_formats;
 			state = std::make_shared<detail::device_state>();
 			SDL_Log("MNGL startup checkpoint: creating SDL GPU device");
-			::mngl::check_sdl(state->handle = SDL_CreateGPUDevice(allowed_formats, debug_mode, nullptr));
+			SDL_ClearError();
+			::mngl::check_sdl(state->handle = SDL_CreateGPUDevice(allowed_formats, enable_debug_mode, nullptr),
+			                  "Failed to create SDL GPU device");
 			const char* driver = SDL_GetGPUDeviceDriver(state->handle);
 			SDL_Log("MNGL startup checkpoint: SDL GPU device created with driver %s",
 			        driver ? driver : "<unknown>");

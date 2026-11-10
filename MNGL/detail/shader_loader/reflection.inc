@@ -19,7 +19,7 @@
 			{
 				std::error_code ec;
 				const auto root = std::filesystem::temp_directory_path(ec);
-				if (ec)
+				if (ec) [[unlikely]]
 				{
 					throw std::filesystem::filesystem_error("Failed to locate a temporary directory", ec);
 				}
@@ -37,7 +37,7 @@
 					{
 						return temporary_directory(candidate);
 					}
-					if (ec && ec != std::errc::file_exists)
+					if (ec && ec != std::errc::file_exists) [[unlikely]]
 					{
 						throw std::filesystem::filesystem_error(
 						    "Failed to create a temporary shader directory", candidate, ec);
@@ -136,7 +136,7 @@
 
 		static void validate_source_file(const std::filesystem::path& source_path)
 		{
-			if (source_path.empty())
+			if (source_path.empty()) [[unlikely]]
 			{
 				throw std::invalid_argument("Shader source path cannot be empty");
 			}
@@ -144,7 +144,7 @@
 			std::error_code ec;
 			if (!std::filesystem::is_regular_file(source_path, ec))
 			{
-				if (ec)
+				if (ec) [[unlikely]]
 				{
 					throw std::filesystem::filesystem_error("Failed to inspect shader source file",
 					                                        source_path, ec);
@@ -162,7 +162,7 @@
 				return {};
 			}
 			if (options.source_language != shader_source_language::hlsl ||
-			    (options.stage != shader_stage::fragment && options.stage != shader_stage::compute))
+			    (options.stage != shader_stage::fragment && options.stage != shader_stage::compute)) [[unlikely]]
 			{
 				throw std::invalid_argument("MNGL named uniform/resource reflection currently supports HLSL "
 				                            "fragment and compute shaders only");
@@ -182,7 +182,7 @@
 			const auto validate_count =
 			    [](std::uint32_t requested, std::uint32_t reflected, std::string_view name)
 			{
-				if (requested != 0 && requested != reflected)
+				if (requested != 0 && requested != reflected) [[unlikely]]
 				{
 					throw std::invalid_argument(
 					    std::format("Shader {} count does not match the reflected HLSL layout", name));
@@ -218,13 +218,13 @@
 		                                                shader_stage stage)
 		{
 			std::ifstream source_file(source_path, std::ios::binary);
-			if (!source_file)
+			if (!source_file) [[unlikely]]
 			{
 				throw std::runtime_error(std::format(
 				    "Failed to read HLSL source for named-uniform reflection: '{}'", source_path.string()));
 			}
 			std::string source{std::istreambuf_iterator<char>(source_file), std::istreambuf_iterator<char>()};
-			if (source_file.bad())
+			if (source_file.bad()) [[unlikely]]
 			{
 				throw std::runtime_error(
 				    std::format("Failed while reading HLSL source for named-uniform reflection: '{}'",
@@ -258,7 +258,7 @@
 			{
 				++keyword_count;
 			}
-			if (keyword_count > 1)
+			if (keyword_count > 1) [[unlikely]]
 			{
 				throw std::invalid_argument("MNGL reflection supports at most one HLSL cbuffer");
 			}
@@ -267,15 +267,18 @@
 			if (keyword_count == 1)
 			{
 				std::smatch block_match;
+				const std::uint32_t uniform_space = stage == shader_stage::compute ? 2 : 3;
 				if (!std::regex_search(source, block_match, cbuffer) ||
-				    std::stoul(block_match[1].str()) != 0 || std::stoul(block_match[2].str()) != 3)
+				    std::stoul(block_match[1].str()) != 0 ||
+				    std::stoul(block_match[2].str()) != uniform_space) [[unlikely]]
 				{
-					throw std::invalid_argument("MNGL HLSL cbuffer must use register(b0, space3)");
+					throw std::invalid_argument(
+					    std::format("MNGL HLSL cbuffer must use register(b0, space{})", uniform_space));
 				}
 
 				const std::string body = block_match[3].str();
 				const std::string remaining = std::regex_replace(body, uniform_field, "");
-				if (remaining.find_first_not_of(" \t\r\n") != std::string::npos)
+				if (remaining.find_first_not_of(" \t\r\n") != std::string::npos) [[unlikely]]
 				{
 					throw std::invalid_argument("MNGL cbuffer reflection supports scalar, vector, and matrix "
 					                            "fields only; arrays and structs are not supported");
@@ -292,7 +295,7 @@
 					if (field_match[6].matched)
 					{
 						const auto array_count = std::stoull(field_match[6].str());
-						if (array_count == 0 || array_count > std::numeric_limits<std::uint32_t>::max())
+						if (array_count == 0 || array_count > std::numeric_limits<std::uint32_t>::max()) [[unlikely]]
 						{
 							throw std::invalid_argument(
 							    "HLSL uniform array length is outside the supported range");
@@ -309,7 +312,7 @@
 					field.is_matrix = !field_match[4].str().empty();
 					field.row_major =
 					    field_match[1].matched ? field_match[1].str() == "row_major" : default_row_major;
-					if (!field.is_matrix && !field_match[1].str().empty())
+					if (!field.is_matrix && !field_match[1].str().empty()) [[unlikely]]
 					{
 						throw std::invalid_argument("row_major/column_major only applies to HLSL matrices");
 					}
@@ -372,14 +375,14 @@
 						field.element_size = vector_count * stride;
 						field.array_stride = field.is_array ? field.element_size : 0;
 						if (field.is_array && field.array_count > std::numeric_limits<std::uint32_t>::max() /
-						                                              field.array_stride)
+						                                              field.array_stride) [[unlikely]]
 						{
 							throw std::length_error(
 							    "HLSL matrix array exceeds the supported uniform block size");
 						}
 						field.storage_size =
 						    field.is_array ? field.array_count * field.array_stride : field.element_size;
-						if (field.storage_size > std::numeric_limits<std::uint32_t>::max() - byte_offset)
+						if (field.storage_size > std::numeric_limits<std::uint32_t>::max() - byte_offset) [[unlikely]]
 						{
 							throw std::length_error("HLSL cbuffer exceeds the supported size");
 						}
@@ -396,13 +399,13 @@
 							field.element_size = field_size;
 							field.array_stride = (field_size + 15) & ~std::uint32_t(15);
 							if (field.array_count >
-							    std::numeric_limits<std::uint32_t>::max() / field.array_stride)
+							    std::numeric_limits<std::uint32_t>::max() / field.array_stride) [[unlikely]]
 							{
 								throw std::length_error(
 								    "HLSL uniform array exceeds the supported block size");
 							}
 							field.storage_size = field.array_count * field.array_stride;
-							if (field.storage_size > std::numeric_limits<std::uint32_t>::max() - byte_offset)
+							if (field.storage_size > std::numeric_limits<std::uint32_t>::max() - byte_offset) [[unlikely]]
 							{
 								throw std::length_error("HLSL cbuffer exceeds the supported size");
 							}
@@ -422,7 +425,7 @@
 							field.byte_offset = byte_offset;
 							field.element_size = field_size;
 							field.storage_size = field_size;
-							if (field.storage_size > std::numeric_limits<std::uint32_t>::max() - byte_offset)
+							if (field.storage_size > std::numeric_limits<std::uint32_t>::max() - byte_offset) [[unlikely]]
 							{
 								throw std::length_error("HLSL cbuffer exceeds the supported size");
 							}
@@ -431,7 +434,7 @@
 					}
 					result.fields.push_back(std::move(field));
 				}
-				if (result.fields.empty())
+				if (result.fields.empty()) [[unlikely]]
 				{
 					throw std::invalid_argument("MNGL HLSL cbuffer must declare at least one uniform field");
 				}
@@ -460,7 +463,7 @@
 					const auto slot = std::stoull(match[2].str());
 					const auto space = std::stoull(match[3].str());
 					if (slot > std::numeric_limits<std::uint32_t>::max() ||
-					    space > std::numeric_limits<std::uint32_t>::max())
+					    space > std::numeric_limits<std::uint32_t>::max()) [[unlikely]]
 					{
 						throw std::out_of_range("HLSL resource register exceeds the supported range");
 					}
@@ -484,40 +487,54 @@
 			}
 			if (reflected_resource_registers != textures.size() + buffers.size() +
 			                                        read_write_textures.size() + read_write_buffers.size() +
-			                                        samplers.size())
+			                                        samplers.size()) [[unlikely]]
 			{
 				throw std::invalid_argument("MNGL resource reflection supports Texture2D, StructuredBuffer, "
-				                            "RWTexture2D, RWStructuredBuffer, and SamplerState at space2");
+				                            "RWTexture2D, RWStructuredBuffer, and SamplerState");
 			}
 			if (stage != shader_stage::compute &&
-			    (!read_write_textures.empty() || !read_write_buffers.empty()))
+			    (!read_write_textures.empty() || !read_write_buffers.empty())) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "HLSL read-write storage resources are only supported in compute shaders");
 			}
 
-			auto require_space2 = [](const std::vector<resource_declaration>& declarations)
+			auto require_space = [](const std::vector<resource_declaration>& declarations,
+			                       std::uint32_t expected_space)
 			{
 				for (const auto& declaration : declarations)
 				{
-					if (declaration.space != 2)
+					if (declaration.space != expected_space) [[unlikely]]
 					{
-						throw std::invalid_argument("MNGL HLSL resources must use register space2");
+						throw std::invalid_argument(
+						    std::format("MNGL HLSL resources must use register space{}", expected_space));
 					}
 				}
 			};
-			require_space2(textures);
-			require_space2(buffers);
-			require_space2(read_write_textures);
-			require_space2(read_write_buffers);
-			require_space2(samplers);
+			if (stage == shader_stage::compute)
+			{
+				// SDL compute shaders put read-only resources in space0 and writable resources in space1.
+				require_space(textures, 0);
+				require_space(buffers, 0);
+				require_space(samplers, 0);
+				require_space(read_write_textures, 1);
+				require_space(read_write_buffers, 1);
+			}
+			else
+			{
+				require_space(textures, 2);
+				require_space(buffers, 2);
+				require_space(read_write_textures, 2);
+				require_space(read_write_buffers, 2);
+				require_space(samplers, 2);
+			}
 
 			auto contiguous_slot_count = [](std::vector<std::uint32_t> slots, std::string_view kind)
 			{
 				std::sort(slots.begin(), slots.end());
 				for (std::uint32_t index = 0; index < slots.size(); ++index)
 				{
-					if (slots[index] != index)
+					if (slots[index] != index) [[unlikely]]
 					{
 						throw std::invalid_argument(std::format(
 						    "MNGL {} resource registers must be contiguous from slot zero", kind));
@@ -569,7 +586,7 @@
 			for (const auto& declaration : samplers)
 			{
 				if (std::none_of(textures.begin(), textures.end(), [&](const resource_declaration& texture)
-				                 { return texture.slot == declaration.slot; }))
+				                 { return texture.slot == declaration.slot; })) [[unlikely]]
 				{
 					throw std::invalid_argument(
 					    "Each MNGL SamplerState must pair with a Texture2D at the same register index");
@@ -579,7 +596,7 @@
 
 			result.resource_counts.samplers =
 			    contiguous_slot_count(std::move(sampled_texture_slots), "sampled texture");
-			if (contiguous_slot_count(std::move(sampler_slots), "sampler") != result.resource_counts.samplers)
+			if (contiguous_slot_count(std::move(sampler_slots), "sampler") != result.resource_counts.samplers) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "MNGL sampled textures and samplers must use matching register indices");
@@ -602,7 +619,7 @@
 			const bool any_requested = requested.x != 0 || requested.y != 0 || requested.z != 0;
 			if (any_requested)
 			{
-				if (requested.x == 0 || requested.y == 0 || requested.z == 0)
+				if (requested.x == 0 || requested.y == 0 || requested.z == 0) [[unlikely]]
 				{
 					throw std::invalid_argument("Compute threadgroup dimensions must all be non-zero");
 				}
@@ -610,14 +627,14 @@
 
 			validate_source_file(source_path);
 			std::ifstream source_file(source_path, std::ios::binary);
-			if (!source_file)
+			if (!source_file) [[unlikely]]
 			{
 				throw std::runtime_error(
 				    std::format("Failed to read shader source for compute threadgroup reflection: '{}'",
 					            source_path.string()));
 			}
 			std::string source{std::istreambuf_iterator<char>(source_file), std::istreambuf_iterator<char>()};
-			if (source_file.bad())
+			if (source_file.bad()) [[unlikely]]
 			{
 				throw std::runtime_error(
 				    std::format("Failed while reading shader source for compute threadgroup reflection: '{}'",
@@ -630,7 +647,7 @@
 			auto parse_dimension = [](const std::string& value)
 			{
 				const auto parsed = std::stoull(value);
-				if (parsed == 0 || parsed > std::numeric_limits<std::uint32_t>::max())
+				if (parsed == 0 || parsed > std::numeric_limits<std::uint32_t>::max()) [[unlikely]]
 				{
 					throw std::invalid_argument(
 					    "Compute threadgroup dimensions must fit in a non-zero 32-bit integer");
@@ -660,7 +677,7 @@
 				{
 					return requested;
 				}
-				if (match_count != 1)
+				if (match_count != 1) [[unlikely]]
 				{
 					throw std::invalid_argument(
 					    std::format("Could not infer one HLSL [numthreads] declaration for entrypoint '{}'; "
@@ -668,7 +685,7 @@
 						            options.entrypoint));
 				}
 				if (any_requested &&
-				    (requested.x != reflected.x || requested.y != reflected.y || requested.z != reflected.z))
+				    (requested.x != reflected.x || requested.y != reflected.y || requested.z != reflected.z)) [[unlikely]]
 				{
 					throw std::invalid_argument(
 					    "compute_threadgroup_size does not match the HLSL [numthreads] declaration");
@@ -707,13 +724,13 @@
 				{
 					return requested;
 				}
-				if (match_count != 1)
+				if (match_count != 1) [[unlikely]]
 				{
 					throw std::invalid_argument("Could not infer one GLSL local_size layout; set "
 					                            "compute_threadgroup_size explicitly");
 				}
 				if (any_requested &&
-				    (requested.x != reflected.x || requested.y != reflected.y || requested.z != reflected.z))
+				    (requested.x != reflected.x || requested.y != reflected.y || requested.z != reflected.z)) [[unlikely]]
 				{
 					throw std::invalid_argument(
 					    "compute_threadgroup_size does not match the GLSL local_size layout");

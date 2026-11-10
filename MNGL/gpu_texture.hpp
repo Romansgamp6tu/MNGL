@@ -2,12 +2,15 @@
 
 #include <cstdint>
 
-#include "utilities.hpp"
+#include "runtime.hpp"
 #include "device.hpp"
+
+#include <glm/glm.hpp>
 
 #include <stdexcept>
 #include <optional>
 #include <utility>
+#include <format>
 
 namespace mngl::gpu
 {
@@ -33,16 +36,16 @@ namespace mngl::gpu
 		    : m_device_owner(device), dev(device.raw()), fmt(format), usage_flag(flags), size(texture_size),
 		      is_swapchain(false)
 		{
-			if (!dev)
+			if (!dev) [[unlikely]]
 			{
 				throw std::invalid_argument("Cannot create a GPU texture with a null device");
 			}
-			if (size.x == 0 || size.y == 0)
+			if (size.x == 0 || size.y == 0) [[unlikely]]
 			{
 				throw std::invalid_argument("GPU texture dimensions must be non-zero");
 			}
 			if (!SDL_GPUTextureSupportsFormat(dev, static_cast<SDL_GPUTextureFormat>(format),
-			                                  SDL_GPU_TEXTURETYPE_2D, flags))
+			                                  SDL_GPU_TEXTURETYPE_2D, flags)) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "GPU device does not support this texture format/usage combination");
@@ -57,10 +60,14 @@ namespace mngl::gpu
 			create_info.layer_count_or_depth = 1;
 			create_info.num_levels = 1; // Для начала без мип-мапов
 
+			SDL_ClearError();
 			handle = SDL_CreateGPUTexture(dev, &create_info);
-			if (!handle)
+			if (!handle) [[unlikely]]
 			{
-				throw sdl_error("Failed to create GPU texture: ");
+				const char* driver = SDL_GetGPUDeviceDriver(dev);
+				throw sdl_error(std::format(
+				    "Failed to create GPU texture on driver '{}': size={}x{}, format={}, usage=0x{:X}",
+				    driver ? driver : "<unknown>", size.x, size.y, static_cast<unsigned int>(format), flags));
 			}
 		}
 

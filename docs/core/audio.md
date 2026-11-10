@@ -54,7 +54,7 @@ mngl::audio::stop(voice);
 в `std::expected`; следующий вызов может
 повторить попытку создания.
 
-Аудио работает независимо от `input::continue_work()`. Функции `audio.update()`
+Аудио работает независимо от `input::next_frame()`. Функции `audio.update()`
 нет. Внутренний engine останавливает голоса и освобождает SDL3_mixer до
 `SDL_Quit()` при завершении программы. Не вызывайте `SDL_Quit()` вручную,
 пока используете runtime MNGL. Потеря фокуса окна сама по себе не ставит
@@ -87,7 +87,7 @@ int main()
 			return 1;
 		}
 
-		while (mngl::input::continue_work())
+		while (mngl::input::next_frame())
 		{
 			for (const auto& keyboard : mngl::input::keyboards())
 			{

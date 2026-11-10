@@ -2,11 +2,13 @@
 
 #include "frame.hpp"
 #include "geometry.hpp"
+#include "../container_growth.hpp"
 
 namespace mngl::two_d
 {
 	class renderer
 	{
+		friend class frame_2d;
 		friend class render_context;
 		friend class ::mngl::detail::texture_render_session_impl;
 
@@ -23,7 +25,7 @@ namespace mngl::two_d
 		    : m_device(device), m_textures(textures), m_batcher(device, target_format),
 		      m_frame_control(std::make_shared<detail::renderer_frame_control>())
 		{
-			if (m_textures.device_raw() != m_device.raw())
+			if (m_textures.device_raw() != m_device.raw()) [[unlikely]]
 			{
 				throw std::invalid_argument("2D renderer and texture store must use the same GPU device");
 			}
@@ -47,29 +49,30 @@ namespace mngl::two_d
 
 		[[nodiscard]] frame_2d begin_frame(const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f))
 		{
-			if (!m_window)
+			if (!m_window) [[unlikely]]
 			{
 				throw std::logic_error("This 2D renderer requires a render target texture");
 			}
-			return begin_frame_impl(nullptr, clear_color);
+			return begin_frame_impl(nullptr, clear_color, false);
 		}
 
 		[[nodiscard]] frame_2d begin_frame(::mngl::texture& target,
-		                                   const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f))
+		                                   const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f),
+		                                   bool preserve_target_contents = false)
 		{
-			if (!target.valid() || !target.can_render_to())
+			if (!target.valid() || !target.can_render_to()) [[unlikely]]
 			{
 				throw std::invalid_argument("2D render target must be a valid color-target texture");
 			}
-			if (target.raw_gpu_texture().device_raw() != m_device.raw())
+			if (target.raw_gpu_texture().device_raw() != m_device.raw()) [[unlikely]]
 			{
 				throw std::invalid_argument("2D render target belongs to a different GPU device");
 			}
-			if (target.format() != target_format())
+			if (target.format() != target_format()) [[unlikely]]
 			{
 				throw std::invalid_argument("2D render target format does not match its renderer");
 			}
-			return begin_frame_impl(&target, clear_color);
+			return begin_frame_impl(&target, clear_color, preserve_target_contents);
 		}
 
 		[[nodiscard]] gpu::texture_format target_format() const noexcept { return m_batcher.target_format(); }
@@ -77,13 +80,52 @@ namespace mngl::two_d
 		void enable_custom_materials()
 		{
 			std::lock_guard lock(m_frame_start_mutex);
-			if (!available_for_frame())
+			if (!available_for_frame()) [[unlikely]]
 			{
 				throw std::logic_error(
 				    "Custom materials cannot be enabled while a 2D frame is active or being submitted");
 			}
 			m_custom_materials_allowed = true;
 		}
+
+		void enable_gpu_culling(bool enabled = true)
+		{
+			std::lock_guard lock(m_frame_start_mutex);
+			if (!available_for_frame()) [[unlikely]]
+			{
+				throw std::logic_error(
+				    "GPU culling cannot be changed while a 2D frame is active or being submitted");
+			}
+			m_batcher.enable_gpu_culling(enabled);
+		}
+
+		void disable_gpu_culling() { enable_gpu_culling(false); }
+
+		void use_global_gpu_culling()
+		{
+			std::lock_guard lock(m_frame_start_mutex);
+			if (!available_for_frame()) [[unlikely]]
+			{
+				throw std::logic_error(
+				    "GPU culling cannot be changed while a 2D frame is active or being submitted");
+			}
+			m_batcher.use_global_gpu_culling();
+		}
+
+		[[nodiscard]] bool gpu_culling_enabled() const noexcept { return m_batcher.gpu_culling_enabled(); }
+
+		void enable_profiling(bool enabled = true)
+		{
+			std::lock_guard lock(m_frame_start_mutex);
+			if (!available_for_frame()) [[unlikely]]
+			{
+				throw std::logic_error(
+				    "2D profiling cannot be changed while a frame is active or being submitted");
+			}
+			m_batcher.enable_profiling(enabled);
+		}
+
+		[[nodiscard]] bool profiling_enabled() const noexcept { return m_batcher.profiling_enabled(); }
 
 	private:
 		[[nodiscard]] bool available_for_frame() const noexcept
@@ -94,14 +136,14 @@ namespace mngl::two_d
 
 		void begin_command_submission()
 		{
-			if (!m_frame_active.load(std::memory_order_acquire))
+			if (!m_frame_active.load(std::memory_order_acquire)) [[unlikely]]
 			{
 				throw std::logic_error("Cannot submit a command buffer for an inactive 2D frame");
 			}
 
 			bool expected = false;
 			if (!m_command_submission_pending.compare_exchange_strong(
-			        expected, true, std::memory_order_acq_rel, std::memory_order_relaxed))
+			        expected, true, std::memory_order_acq_rel, std::memory_order_relaxed)) [[unlikely]]
 			{
 				throw std::logic_error("A command buffer is already being submitted for this 2D renderer");
 			}
@@ -112,10 +154,11 @@ namespace mngl::two_d
 			m_command_submission_pending.store(false, std::memory_order_release);
 		}
 
-		[[nodiscard]] frame_2d begin_frame_impl(::mngl::texture* target, const color& clear_color)
+		[[nodiscard]] frame_2d begin_frame_impl(::mngl::texture* target, const color& clear_color,
+		                                        bool preserve_target_contents)
 		{
 			std::lock_guard lock(m_frame_start_mutex);
-			if (!available_for_frame())
+			if (!available_for_frame()) [[unlikely]]
 			{
 				throw std::logic_error("A 2D renderer frame is already active or being submitted");
 			}
@@ -130,13 +173,20 @@ namespace mngl::two_d
 
 			try
 			{
-				m_batcher.begin_frame(clear_color);
+				m_batcher.begin_frame(clear_color, preserve_target_contents);
 				m_active_target = target;
+				m_active_target_size = target ? target->size()
+				                              : (m_window ? m_window->pixel_size() : glm::uvec2{});
+				m_active_scissor.reset();
 				m_hit_test_items.clear();
 				m_used_fonts.clear();
 				if (++m_next_frame_token == 0)
 				{
 					++m_next_frame_token;
+					for (auto& cached : m_automatic_materials)
+					{
+						cached.second.validated_frame_token = 0;
+					}
 				}
 				m_active_frame_token = m_next_frame_token;
 				m_recording_state = std::move(recording_state);
@@ -152,6 +202,8 @@ namespace mngl::two_d
 			{
 				m_batcher.cancel_frame();
 				m_active_target = nullptr;
+				m_active_target_size = {};
+				m_active_scissor.reset();
 				m_active_frame_token = 0;
 				m_recording_state.reset();
 				m_hit_test_items.clear();
@@ -166,7 +218,7 @@ namespace mngl::two_d
 		{
 			ensure_frame(frame.m_token);
 			if (frame.m_recording_context || !frame.m_recording_state ||
-			    frame.m_recording_state != m_recording_state)
+			    frame.m_recording_state != m_recording_state) [[unlikely]]
 			{
 				throw std::logic_error(
 				    "Recording contexts can only be created from the active parent frame_2d");
@@ -174,7 +226,7 @@ namespace mngl::two_d
 
 			auto context = recording_context(m_frame_control, m_recording_state, frame.m_token,
 			                                 m_batcher.create_recording_context(expected_draw_count),
-			                                 frame.m_view_projection, frame.m_view);
+			                                 frame.m_view_projection, frame.m_view, m_active_scissor);
 			context.register_with_frame();
 			return context;
 		}
@@ -182,31 +234,46 @@ namespace mngl::two_d
 		void merge_recording_context(const frame_2d& frame, recording_context& context)
 		{
 			ensure_frame(frame.m_token);
-			if (frame.m_recording_context)
+			if (frame.m_recording_context) [[unlikely]]
 			{
 				throw std::logic_error("A worker recording context cannot merge other recording contexts");
 			}
 			if (!context.valid() || !context.m_finished || context.m_control != m_frame_control ||
 			    context.m_token != frame.m_token || context.m_recording_state != frame.m_recording_state ||
-			    context.m_recording_state != m_recording_state)
+			    context.m_recording_state != m_recording_state) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "Only a finished recording context from this frame can be merged");
 			}
+			if (context.m_order_independent && m_active_target && m_active_target->m_hit_testing_enabled)
+			    [[unlikely]]
+			{
+				throw std::logic_error(
+				    "Order-independent draw groups cannot be used while hit testing is enabled");
+			}
 
 			const std::size_t hit_item_offset = m_hit_test_items.size();
-			if (context.m_hit_test_items.size() > m_hit_test_items.max_size() - hit_item_offset)
+			if (context.m_hit_test_items.size() > m_hit_test_items.max_size() - hit_item_offset) [[unlikely]]
 			{
 				throw std::length_error("2D frame exhausted its hit-test item capacity");
 			}
-			if (context.m_used_fonts.size() > m_used_fonts.max_size() - m_used_fonts.size())
+			if (context.m_used_fonts.size() > m_used_fonts.max_size() - m_used_fonts.size()) [[unlikely]]
 			{
 				throw std::length_error("2D frame exhausted its font reference capacity");
 			}
 
-			m_hit_test_items.reserve(hit_item_offset + context.m_hit_test_items.size());
-			m_used_fonts.reserve(m_used_fonts.size() + context.m_used_fonts.size());
-			m_batcher.merge_recording_context(context.m_batcher_context);
+			::mngl::detail::reserve_vector_growth(m_hit_test_items,
+			                                      hit_item_offset + context.m_hit_test_items.size());
+			::mngl::detail::reserve_vector_growth(m_used_fonts,
+			                                      m_used_fonts.size() + context.m_used_fonts.size());
+			if (context.m_order_independent)
+			{
+				m_batcher.merge_order_independent_recording_context(context.m_batcher_context);
+			}
+			else
+			{
+				m_batcher.merge_recording_context(context.m_batcher_context);
+			}
 
 			for (auto& item : context.m_hit_test_items)
 			{
@@ -226,8 +293,8 @@ namespace mngl::two_d
 		void ensure_preparation_allowed(std::uint64_t token) const
 		{
 			ensure_frame(token);
-			if (m_recording_state &&
-			    m_recording_state->outstanding_recording_contexts.load(std::memory_order_acquire) != 0)
+			if (m_recording_state && m_recording_state->outstanding_recording_contexts.load(
+			                             std::memory_order_acquire) != 0) [[unlikely]]
 			{
 				throw std::logic_error("Prepare frame resources before creating worker recording contexts");
 			}
@@ -261,7 +328,7 @@ namespace mngl::two_d
 		[[nodiscard]] frame_font_uploads lock_frame_fonts(const frame_2d& frame)
 		{
 			ensure_frame(frame.m_token);
-			if (frame.m_recording_context)
+			if (frame.m_recording_context) [[unlikely]]
 			{
 				throw std::logic_error("Only a parent frame_2d can submit its font atlas updates");
 			}
@@ -274,7 +341,7 @@ namespace mngl::two_d
 			uploads.locks.reserve(m_used_fonts.size());
 			for (font* typeface : m_used_fonts)
 			{
-				if (!typeface || !typeface->m_implementation)
+				if (!typeface || !typeface->m_implementation) [[unlikely]]
 				{
 					throw std::logic_error("2D frame contains an invalid font reference");
 				}
@@ -299,7 +366,7 @@ namespace mngl::two_d
 		    const gpu::graphics_shader_asset& fragment_shader,
 		    gpu::sprite_blend_mode blend = gpu::sprite_blend_mode::alpha)
 		{
-			if (!m_custom_materials_allowed)
+			if (!m_custom_materials_allowed) [[unlikely]]
 			{
 				throw std::logic_error("Custom materials are unavailable for this render-target format");
 			}
@@ -309,7 +376,7 @@ namespace mngl::two_d
 		[[nodiscard]] gpu::material_instance_handle create_material_instance(
 		    gpu::material_handle material, gpu::fragment_resource_bindings bindings)
 		{
-			if (!m_custom_materials_allowed)
+			if (!m_custom_materials_allowed) [[unlikely]]
 			{
 				throw std::logic_error("Custom materials are unavailable for this render-target format");
 			}
@@ -343,7 +410,7 @@ namespace mngl::two_d
 		void update_material_instance(gpu::material_instance_handle instance,
 		                              gpu::fragment_resource_bindings bindings)
 		{
-			if (!m_custom_materials_allowed)
+			if (!m_custom_materials_allowed) [[unlikely]]
 			{
 				throw std::logic_error("Custom materials are unavailable for this render-target format");
 			}
@@ -352,7 +419,7 @@ namespace mngl::two_d
 
 		void destroy_material_instance(gpu::material_instance_handle instance)
 		{
-			if (!m_custom_materials_allowed)
+			if (!m_custom_materials_allowed) [[unlikely]]
 			{
 				throw std::logic_error("Custom materials are unavailable for this render-target format");
 			}
@@ -361,7 +428,7 @@ namespace mngl::two_d
 
 		void destroy_material(gpu::material_handle material)
 		{
-			if (!m_custom_materials_allowed)
+			if (!m_custom_materials_allowed) [[unlikely]]
 			{
 				throw std::logic_error("Custom materials are unavailable for this render-target format");
 			}
@@ -380,16 +447,16 @@ namespace mngl::two_d
 		static gpu::texture_format required_swapchain_format(const gpu::device& device,
 		                                                     const window& target_window)
 		{
-			if (!device.raw())
+			if (!device.raw()) [[unlikely]]
 			{
 				throw std::invalid_argument("Cannot create a 2D renderer with a null GPU device");
 			}
-			if (!target_window.raw())
+			if (!target_window.raw()) [[unlikely]]
 			{
 				throw std::invalid_argument("Cannot create a 2D renderer with a null window");
 			}
 			const auto format = device.swapchain_texture_format(target_window);
-			if (format == gpu::texture_format::invalid)
+			if (format == gpu::texture_format::invalid) [[unlikely]]
 			{
 				throw std::runtime_error("The renderer window must be claimed by its GPU device");
 			}
@@ -413,7 +480,7 @@ namespace mngl::two_d
 
 		void ensure_material_resources_change_allowed() const
 		{
-			if (!available_for_frame())
+			if (!available_for_frame()) [[unlikely]]
 			{
 				throw std::logic_error(
 				    "Material resources cannot change while a 2D frame is active or being submitted");
@@ -445,6 +512,8 @@ namespace mngl::two_d
 			std::string entrypoint;
 			gpu::shader_resource_layout resources{};
 			std::vector<std::uint8_t> bytecode;
+			// The shader snapshot is checked once for each active frame token.
+			std::uint64_t validated_frame_token = 0;
 		};
 
 		[[nodiscard]] static bool same_shader_code(const automatic_shader_material& cached,
@@ -460,15 +529,15 @@ namespace mngl::two_d
 		    recording_context* context)
 		{
 			ensure_frame(token, context);
-			if (!m_custom_materials_allowed)
+			if (!m_custom_materials_allowed) [[unlikely]]
 			{
 				throw std::logic_error("Custom materials are unavailable for this render-target format");
 			}
 
-			auto material = std::as_const(m_automatic_materials).find(&shader);
-			if (material == std::as_const(m_automatic_materials).end())
+			auto material = m_automatic_materials.find(&shader);
+			if (material == m_automatic_materials.end())
 			{
-				if (context)
+				if (context) [[unlikely]]
 				{
 					throw std::logic_error(
 					    "Call frame_2d::prepare(sprite) before recording a shader sprite in parallel");
@@ -478,13 +547,14 @@ namespace mngl::two_d
 				                                .format = shader.code.format,
 				                                .entrypoint = shader.entrypoint,
 				                                .resources = shader.resources,
-				                                .bytecode = shader.code.bytes};
+				                                .bytecode = shader.code.bytes,
+				                                .validated_frame_token = token};
 				auto inserted = m_automatic_materials.emplace(&shader, std::move(entry)).first;
 				try
 				{
 					inserted->second.material =
 					    m_batcher.create_material_for_active_frame(shader, gpu::sprite_blend_mode::alpha);
-					material = std::as_const(m_automatic_materials).find(&shader);
+					material = m_automatic_materials.find(&shader);
 				}
 				catch (...)
 				{
@@ -492,10 +562,19 @@ namespace mngl::two_d
 					throw;
 				}
 			}
-			else if (!same_shader_code(material->second, shader))
+			else if (material->second.validated_frame_token != token)
 			{
-				throw std::logic_error(
-				    "A shader asset used by a sprite changed after its automatic material was created");
+				if (context) [[unlikely]]
+				{
+					throw std::logic_error(
+					    "Call frame_2d::prepare(sprite) before recording a shader sprite in parallel");
+				}
+				if (!same_shader_code(material->second, shader)) [[unlikely]]
+				{
+					throw std::logic_error(
+					    "A shader asset used by a sprite changed after its automatic material was created");
+				}
+				material->second.validated_frame_token = token;
 			}
 
 			const automatic_instance_key key{&shader, source};
@@ -504,7 +583,7 @@ namespace mngl::two_d
 			{
 				return existing->second;
 			}
-			if (context)
+			if (context) [[unlikely]]
 			{
 				throw std::logic_error(
 				    "Call frame_2d::prepare(sprite) before recording this shader sprite in parallel");
@@ -530,8 +609,10 @@ namespace mngl::two_d
 			const gpu::sampler* sampler = bound_shader.needs_default_sampler() ? &default_sampler() : nullptr;
 			bindings.add_shader_resources(bound_shader, sampler);
 
-			m_automatic_instance_handles.reserve(m_automatic_instance_handles.size() + 1);
-			m_automatic_instances.reserve(m_automatic_instances.size() + 1);
+			::mngl::detail::reserve_vector_growth(m_automatic_instance_handles,
+			                                      m_automatic_instance_handles.size() + 1);
+			::mngl::detail::reserve_unordered_map_growth(m_automatic_instances,
+			                                             m_automatic_instances.size() + 1);
 			const auto instance = m_batcher.create_material_instance_for_active_frame(
 			    material->second.material, std::move(bindings));
 			m_automatic_instance_handles.push_back(instance);
@@ -559,25 +640,25 @@ namespace mngl::two_d
 
 			if (value.source_texture)
 			{
-				submit_texture(token, context, *value.source_texture, transform, value.tint, state,
+				submit_texture(context, *value.source_texture, transform, value.tint, state,
 				               value.click_callback);
 			}
 			else
 			{
-				submit_quad(token, context, value.source, transform, value.tint, state,
+				submit_quad(context, value.source, transform, value.tint, state,
 				            ::mngl::detail::hit_test_shape::quad, 0.0f, value.click_callback);
 			}
 		}
 
-		void submit_quad(std::uint64_t token, recording_context* context, const texture_region& source,
+		void submit_quad(recording_context* context, const texture_region& source,
 		                 const gpu::quad_transform& transform, const color& tint,
 		                 const gpu::quad_draw_state& state,
 		                 ::mngl::detail::hit_test_shape shape = ::mngl::detail::hit_test_shape::quad,
 		                 float corner_radius = 0.0f,
 		                 const std::shared_ptr<const ::mngl::hit_test_callback>& click_callback = {})
 		{
-			ensure_frame(token, context);
-			if (state.material.valid() && !m_custom_materials_allowed)
+			const auto draw_state = apply_frame_scissor(context, state);
+			if (draw_state.material.valid() && !m_custom_materials_allowed) [[unlikely]]
 			{
 				throw std::logic_error("Custom materials are unavailable for this render-target format");
 			}
@@ -587,65 +668,96 @@ namespace mngl::two_d
 			{
 				source_texture = &m_textures.resolve(source.page);
 				page = &source_texture->raw_gpu_texture();
-				if (m_active_target && page == &m_active_target->raw_gpu_texture())
+				if (m_active_target && page == &m_active_target->raw_gpu_texture()) [[unlikely]]
 				{
 					throw std::invalid_argument(
 					    "A render target texture cannot also be sampled in the same frame");
 				}
 			}
-			else if (!state.material.valid())
+			else if (!draw_state.material.valid()) [[unlikely]]
 			{
 				throw std::invalid_argument("A textured quad requires a valid texture region");
 			}
 			const gpu::texture_region_view source_view{page, source.uv_bounds};
-			if (context)
+			if (context) [[unlikely]]
 			{
-				m_batcher.draw_quad(context->m_batcher_context, source_view, transform, tint, state);
+				m_batcher.draw_quad_unchecked(context->m_batcher_context, source_view, transform, tint,
+				                              draw_state);
 			}
 			else
 			{
-				m_batcher.draw_quad(source_view, transform, tint, state);
+				m_batcher.draw_quad_unchecked(source_view, transform, tint, draw_state);
 			}
-			record_hit_item(context, transform, source.uv_bounds, source_texture, state, shape, corner_radius,
+			record_hit_item(context, transform, source.uv_bounds, source_texture, draw_state, shape, corner_radius,
 			                click_callback);
 		}
 
-		void submit_rectangle(std::uint64_t token, recording_context* context, const rectangle& bounds,
-		                      const color& tint, const ::mngl::two_d::transform& object_transform = {})
+		void submit_rectangle(recording_context* context, const rectangle& bounds, const color& tint,
+		                      const ::mngl::two_d::transform& object_transform = {},
+		                      gpu::sprite_blend_mode blend = gpu::sprite_blend_mode::alpha)
 		{
-			ensure_frame(token, context);
 			gpu::quad_transform transform{};
 			transform.destination = bounds;
 			transform.matrix(object_transform.matrix());
-			submit_quad(token, context, m_textures.white_region(), transform, tint, {});
+			gpu::quad_draw_state state{};
+			state.blend = blend;
+			submit_quad(context, m_textures.white_region(), transform, tint, state);
 		}
 
-		void submit_vertex_array(std::uint64_t token, recording_context* context, const vertex_array& value)
+		void submit_vertex_array(recording_context* context, const vertex_array& value)
 		{
-			ensure_frame(token, context);
+			auto& scratch = context ? context->m_geometry_scratch : m_geometry_scratch;
+			const auto triangles = detail::tessellate(value, scratch);
+			submit_geometry(context, triangles, value.transform, value.tint, value.blend);
+		}
+
+		void submit_prepared_vertex_array(recording_context* context, const prepared_vertex_array& value)
+		{
+			submit_geometry<true>(context, value.triangle_vertices(), value.transform, value.tint,
+			                      value.blend);
+		}
+
+		void submit_mesh(recording_context* context, const mesh& value)
+		{
+			if (!value.m_storage) [[unlikely]]
+			{
+				throw std::logic_error("Cannot draw a moved-from 2D mesh");
+			}
+			const auto& white_page = m_textures.resolve(m_textures.white_region().page).raw_gpu_texture();
+			const gpu::texture_region_view source{&white_page, glm::vec4(0.0f, 0.0f, 1.0f, 1.0f)};
+			gpu::quad_draw_state state{};
+			state.blend = value.blend;
+			state = apply_frame_scissor(context, state);
+			if (context)
+			{
+				m_batcher.draw_mesh_unchecked(context->m_batcher_context, value.m_storage, source,
+				                              value.transform.matrix(), value.tint, state);
+			}
+			else
+			{
+				m_batcher.draw_mesh_unchecked(value.m_storage, source, value.transform.matrix(), value.tint,
+				                              state);
+			}
+		}
+
+		void submit_convex_polygon(recording_context* context, const convex_polygon& value)
+		{
 			auto& scratch = context ? context->m_geometry_scratch : m_geometry_scratch;
 			detail::tessellate(value, scratch);
-			submit_geometry(token, context, scratch.triangles, value.transform, value.tint, value.blend);
+			submit_geometry<true>(context, scratch.triangles, value.transform, value.fill_color, value.blend);
+			if (value.outline_thickness > 0.0f)
+			{
+				detail::tessellate_outline(value, scratch);
+				submit_geometry(context, scratch.triangles, value.transform, value.outline_color,
+				                value.blend);
+			}
 		}
 
-		void submit_convex_polygon(std::uint64_t token, recording_context* context,
-		                           const convex_polygon& value)
+		template <bool vertices_validated = false>
+		void submit_geometry(recording_context* context, std::span<const glm::vec2> vertices,
+		                     const ::mngl::two_d::transform& transform, const color& tint,
+		                     gpu::sprite_blend_mode blend)
 		{
-			ensure_frame(token, context);
-			auto& scratch = context ? context->m_geometry_scratch : m_geometry_scratch;
-			detail::tessellate(value, scratch);
-			submit_geometry(token, context, scratch.triangles, value.transform, value.fill_color,
-			                value.blend);
-			detail::tessellate_outline(value, scratch);
-			submit_geometry(token, context, scratch.triangles, value.transform, value.outline_color,
-			                value.blend);
-		}
-
-		void submit_geometry(std::uint64_t token, recording_context* context,
-		                     std::span<const glm::vec2> vertices, const ::mngl::two_d::transform& transform,
-		                     const color& tint, gpu::sprite_blend_mode blend)
-		{
-			ensure_frame(token, context);
 			if (vertices.empty())
 			{
 				return;
@@ -655,65 +767,67 @@ namespace mngl::two_d
 			const gpu::texture_region_view source{&white_page, glm::vec4(0.0f, 0.0f, 1.0f, 1.0f)};
 			gpu::quad_draw_state state{};
 			state.blend = blend;
-			if (context)
+			state = apply_frame_scissor(context, state);
+			if (context) [[unlikely]]
 			{
-				m_batcher.draw_geometry(context->m_batcher_context, vertices, source, transform.matrix(),
-				                        tint, state);
+				m_batcher.draw_geometry_unchecked<vertices_validated>(
+				    context->m_batcher_context, vertices, source, transform.matrix(), tint, state);
 			}
 			else
 			{
-				m_batcher.draw_geometry(vertices, source, transform.matrix(), tint, state);
+				m_batcher.draw_geometry_unchecked<vertices_validated>(vertices, source, transform.matrix(),
+				                                                      tint, state);
 			}
 		}
 
-		void submit_texture(std::uint64_t token, recording_context* context, const ::mngl::texture& source,
+		void submit_texture(recording_context* context, const ::mngl::texture& source,
 		                    const gpu::quad_transform& transform, const color& tint,
 		                    const gpu::quad_draw_state& state,
 		                    const std::shared_ptr<const ::mngl::hit_test_callback>& click_callback = {})
 		{
-			ensure_frame(token, context);
-			if (!source.valid())
+			if (!source.valid()) [[unlikely]]
 			{
 				throw std::invalid_argument("A 2D sprite source must be a valid texture");
 			}
-			if (m_active_target == &source)
+			if (m_active_target == &source) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "A render target texture cannot also be sampled in the same frame");
 			}
-			if (source.rendering())
+			if (source.rendering()) [[unlikely]]
 			{
 				throw std::logic_error("A texture being rendered to cannot be used as a 2D sprite source");
 			}
 
 			const auto& gpu_texture = source.raw_gpu_texture();
-			if (gpu_texture.device_raw() != m_device.raw())
+			if (gpu_texture.device_raw() != m_device.raw()) [[unlikely]]
 			{
 				throw std::invalid_argument("2D sprite source texture belongs to a different GPU device");
 			}
-			if (!gpu_texture.has_usage(gpu::texture::usage_flags::sampler))
+			if (!gpu_texture.has_usage(gpu::texture::usage_flags::sampler)) [[unlikely]]
 			{
 				throw std::invalid_argument("2D sprite source texture must have sampler usage");
 			}
 
 			const gpu::texture_region_view source_view{&gpu_texture, glm::vec4(0.0f, 0.0f, 1.0f, 1.0f)};
+			const auto draw_state = apply_frame_scissor(context, state);
 			if (context)
 			{
-				m_batcher.draw_quad(context->m_batcher_context, source_view, transform, tint, state);
+				m_batcher.draw_quad_unchecked(context->m_batcher_context, source_view, transform, tint,
+				                              draw_state);
 			}
 			else
 			{
-				m_batcher.draw_quad(source_view, transform, tint, state);
+				m_batcher.draw_quad_unchecked(source_view, transform, tint, draw_state);
 			}
-			record_hit_item(context, transform, glm::vec4(0.0f, 0.0f, 1.0f, 1.0f), &source, state,
+			record_hit_item(context, transform, glm::vec4(0.0f, 0.0f, 1.0f, 1.0f), &source, draw_state,
 			                ::mngl::detail::hit_test_shape::quad, 0.0f, click_callback);
 		}
 
-		void submit_circle(std::uint64_t token, recording_context* context, const circle& value)
+		void submit_circle(recording_context* context, const circle& value)
 		{
-			ensure_frame(token, context);
 			if (!std::isfinite(value.center.x) || !std::isfinite(value.center.y) ||
-			    !std::isfinite(value.radius) || value.radius < 0.0f)
+			    !std::isfinite(value.radius) || value.radius < 0.0f) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "Circle center and radius must be finite and radius non-negative");
@@ -729,16 +843,15 @@ namespace mngl::two_d
 			transform.matrix(value.transform.matrix());
 			auto state = value.state;
 			state.effect = gpu::quad_effect::circle;
-			submit_quad(token, context, m_textures.white_region(), transform, value.tint, state,
+			submit_quad(context, m_textures.white_region(), transform, value.tint, state,
 			            ::mngl::detail::hit_test_shape::circle, 0.0f, value.click_callback);
 		}
 
-		void submit_ellipse(std::uint64_t token, recording_context* context, const ellipse& value)
+		void submit_ellipse(recording_context* context, const ellipse& value)
 		{
-			ensure_frame(token, context);
 			if (!std::isfinite(value.center.x) || !std::isfinite(value.center.y) ||
 			    !std::isfinite(value.radii.x) || !std::isfinite(value.radii.y) || value.radii.x < 0.0f ||
-			    value.radii.y < 0.0f)
+			    value.radii.y < 0.0f) [[unlikely]]
 			{
 				throw std::invalid_argument("Ellipse center and radii must be finite and radii non-negative");
 			}
@@ -753,21 +866,19 @@ namespace mngl::two_d
 			transform.matrix(value.transform.matrix());
 			auto state = value.state;
 			state.effect = gpu::quad_effect::ellipse;
-			submit_quad(token, context, m_textures.white_region(), transform, value.tint, state,
+			submit_quad(context, m_textures.white_region(), transform, value.tint, state,
 			            ::mngl::detail::hit_test_shape::ellipse, 0.0f, value.click_callback);
 		}
 
-		void submit_rounded_rectangle(std::uint64_t token, recording_context* context,
-		                              const rounded_rectangle& value)
+		void submit_rounded_rectangle(recording_context* context, const rounded_rectangle& value)
 		{
-			ensure_frame(token, context);
-			if (!std::isfinite(value.radius) || value.radius < 0.0f)
+			if (!std::isfinite(value.radius) || value.radius < 0.0f) [[unlikely]]
 			{
 				throw std::invalid_argument("Rounded rectangle radius must be finite and non-negative");
 			}
 			if (!std::isfinite(value.bounds.pos.x) || !std::isfinite(value.bounds.pos.y) ||
 			    !std::isfinite(value.bounds.size.x) || !std::isfinite(value.bounds.size.y) ||
-			    value.bounds.size.x < 0.0f || value.bounds.size.y < 0.0f)
+			    value.bounds.size.x < 0.0f || value.bounds.size.y < 0.0f) [[unlikely]]
 			{
 				throw std::invalid_argument("Rounded rectangle bounds must be finite and non-negative");
 			}
@@ -783,7 +894,7 @@ namespace mngl::two_d
 			state.effect = gpu::quad_effect::rounded_rectangle;
 			const float half_min_dimension = std::min(value.bounds.size.x, value.bounds.size.y) * 0.5f;
 			state.effect_parameters.x = std::clamp(value.radius / half_min_dimension, 0.0f, 1.0f);
-			submit_quad(token, context, m_textures.white_region(), transform, value.tint, state,
+			submit_quad(context, m_textures.white_region(), transform, value.tint, state,
 			            ::mngl::detail::hit_test_shape::rounded_rectangle, value.radius,
 			            value.click_callback);
 		}
@@ -860,7 +971,7 @@ namespace mngl::two_d
 
 		void remember_font(recording_context* context, font& typeface)
 		{
-			if (typeface.device_raw() != m_device.raw())
+			if (typeface.device_raw() != m_device.raw()) [[unlikely]]
 			{
 				throw std::invalid_argument("Font and 2D renderer must use the same GPU device");
 			}
@@ -874,6 +985,7 @@ namespace mngl::two_d
 		static void validate_text_options(glm::vec2 top_left, const text_draw_options& options)
 		{
 			if (!::mngl::detail::finite(top_left) || !std::isfinite(options.height) || options.height <= 0.0f)
+			    [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "Text position must be finite and text height must be finite and positive");
@@ -881,7 +993,7 @@ namespace mngl::two_d
 
 			const glm::vec4 tint = options.tint.rgba_glsl();
 			if (!std::isfinite(tint.x) || !std::isfinite(tint.y) || !std::isfinite(tint.z) ||
-			    !std::isfinite(tint.w))
+			    !std::isfinite(tint.w)) [[unlikely]]
 			{
 				throw std::invalid_argument("Text tint channels must be finite");
 			}
@@ -891,14 +1003,14 @@ namespace mngl::two_d
 				const auto& clip = *options.clip_bounds;
 				if (!::mngl::detail::finite(clip.pos) || !::mngl::detail::finite(clip.size) ||
 				    clip.size.x < 0.0f || clip.size.y < 0.0f || !std::isfinite(clip.pos.x + clip.size.x) ||
-				    !std::isfinite(clip.pos.y + clip.size.y))
+				    !std::isfinite(clip.pos.y + clip.size.y)) [[unlikely]]
 				{
 					throw std::invalid_argument(
 					    "Text clip bounds must be finite with non-negative dimensions");
 				}
 			}
 
-			if (options.scissor && (options.scissor->w < 0 || options.scissor->h < 0))
+			if (options.scissor && (options.scissor->w < 0 || options.scissor->h < 0)) [[unlikely]]
 			{
 				throw std::invalid_argument("Text scissor dimensions must be non-negative");
 			}
@@ -908,7 +1020,7 @@ namespace mngl::two_d
 		                                     std::string_view text, glm::vec2 baseline, float scale,
 		                                     const text_draw_options& options)
 		{
-			if (!::mngl::detail::finite(baseline))
+			if (!::mngl::detail::finite(baseline)) [[unlikely]]
 			{
 				throw std::length_error("Text line exceeds the renderer's coordinate range");
 			}
@@ -919,8 +1031,9 @@ namespace mngl::two_d
 			const float tab_width = space.advance * scale * 4.0f;
 			gpu::quad_draw_state state{};
 			state.scissor = options.scissor;
+			state = apply_frame_scissor(context, state);
 			const bool scissor_empty =
-			    options.scissor && (options.scissor->w == 0 || options.scissor->h == 0);
+			    state.scissor && (state.scissor->w == 0 || state.scissor->h == 0);
 
 			for (std::size_t offset = 0; offset < text.size();)
 			{
@@ -933,7 +1046,7 @@ namespace mngl::two_d
 						const float relative_x = pen_x - baseline.x;
 						pen_x = baseline.x + (std::floor(relative_x / tab_width) + 1.0f) * tab_width;
 					}
-					if (!std::isfinite(pen_x))
+					if (!std::isfinite(pen_x)) [[unlikely]]
 					{
 						throw std::length_error("Text line exceeds the renderer's coordinate range");
 					}
@@ -950,7 +1063,7 @@ namespace mngl::two_d
 						        : typeface.kerning(previous_codepoint, metrics.codepoint);
 					pen_x += kerning * scale;
 				}
-				if (!std::isfinite(pen_x))
+				if (!std::isfinite(pen_x)) [[unlikely]]
 				{
 					throw std::length_error("Text line exceeds the renderer's coordinate range");
 				}
@@ -966,7 +1079,7 @@ namespace mngl::two_d
 					if (!::mngl::detail::finite(glyph_bounds.pos) ||
 					    !::mngl::detail::finite(glyph_bounds.size) ||
 					    !std::isfinite(glyph_bounds.pos.x + glyph_bounds.size.x) ||
-					    !std::isfinite(glyph_bounds.pos.y + glyph_bounds.size.y))
+					    !std::isfinite(glyph_bounds.pos.y + glyph_bounds.size.y)) [[unlikely]]
 					{
 						throw std::length_error("Text glyph exceeds the renderer's coordinate range");
 					}
@@ -975,7 +1088,7 @@ namespace mngl::two_d
 					if (!scissor_empty && in_clip)
 					{
 						const auto glyph = context ? metrics : typeface.glyph(codepoint, true);
-						if (!glyph.atlas_page)
+						if (!glyph.atlas_page) [[unlikely]]
 						{
 							throw std::logic_error("Rasterized text glyph has no atlas page");
 						}
@@ -986,18 +1099,18 @@ namespace mngl::two_d
 						                                      glyph.uv_bounds};
 						if (context)
 						{
-							m_batcher.draw_quad(context->m_batcher_context, source, transform, options.tint,
-							                    state);
+							m_batcher.draw_quad_unchecked(context->m_batcher_context, source, transform,
+							                              options.tint, state);
 						}
 						else
 						{
-							m_batcher.draw_quad(source, transform, options.tint, state);
+							m_batcher.draw_quad_unchecked(source, transform, options.tint, state);
 						}
 					}
 				}
 
 				pen_x += metrics.advance * scale;
-				if (!std::isfinite(pen_x))
+				if (!std::isfinite(pen_x)) [[unlikely]]
 				{
 					throw std::length_error("Text line exceeds the renderer's coordinate range");
 				}
@@ -1005,7 +1118,7 @@ namespace mngl::two_d
 			}
 
 			const float width = pen_x - baseline.x;
-			if (!std::isfinite(width))
+			if (!std::isfinite(width)) [[unlikely]]
 			{
 				throw std::length_error("Text line exceeds the renderer's coordinate range");
 			}
@@ -1028,10 +1141,9 @@ namespace mngl::two_d
 			                ::mngl::detail::hit_test_shape::quad, 0.0f, {});
 		}
 
-		void submit_text(std::uint64_t token, recording_context* context, font& typeface,
-		                 std::string_view text, glm::vec2 top_left, const text_draw_options& options)
+		void submit_text(recording_context* context, font& typeface, std::string_view text,
+		                 glm::vec2 top_left, const text_draw_options& options)
 		{
-			ensure_frame(token, context);
 			validate_text_options(top_left, options);
 			if (text.empty() ||
 			    (options.clip_bounds &&
@@ -1046,7 +1158,7 @@ namespace mngl::two_d
 			const float line_height = typeface.line_height() * scale;
 			const float ascent = typeface.ascent() * scale;
 			if (!std::isfinite(scale) || scale <= 0.0f || !std::isfinite(line_height) ||
-			    line_height <= 0.0f || !std::isfinite(ascent))
+			    line_height <= 0.0f || !std::isfinite(ascent)) [[unlikely]]
 			{
 				throw std::invalid_argument("Font metrics cannot be scaled to the requested text height");
 			}
@@ -1065,7 +1177,7 @@ namespace mngl::two_d
 				}
 
 				const float top = top_left.y - static_cast<float>(line_index) * line_height;
-				if (!std::isfinite(top))
+				if (!std::isfinite(top)) [[unlikely]]
 				{
 					throw std::length_error("Text block exceeds the renderer's coordinate range");
 				}
@@ -1091,6 +1203,7 @@ namespace mngl::two_d
 			rectangle bounds{top_left.x, top_left.y - block_height, max_width, block_height};
 			if (!::mngl::detail::finite(bounds.pos) || !::mngl::detail::finite(bounds.size) ||
 			    !std::isfinite(bounds.pos.x + bounds.size.x) || !std::isfinite(bounds.pos.y + bounds.size.y))
+			    [[unlikely]]
 			{
 				throw std::length_error("Text block exceeds the renderer's coordinate range");
 			}
@@ -1101,13 +1214,11 @@ namespace mngl::two_d
 			record_text_hit(context, bounds, options);
 		}
 
-		void submit_text_document(std::uint64_t token, recording_context* context, font& typeface,
-		                          const text_document& document, glm::vec2 top_left,
-		                          const text_draw_options& options)
+		void submit_text_document(recording_context* context, font& typeface, const text_document& document,
+		                          glm::vec2 top_left, const text_draw_options& options)
 		{
-			ensure_frame(token, context);
 			validate_text_options(top_left, options);
-			if (!options.clip_bounds)
+			if (!options.clip_bounds) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "Drawing a text document requires clip_bounds for line virtualization");
@@ -1124,7 +1235,7 @@ namespace mngl::two_d
 			const float line_height = typeface.line_height() * scale;
 			const float ascent = typeface.ascent() * scale;
 			if (!std::isfinite(scale) || scale <= 0.0f || !std::isfinite(line_height) ||
-			    line_height <= 0.0f || !std::isfinite(ascent))
+			    line_height <= 0.0f || !std::isfinite(ascent)) [[unlikely]]
 			{
 				throw std::invalid_argument("Font metrics cannot be scaled to the requested text height");
 			}
@@ -1151,7 +1262,7 @@ namespace mngl::two_d
 			for (std::size_t index = first_line; index < end_line; ++index)
 			{
 				const float line_top = top_left.y - static_cast<float>(index) * line_height;
-				if (!std::isfinite(line_top))
+				if (!std::isfinite(line_top)) [[unlikely]]
 				{
 					throw std::length_error("Text document exceeds the renderer's coordinate range");
 				}
@@ -1165,6 +1276,7 @@ namespace mngl::two_d
 			                 block_height};
 			if (!::mngl::detail::finite(bounds.pos) || !::mngl::detail::finite(bounds.size) ||
 			    !std::isfinite(bounds.pos.x + bounds.size.x) || !std::isfinite(bounds.pos.y + bounds.size.y))
+			    [[unlikely]]
 			{
 				throw std::length_error("Text document exceeds the renderer's coordinate range");
 			}
@@ -1175,12 +1287,12 @@ namespace mngl::two_d
 		void finish_frame(frame_2d& frame, gpu::command_buffer* external_command_buffer = nullptr)
 		{
 			ensure_frame(frame.m_token);
-			if (frame.m_recording_context)
+			if (frame.m_recording_context) [[unlikely]]
 			{
 				throw std::logic_error("A worker recording context cannot finish its parent frame");
 			}
-			if (m_recording_state &&
-			    m_recording_state->outstanding_recording_contexts.load(std::memory_order_acquire) != 0)
+			if (m_recording_state && m_recording_state->outstanding_recording_contexts.load(
+			                             std::memory_order_acquire) != 0) [[unlikely]]
 			{
 				throw std::logic_error(
 				    "Finish the worker recording contexts and merge them before finishing the frame");
@@ -1206,7 +1318,7 @@ namespace mngl::two_d
 
 				auto flush = [&](gpu::command_buffer& cmd)
 				{
-					if (!cmd.valid() || cmd.device_raw() != m_device.raw())
+					if (!cmd.valid() || cmd.device_raw() != m_device.raw()) [[unlikely]]
 					{
 						throw std::invalid_argument(
 						    "2D frame command buffer must belong to the renderer's GPU device");
@@ -1215,7 +1327,7 @@ namespace mngl::two_d
 					font_uploads_started = true;
 					for (font* typeface : m_used_fonts)
 					{
-						if (!typeface)
+						if (!typeface) [[unlikely]]
 						{
 							throw std::logic_error("2D frame contains a null font reference");
 						}
@@ -1234,7 +1346,7 @@ namespace mngl::two_d
 					}
 					else
 					{
-						if (!m_window)
+						if (!m_window) [[unlikely]]
 						{
 							throw std::logic_error("This 2D renderer requires a render target texture");
 						}
@@ -1274,6 +1386,8 @@ namespace mngl::two_d
 				m_batcher.cancel_frame();
 				m_active_frame_token = 0;
 				m_active_target = nullptr;
+				m_active_target_size = {};
+				m_active_scissor.reset();
 				m_recording_state.reset();
 				m_hit_test_items.clear();
 				m_used_fonts.clear();
@@ -1284,6 +1398,8 @@ namespace mngl::two_d
 
 			m_active_frame_token = 0;
 			m_active_target = nullptr;
+			m_active_target_size = {};
+			m_active_scissor.reset();
 			m_recording_state.reset();
 			m_hit_test_items.clear();
 			m_used_fonts.clear();
@@ -1298,6 +1414,8 @@ namespace mngl::two_d
 				m_batcher.cancel_frame();
 				m_active_frame_token = 0;
 				m_active_target = nullptr;
+				m_active_target_size = {};
+				m_active_scissor.reset();
 				m_recording_state.reset();
 				m_hit_test_items.clear();
 				m_used_fonts.clear();
@@ -1336,9 +1454,95 @@ namespace mngl::two_d
 			return coordinate_projection(target_size);
 		}
 
+		[[nodiscard]] bool bounds_visible(const frame_2d& frame, const ::mngl::rectangle& bounds) const
+		{
+			if (!std::isfinite(bounds.pos.x) || !std::isfinite(bounds.pos.y) ||
+			    !std::isfinite(bounds.size.x) || !std::isfinite(bounds.size.y) || bounds.size.x < 0.0f ||
+			    bounds.size.y < 0.0f || !std::isfinite(bounds.pos.x + bounds.size.x) ||
+			    !std::isfinite(bounds.pos.y + bounds.size.y)) [[unlikely]]
+			{
+				throw std::invalid_argument("Visible 2D bounds must be finite and have non-negative dimensions");
+			}
+			if (bounds.size.x == 0.0f || bounds.size.y == 0.0f || m_active_target_size.x == 0 ||
+			    m_active_target_size.y == 0)
+			{
+				return false;
+			}
+
+			const float right = bounds.pos.x + bounds.size.x;
+			const float top = bounds.pos.y + bounds.size.y;
+			const std::array<glm::vec2, 4> corners{{
+			    bounds.pos,
+			    {right, bounds.pos.y},
+			    {right, top},
+			    {bounds.pos.x, top},
+			}};
+			return !m_batcher.outside_target(projection_for_frame(frame, m_active_target_size), corners);
+		}
+
+		[[nodiscard]] std::optional<SDL_Rect> exchange_frame_scissor(const frame_2d& frame, SDL_Rect scissor)
+		{
+			ensure_frame(frame.m_token);
+			if (frame.m_recording_context) [[unlikely]]
+			{
+				throw std::logic_error("Cached-layer scissor scopes require the parent frame");
+			}
+			if (scissor.w < 0 || scissor.h < 0) [[unlikely]]
+			{
+				throw std::invalid_argument("Frame scissor dimensions must be non-negative");
+			}
+
+			auto previous = m_active_scissor;
+			m_active_scissor = previous ? intersect_scissors(*previous, scissor) : scissor;
+			return previous;
+		}
+
+		void restore_frame_scissor(std::optional<SDL_Rect> scissor) noexcept
+		{
+			m_active_scissor = scissor;
+		}
+
+		[[nodiscard]] gpu::quad_draw_state apply_frame_scissor(const recording_context* context,
+		                                                       gpu::quad_draw_state state) const noexcept
+		{
+			const auto& frame_scissor = context ? context->m_scissor : m_active_scissor;
+			if (!frame_scissor)
+			{
+				return state;
+			}
+			if (!state.scissor)
+			{
+				state.scissor = frame_scissor;
+			}
+			else if (state.scissor->w >= 0 && state.scissor->h >= 0)
+			{
+				state.scissor = intersect_scissors(*state.scissor, *frame_scissor);
+			}
+			return state;
+		}
+
+		[[nodiscard]] static SDL_Rect intersect_scissors(const SDL_Rect& left,
+		                                                 const SDL_Rect& right) noexcept
+		{
+			const auto left_x = static_cast<std::int64_t>(left.x);
+			const auto left_y = static_cast<std::int64_t>(left.y);
+			const auto right_x = static_cast<std::int64_t>(right.x);
+			const auto right_y = static_cast<std::int64_t>(right.y);
+			const auto x0 = std::max(left_x, right_x);
+			const auto y0 = std::max(left_y, right_y);
+			const auto x1 = std::min(left_x + left.w, right_x + right.w);
+			const auto y1 = std::min(left_y + left.h, right_y + right.h);
+			if (x1 <= x0 || y1 <= y0)
+			{
+				return {static_cast<int>(x0), static_cast<int>(y0), 0, 0};
+			}
+			return {static_cast<int>(x0), static_cast<int>(y0), static_cast<int>(x1 - x0),
+			        static_cast<int>(y1 - y0)};
+		}
+
 		void ensure_frame(std::uint64_t token) const
 		{
-			if (!owns_frame(token))
+			if (!owns_frame(token)) [[unlikely]]
 			{
 				throw std::logic_error("frame_2d is no longer active");
 			}
@@ -1347,10 +1551,10 @@ namespace mngl::two_d
 		void ensure_frame(std::uint64_t token, recording_context* context) const
 		{
 			ensure_frame(token);
-			if (!context)
+			if (!context) [[likely]]
 			{
-				if (m_recording_state &&
-				    m_recording_state->outstanding_recording_contexts.load(std::memory_order_acquire) != 0)
+				if (m_recording_state && m_recording_state->outstanding_recording_contexts.load(
+				                             std::memory_order_acquire) != 0) [[unlikely]]
 				{
 					throw std::logic_error(
 					    "Finish and merge worker recording contexts before drawing on the parent frame");
@@ -1359,7 +1563,7 @@ namespace mngl::two_d
 			}
 
 			if (!context->valid() || context->m_finished || context->m_control != m_frame_control ||
-			    context->m_token != token || context->m_recording_state != m_recording_state)
+			    context->m_token != token || context->m_recording_state != m_recording_state) [[unlikely]]
 			{
 				throw std::logic_error("Recording context is no longer active for this frame");
 			}
@@ -1378,6 +1582,8 @@ namespace mngl::two_d
 		std::shared_ptr<detail::renderer_frame_control> m_frame_control;
 		std::shared_ptr<detail::renderer_frame_state> m_recording_state;
 		::mngl::texture* m_active_target = nullptr;
+		glm::uvec2 m_active_target_size{};
+		std::optional<SDL_Rect> m_active_scissor;
 		std::vector<::mngl::detail::hit_test_item> m_hit_test_items;
 		std::vector<font*> m_used_fonts;
 		detail::tessellation_scratch m_geometry_scratch;
@@ -1420,11 +1626,12 @@ namespace mngl::two_d
 
 		[[nodiscard]] frame_start begin_frame(::mngl::texture& target,
 		                                      const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f),
-		                                      bool allow_custom_materials = false)
+		                                      bool allow_custom_materials = false,
+		                                      bool preserve_target_contents = false)
 		{
 			std::lock_guard lock(m_renderer_mutex);
 			auto& target_renderer = renderer_for_locked(target.format(), allow_custom_materials);
-			auto frame = target_renderer.begin_frame(target, clear_color);
+			auto frame = target_renderer.begin_frame(target, clear_color, preserve_target_contents);
 			return {&target_renderer, std::move(frame)};
 		}
 
@@ -1432,7 +1639,7 @@ namespace mngl::two_d
 		[[nodiscard]] renderer& renderer_for_locked(gpu::texture_format target_format,
 		                                            bool allow_custom_materials)
 		{
-			if (target_format == gpu::texture_format::invalid)
+			if (target_format == gpu::texture_format::invalid) [[unlikely]]
 			{
 				throw std::invalid_argument("A render context requires a valid target format");
 			}

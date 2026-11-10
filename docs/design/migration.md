@@ -31,6 +31,9 @@ samples, а активный поток теперь необходимо ост
 
 `error.hpp` и `runtime.hpp` позволяют подключить базовый слой без логгера, GLM и image API.
 Старые глобальные имена доступны через `utilities.hpp`; новый код использует `mngl::`.
+Публичные модульные заголовки больше не включают `utilities.hpp` транзитивно. Если старый
+код полагался на глобальные aliases или макросы после одного `window.hpp`/`input.hpp`, добавьте
+явный `#include <MNGL/utilities.hpp>` либо замените имя на его вариант в `mngl::`.
 Заголовок визуализации деревьев находится в `extras/tree_renderer.hpp`; прежний
 `tree_renderer.hpp` перенаправляет include для совместимости.
 
@@ -39,7 +42,10 @@ samples, а активный поток теперь необходимо ост
 (`from_hsv`, `to_hsl`, `intersection_point`, `intersects_line`, `union_with`); старые
 вызовы сохраняются wrappers. `current_view()` — основной getter; `get_view()` сохранён.
 `mngl::log` и `mngl::logger` заменяют глобальный `logger` и тип `Logger`, которые
-пока доступны для совместимости. `runtime::ensure()` заменяет ручную проверку `SDL_Runtime`.
+пока доступны через `logger.h`/`utilities.hpp` для совместимости. Новый код подключает
+`logger.hpp`. `runtime::ensure()` заменяет ручную проверку `SDL_Runtime`.
+Глобальные scene-culling и dirty-region настройки переехали в `mngl::gpu`; прежние
+`mngl::two_d::enable_*`/`disable_*` функции остаются совместимыми обёртками.
 `gpu::device::wait()` теперь бросает при отказе; `try_wait()` возвращает `expected<void, sdl_error>`.
 
 `updatable` имеет стабильную идентичность в update registry и больше не копируется и

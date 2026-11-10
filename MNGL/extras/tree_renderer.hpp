@@ -372,14 +372,14 @@ namespace mngl::two_d
 				const std::size_t child_count = source->child_count();
 				if (source->is_leaf())
 				{
-					if (child_count != 0 || key_count == 0)
+					if (child_count != 0 || key_count == 0) [[unlikely]]
 					{
 						throw std::invalid_argument("B+ tree leaf has an invalid key or child count");
 					}
 					leaves.emplace_back(source, index);
 					continue;
 				}
-				if (key_count == 0 || child_count != key_count + 1)
+				if (key_count == 0 || child_count != key_count + 1) [[unlikely]]
 				{
 					throw std::invalid_argument("B+ tree internal node must have one more child than keys");
 				}
@@ -389,7 +389,7 @@ namespace mngl::two_d
 				for (std::size_t i = 0; i < child_count; ++i)
 				{
 					const node_type* child = source->child(i);
-					if (!child)
+					if (!child) [[unlikely]]
 					{
 						throw std::invalid_argument("B+ tree internal node contains a null child");
 					}
@@ -409,7 +409,7 @@ namespace mngl::two_d
 				const node_type* expected_previous = i == 0 ? nullptr : leaves[i - 1].first;
 				const node_type* expected_next = i + 1 == leaves.size() ? nullptr : leaves[i + 1].first;
 				if (leaves[i].first->previous_leaf() != expected_previous ||
-				    leaves[i].first->next_leaf() != expected_next)
+				    leaves[i].first->next_leaf() != expected_next) [[unlikely]]
 				{
 					throw std::invalid_argument("B+ tree leaf chain does not match child order");
 				}
@@ -425,7 +425,7 @@ namespace mngl::two_d
 		[[nodiscard]] inline float checked_tree_coordinate(double value)
 		{
 			if (!std::isfinite(value) || value > std::numeric_limits<float>::max() ||
-			    value < -std::numeric_limits<float>::max())
+			    value < -std::numeric_limits<float>::max()) [[unlikely]]
 			{
 				throw std::length_error("Tree layout exceeds the renderer's coordinate range");
 			}
@@ -434,7 +434,7 @@ namespace mngl::two_d
 
 		[[nodiscard]] inline double checked_tree_world_coordinate(double value)
 		{
-			if (!std::isfinite(value))
+			if (!std::isfinite(value)) [[unlikely]]
 			{
 				throw std::length_error("Tree layout exceeds the CPU coordinate range");
 			}
@@ -452,7 +452,7 @@ namespace mngl::two_d
 		{
 			if (!std::isfinite(area.pos.x) || !std::isfinite(area.pos.y) || !std::isfinite(area.size.x) ||
 			    !std::isfinite(area.size.y) || !std::isfinite(area.pos.x + area.size.x) ||
-			    !std::isfinite(area.pos.y + area.size.y) || area.size.x <= 0.0f || area.size.y <= 0.0f)
+			    !std::isfinite(area.pos.y + area.size.y) || area.size.x <= 0.0f || area.size.y <= 0.0f) [[unlikely]]
 			{
 				throw std::invalid_argument("Tree drawing area must be finite and positive");
 			}
@@ -460,7 +460,7 @@ namespace mngl::two_d
 
 		inline void validate_tree_draw_options(const tree_draw_options& options)
 		{
-			if (!std::isfinite(options.coordinate_origin.x) || !std::isfinite(options.coordinate_origin.y))
+			if (!std::isfinite(options.coordinate_origin.x) || !std::isfinite(options.coordinate_origin.y)) [[unlikely]]
 			{
 				throw std::invalid_argument("Tree coordinate origin must be finite");
 			}
@@ -477,7 +477,7 @@ namespace mngl::two_d
 			    !std::isfinite(options.border_width) || options.border_width < 0.0f ||
 			    options.border_width >= std::min(options.node_size.x, options.node_size.y) * 0.5f ||
 			    !std::isfinite(options.value_text_height) || options.value_text_height <= 0.0f ||
-			    !std::isfinite(options.metadata_text_height) || options.metadata_text_height <= 0.0f)
+			    !std::isfinite(options.metadata_text_height) || options.metadata_text_height <= 0.0f) [[unlikely]]
 			{
 				throw std::invalid_argument("Tree drawing options contain invalid dimensions");
 			}
@@ -486,7 +486,7 @@ namespace mngl::two_d
 			    !finite_color(options.black_node_fill) || !finite_color(options.value_color) ||
 			    !finite_color(options.metadata_color) || !finite_color(options.b_plus_leaf_fill) ||
 			    !finite_color(options.b_plus_internal_fill) || !finite_color(options.highlight_border) ||
-			    !finite_color(options.leaf_link_color))
+			    !finite_color(options.leaf_link_color)) [[unlikely]]
 			{
 				throw std::invalid_argument("Tree drawing colors must be finite");
 			}
@@ -579,7 +579,7 @@ namespace mngl::two_d
 			buffer[1] = '=';
 			const auto [value_end, conversion_error] =
 			    std::to_chars(buffer.data() + 2, buffer.data() + buffer.size(), node.metadata_value);
-			if (conversion_error != std::errc{})
+			if (conversion_error != std::errc{}) [[unlikely]]
 			{
 				throw std::logic_error("Could not format tree node metadata");
 			}
@@ -659,13 +659,13 @@ namespace mngl::two_d
 			const std::size_t count = snapshot.nodes.size();
 			if (count == 0)
 			{
-				if (snapshot.root != no_tree_node || !snapshot.keys.empty() || !snapshot.children.empty())
+				if (snapshot.root != no_tree_node || !snapshot.keys.empty() || !snapshot.children.empty()) [[unlikely]]
 				{
 					throw std::invalid_argument("Empty tree snapshot contains nodes or references");
 				}
 				return;
 			}
-			if (snapshot.root >= count)
+			if (snapshot.root >= count) [[unlikely]]
 			{
 				throw std::invalid_argument("Tree snapshot root is outside the node array");
 			}
@@ -675,11 +675,11 @@ namespace mngl::two_d
 				if (node.key_begin > snapshot.keys.size() ||
 				    node.key_count > snapshot.keys.size() - node.key_begin ||
 				    node.child_begin > snapshot.children.size() ||
-				    node.child_count > snapshot.children.size() - node.child_begin)
+				    node.child_count > snapshot.children.size() - node.child_begin) [[unlikely]]
 				{
 					throw std::invalid_argument("Tree snapshot contains an invalid node range");
 				}
-				if (node.next_leaf != no_tree_node && node.next_leaf >= count)
+				if (node.next_leaf != no_tree_node && node.next_leaf >= count) [[unlikely]]
 				{
 					throw std::invalid_argument("Tree snapshot leaf link is outside the node array");
 				}
@@ -699,15 +699,15 @@ namespace mngl::two_d
 				for (std::size_t i = 0; i < node.child_count; ++i)
 				{
 					const std::size_t child = snapshot.children[node.child_begin + i];
-					if (child >= count || child <= current)
+					if (child >= count || child <= current) [[unlikely]]
 					{
 						throw std::invalid_argument("Tree snapshot child is invalid or not parent-first");
 					}
-					if (discovered[child] != 0)
+					if (discovered[child] != 0) [[unlikely]]
 					{
 						throw std::invalid_argument("Tree snapshot contains a cycle or shared child");
 					}
-					if (depths[current] == std::numeric_limits<std::size_t>::max())
+					if (depths[current] == std::numeric_limits<std::size_t>::max()) [[unlikely]]
 					{
 						throw std::length_error("Tree depth exceeds the supported range");
 					}
@@ -718,12 +718,12 @@ namespace mngl::two_d
 					pending.push_back(child);
 				}
 				if (node.next_leaf != no_tree_node &&
-				    (node.child_count != 0 || snapshot.nodes[node.next_leaf].child_count != 0))
+				    (node.child_count != 0 || snapshot.nodes[node.next_leaf].child_count != 0)) [[unlikely]]
 				{
 					throw std::invalid_argument("Tree snapshot leaf links must connect leaf nodes");
 				}
 			}
-			if (reachable_count != count)
+			if (reachable_count != count) [[unlikely]]
 			{
 				throw std::invalid_argument("Tree snapshot contains unreachable nodes");
 			}
@@ -739,7 +739,7 @@ namespace mngl::two_d
 				const double key_slots =
 				    static_cast<double>(std::max<std::size_t>(1, snapshot.nodes[index].key_count));
 				node_widths[index] = key_slots * cell_width;
-				if (!std::isfinite(node_widths[index]))
+				if (!std::isfinite(node_widths[index])) [[unlikely]]
 				{
 					throw std::length_error("Tree node width exceeds the supported range");
 				}
@@ -759,7 +759,7 @@ namespace mngl::two_d
 				}
 
 				subtree_widths[index] = std::max(node_widths[index], children_width);
-				if (!std::isfinite(subtree_widths[index]))
+				if (!std::isfinite(subtree_widths[index])) [[unlikely]]
 				{
 					throw std::length_error("Tree layout width exceeds the supported range");
 				}
@@ -864,14 +864,14 @@ namespace mngl::two_d
 					const std::size_t count = model.nodes.size();
 					if (count == 0)
 					{
-						if (model.root != tree_draw_model::no_node)
+						if (model.root != tree_draw_model::no_node) [[unlikely]]
 						{
 							throw std::invalid_argument(
 								"An empty tree model must not specify a root");
 						}
 						return result;
 					}
-					if (model.root >= count)
+					if (model.root >= count) [[unlikely]]
 					{
 						throw std::invalid_argument(
 							"Tree model root is outside the node array");
@@ -888,19 +888,19 @@ namespace mngl::two_d
 					for (std::size_t index = 0; index < count; ++index)
 					{
 						const auto& node = model.nodes[index];
-						if (!std::isfinite(node.width) || node.width < 0.0f)
+						if (!std::isfinite(node.width) || node.width < 0.0f) [[unlikely]]
 						{
 							throw std::invalid_argument(
 								"Tree model node width must be finite and non-negative");
 						}
 						if (!node.key_metadata.empty() &&
-							node.key_metadata.size() != node.keys.size())
+							node.key_metadata.size() != node.keys.size()) [[unlikely]]
 						{
 							throw std::invalid_argument(
 								"Tree model key metadata must match its key count");
 						}
 						if (node.cell_widths.size() != 0 &&
-							node.cell_widths.size() != node.keys.size())
+							node.cell_widths.size() != node.keys.size()) [[unlikely]]
 						{
 							throw std::invalid_argument(
 								"Tree model cell widths must match its key count");
@@ -918,14 +918,14 @@ namespace mngl::two_d
 								"Tree model contains an unknown node style");
 						}
 						if (node.next_leaf != tree_draw_model::no_node &&
-							node.next_leaf >= count)
+							node.next_leaf >= count) [[unlikely]]
 						{
 							throw std::invalid_argument(
 								"Tree model leaf link is outside the node array");
 						}
 						for (const std::size_t child : node.children)
 						{
-							if (child != tree_draw_model::no_node && child >= count)
+							if (child != tree_draw_model::no_node && child >= count) [[unlikely]]
 							{
 								throw std::invalid_argument(
 									"Tree model child is outside the node array");
@@ -937,7 +937,7 @@ namespace mngl::two_d
 						{
 							for (const float cell_width : node.cell_widths)
 							{
-								if (!std::isfinite(cell_width) || cell_width <= 0.0f)
+								if (!std::isfinite(cell_width) || cell_width <= 0.0f) [[unlikely]]
 								{
 									throw std::invalid_argument(
 										"Tree model cell widths must be finite and positive");
@@ -946,7 +946,7 @@ namespace mngl::two_d
 							}
 							if (node.width > 0.0f &&
 								std::abs(node_width - node.width) >
-									std::max(0.001, node_width * 0.00001))
+									std::max(0.001, node_width * 0.00001)) [[unlikely]]
 							{
 								throw std::invalid_argument(
 									"Tree model node width must equal the sum of its cell widths");
@@ -963,7 +963,7 @@ namespace mngl::two_d
 								options.node_size.x;
 						}
 						if (!std::isfinite(node_width) ||
-							node_width <= 2.0 * options.border_width)
+							node_width <= 2.0 * options.border_width) [[unlikely]]
 						{
 							throw std::invalid_argument(
 								"Tree model node width is too small for its border");
@@ -1024,13 +1024,13 @@ namespace mngl::two_d
 							{
 								continue;
 							}
-							if (state[child] != 0)
+							if (state[child] != 0) [[unlikely]]
 							{
 								throw std::invalid_argument(
 									"Tree model contains a cycle or shared child");
 							}
 							if (depths[current.index] ==
-								std::numeric_limits<std::size_t>::max())
+								std::numeric_limits<std::size_t>::max()) [[unlikely]]
 							{
 								throw std::length_error(
 									"Tree depth exceeds the supported range");
@@ -1045,7 +1045,7 @@ namespace mngl::two_d
 					if (std::any_of(
 						state.begin(),
 						state.end(),
-						[](unsigned char value) { return value == 0; }))
+						[](unsigned char value) { return value == 0; })) [[unlikely]]
 					{
 						throw std::invalid_argument(
 							"Tree model contains unreachable nodes");
@@ -1055,7 +1055,7 @@ namespace mngl::two_d
 						const std::size_t next = model.nodes[index].next_leaf;
 						if (next != tree_draw_model::no_node &&
 							(has_tree_model_children(model.nodes[index]) ||
-								has_tree_model_children(model.nodes[next])))
+								has_tree_model_children(model.nodes[next]))) [[unlikely]]
 						{
 							throw std::invalid_argument(
 								"Tree model leaf links must connect leaf nodes");
@@ -1080,7 +1080,7 @@ namespace mngl::two_d
 						}
 						subtree_widths[index] =
 							std::max(node_widths[index], children_width);
-						if (!std::isfinite(subtree_widths[index]))
+						if (!std::isfinite(subtree_widths[index])) [[unlikely]]
 						{
 							throw std::length_error(
 								"Tree layout width exceeds the supported range");
@@ -1318,14 +1318,14 @@ namespace mngl::two_d
 					if (!std::isfinite(raster_height) ||
 						raster_height <= 0.0f ||
 						!std::isfinite(line_height) ||
-						line_height <= 0.0f)
+						line_height <= 0.0f) [[unlikely]]
 					{
 						throw std::logic_error(
 							"Tree drawing requires a valid font");
 					}
 					const float line_height_factor = line_height / raster_height;
 					if (!std::isfinite(line_height_factor) ||
-						line_height_factor <= 0.0f)
+						line_height_factor <= 0.0f) [[unlikely]]
 					{
 						throw std::logic_error(
 							"Tree drawing font metrics cannot be scaled");
@@ -1492,12 +1492,12 @@ namespace mngl::two_d
 			const float raster_height = value_font.raster_height_pixels();
 			const float line_height = value_font.line_height();
 			if (!std::isfinite(raster_height) || raster_height <= 0.0f || !std::isfinite(line_height) ||
-			    line_height <= 0.0f)
+			    line_height <= 0.0f) [[unlikely]]
 			{
 				throw std::logic_error("Tree drawing requires a valid font");
 			}
 			const float line_height_factor = line_height / raster_height;
-			if (!std::isfinite(line_height_factor) || line_height_factor <= 0.0f)
+			if (!std::isfinite(line_height_factor) || line_height_factor <= 0.0f) [[unlikely]]
 			{
 				throw std::logic_error("Tree drawing font metrics cannot be scaled");
 			}
@@ -1568,7 +1568,7 @@ namespace mngl::two_d
 					const std::int64_t value = snapshot.keys[node.key_begin + i];
 					const auto [value_end, conversion_error] =
 					    std::to_chars(value_buffer.data(), value_buffer.data() + value_buffer.size(), value);
-					if (conversion_error != std::errc{})
+					if (conversion_error != std::errc{}) [[unlikely]]
 					{
 						throw std::logic_error("Could not format an std::int64_t tree key");
 					}
@@ -1613,13 +1613,13 @@ namespace mngl::two_d
 			const std::size_t count = model.nodes.size();
 			if (count == 0)
 			{
-				if (model.root != tree_draw_model::no_node)
+				if (model.root != tree_draw_model::no_node) [[unlikely]]
 				{
 					throw std::invalid_argument("An empty tree model must not specify a root");
 				}
 				return result;
 			}
-			if (model.root >= count)
+			if (model.root >= count) [[unlikely]]
 			{
 				throw std::invalid_argument("Tree model root is outside the node array");
 			}
@@ -1633,15 +1633,15 @@ namespace mngl::two_d
 			for (std::size_t index = 0; index < count; ++index)
 			{
 				const auto& node = model.nodes[index];
-				if (!std::isfinite(node.width) || node.width < 0.0f)
+				if (!std::isfinite(node.width) || node.width < 0.0f) [[unlikely]]
 				{
 					throw std::invalid_argument("Tree model node width must be finite and non-negative");
 				}
-				if (!node.key_metadata.empty() && node.key_metadata.size() != node.keys.size())
+				if (!node.key_metadata.empty() && node.key_metadata.size() != node.keys.size()) [[unlikely]]
 				{
 					throw std::invalid_argument("Tree model key metadata must match its key count");
 				}
-				if (!node.cell_widths.empty() && node.cell_widths.size() != node.keys.size())
+				if (!node.cell_widths.empty() && node.cell_widths.size() != node.keys.size()) [[unlikely]]
 				{
 					throw std::invalid_argument("Tree model cell widths must match its key count");
 				}
@@ -1656,13 +1656,13 @@ namespace mngl::two_d
 				default:
 					throw std::invalid_argument("Tree model contains an unknown node style");
 				}
-				if (node.next_leaf != tree_draw_model::no_node && node.next_leaf >= count)
+				if (node.next_leaf != tree_draw_model::no_node && node.next_leaf >= count) [[unlikely]]
 				{
 					throw std::invalid_argument("Tree model leaf link is outside the node array");
 				}
 				for (const std::size_t child : node.children)
 				{
-					if (child != tree_draw_model::no_node && child >= count)
+					if (child != tree_draw_model::no_node && child >= count) [[unlikely]]
 					{
 						throw std::invalid_argument("Tree model child is outside the node array");
 					}
@@ -1674,14 +1674,14 @@ namespace mngl::two_d
 				{
 					for (const float cell_width : node.cell_widths)
 					{
-						if (!std::isfinite(cell_width) || cell_width <= 0.0f)
+						if (!std::isfinite(cell_width) || cell_width <= 0.0f) [[unlikely]]
 						{
 							throw std::invalid_argument("Tree model cell widths must be finite and positive");
 						}
 						node_width += cell_width;
 					}
 					if (node.width > 0.0f &&
-					    std::abs(node_width - node.width) > std::max(0.001, node_width * 0.00001))
+					    std::abs(node_width - node.width) > std::max(0.001, node_width * 0.00001)) [[unlikely]]
 					{
 						throw std::invalid_argument("Tree model width must equal the sum of its cell widths");
 					}
@@ -1708,7 +1708,7 @@ namespace mngl::two_d
 						layout_node.cell_widths.assign(node.keys.size(), options.node_size.x);
 					}
 				}
-				if (!std::isfinite(node_width) || node_width <= 2.0 * options.border_width)
+				if (!std::isfinite(node_width) || node_width <= 2.0 * options.border_width) [[unlikely]]
 				{
 					throw std::invalid_argument("Tree model node width is too small for its border");
 				}
@@ -1744,11 +1744,11 @@ namespace mngl::two_d
 					{
 						continue;
 					}
-					if (state[child] != 0)
+					if (state[child] != 0) [[unlikely]]
 					{
 						throw std::invalid_argument("Tree model contains a cycle or shared child");
 					}
-					if (depths[current.index] == std::numeric_limits<std::size_t>::max())
+					if (depths[current.index] == std::numeric_limits<std::size_t>::max()) [[unlikely]]
 					{
 						throw std::length_error("Tree depth exceeds the supported range");
 					}
@@ -1759,7 +1759,7 @@ namespace mngl::two_d
 					pending.push_back({child, false});
 				}
 			}
-			if (std::any_of(state.begin(), state.end(), [](unsigned char value) { return value == 0; }))
+			if (std::any_of(state.begin(), state.end(), [](unsigned char value) { return value == 0; })) [[unlikely]]
 			{
 				throw std::invalid_argument("Tree model contains unreachable nodes");
 			}
@@ -1768,7 +1768,7 @@ namespace mngl::two_d
 				const std::size_t next = model.nodes[index].next_leaf;
 				if (next != tree_draw_model::no_node &&
 				    (next == index || has_tree_model_children(model.nodes[index]) ||
-				     has_tree_model_children(model.nodes[next])))
+				     has_tree_model_children(model.nodes[next]))) [[unlikely]]
 				{
 					throw std::invalid_argument("Tree model leaf links must connect distinct leaf nodes");
 				}
@@ -1790,7 +1790,7 @@ namespace mngl::two_d
 				}
 				subtree_widths[index] =
 				    std::max(static_cast<double>(result.nodes[index].size.x), children_width);
-				if (!std::isfinite(subtree_widths[index]))
+				if (!std::isfinite(subtree_widths[index])) [[unlikely]]
 				{
 					throw std::length_error("Tree layout width exceeds the supported range");
 				}
@@ -1882,7 +1882,7 @@ namespace mngl::two_d
 				precomputed_layout = &generated_layout;
 			}
 			const tree_layout& layout = *precomputed_layout;
-			if (layout.nodes.size() != model.nodes.size())
+			if (layout.nodes.size() != model.nodes.size()) [[unlikely]]
 			{
 				throw std::logic_error("Tree layout does not match the drawing model");
 			}
@@ -1898,7 +1898,7 @@ namespace mngl::two_d
 			const glm::dvec2 offset = tree_layout_offset(layout, area);
 			const auto center_at = [&layout, &offset](std::size_t index)
 			{
-				if (index >= layout.nodes.size())
+				if (index >= layout.nodes.size()) [[unlikely]]
 				{
 					throw std::logic_error("Tree visibility contains an invalid node index");
 				}
@@ -1911,7 +1911,7 @@ namespace mngl::two_d
 				{
 					if (parent >= model.nodes.size() || child >= model.nodes.size() ||
 					    child_slot >= model.nodes[parent].children.size() ||
-					    model.nodes[parent].children[child_slot] != child)
+					    model.nodes[parent].children[child_slot] != child) [[unlikely]]
 					{
 						throw std::logic_error("Tree visibility contains an invalid edge");
 					}
@@ -1957,16 +1957,16 @@ namespace mngl::two_d
 				{
 					const auto draw_leaf_link = [&](std::size_t index)
 					{
-						if (index >= model.nodes.size())
+						if (index >= model.nodes.size()) [[unlikely]]
 						{
 							throw std::logic_error("Tree visibility contains an invalid leaf link");
 						}
 						const std::size_t next = model.nodes[index].next_leaf;
-						if (next == tree_draw_model::no_node)
+						if (next == tree_draw_model::no_node) [[unlikely]]
 						{
 							throw std::logic_error("Tree visibility references an absent leaf link");
 						}
-						if (next >= model.nodes.size())
+						if (next >= model.nodes.size()) [[unlikely]]
 						{
 							throw std::logic_error("Tree leaf link contains an invalid node index");
 						}
@@ -2015,12 +2015,12 @@ namespace mngl::two_d
 				const float raster_height = value_font.raster_height_pixels();
 				const float line_height = value_font.line_height();
 				if (!std::isfinite(raster_height) || raster_height <= 0.0f || !std::isfinite(line_height) ||
-				    line_height <= 0.0f)
+				    line_height <= 0.0f) [[unlikely]]
 				{
 					throw std::logic_error("Tree drawing requires a valid font");
 				}
 				line_height_factor = line_height / raster_height;
-				if (!std::isfinite(line_height_factor) || line_height_factor <= 0.0f)
+				if (!std::isfinite(line_height_factor) || line_height_factor <= 0.0f) [[unlikely]]
 				{
 					throw std::logic_error("Tree drawing font metrics cannot be scaled");
 				}
@@ -2044,7 +2044,7 @@ namespace mngl::two_d
 			};
 			const auto draw_node = [&](frame_2d& draw_frame, std::size_t index, bool prepared_glyphs)
 			{
-				if (index >= model.nodes.size())
+				if (index >= model.nodes.size()) [[unlikely]]
 				{
 					throw std::logic_error("Tree visibility contains an invalid node index");
 				}
@@ -2314,7 +2314,7 @@ namespace mngl::two_d
 			std::lock_guard call_lock(m_call_mutex);
 			detail::validate_tree_draw_options(area, options);
 			detail::validate_tree_draw_area(viewport);
-			if (layout.nodes.size() != model.nodes.size())
+			if (layout.nodes.size() != model.nodes.size()) [[unlikely]]
 			{
 				throw std::logic_error("Tree layout does not match the culling model");
 			}
@@ -2330,7 +2330,7 @@ namespace mngl::two_d
 					std::unique_lock lock(m_mutex);
 					m_work_complete.wait(
 					    lock, [this] { return m_stopping || (!m_worker_active && !m_pending.has_value()); });
-					if (m_stopping)
+					if (m_stopping) [[unlikely]]
 					{
 						throw std::logic_error("Tree culling worker is shutting down");
 					}
@@ -2357,7 +2357,7 @@ namespace mngl::two_d
 				std::unique_lock lock(m_mutex);
 				m_work_complete.wait(lock, [this]
 				                     { return m_stopping || (!m_worker_active && !m_pending.has_value()); });
-				if (m_stopping)
+				if (m_stopping) [[unlikely]]
 				{
 					throw std::logic_error("Tree culling worker is shutting down");
 				}
@@ -2409,13 +2409,13 @@ namespace mngl::two_d
 		                                          const tree_draw_area& area, const tree_draw_area& viewport,
 		                                          const tree_draw_options& options)
 		{
-			if (!source)
+			if (!source) [[unlikely]]
 			{
 				throw std::invalid_argument("Asynchronous tree culling requires a retained snapshot");
 			}
 			detail::validate_tree_draw_options(area, options);
 			detail::validate_tree_draw_area(viewport);
-			if (layout.nodes.size() != model.nodes.size())
+			if (layout.nodes.size() != model.nodes.size()) [[unlikely]]
 			{
 				throw std::logic_error("Tree layout does not match the culling model");
 			}
@@ -2424,7 +2424,7 @@ namespace mngl::two_d
 			std::uint64_t request_id = 0;
 			{
 				std::lock_guard lock(m_mutex);
-				if (m_stopping)
+				if (m_stopping) [[unlikely]]
 				{
 					throw std::logic_error("Tree culling worker is shutting down");
 				}
@@ -2496,7 +2496,7 @@ namespace mngl::two_d
 			const glm::dvec2 offset = detail::tree_layout_offset(layout, area);
 			const auto center_at = [&layout, &offset](std::size_t index)
 			{
-				if (index >= layout.nodes.size())
+				if (index >= layout.nodes.size()) [[unlikely]]
 				{
 					throw std::logic_error("Tree visibility contains an invalid node index");
 				}
@@ -2533,7 +2533,7 @@ namespace mngl::two_d
 					{
 						continue;
 					}
-					if (child >= count)
+					if (child >= count) [[unlikely]]
 					{
 						throw std::logic_error("Tree culling encountered an invalid child index");
 					}
@@ -2556,7 +2556,7 @@ namespace mngl::two_d
 					return;
 				}
 				const std::size_t next = node.next_leaf;
-				if (next >= count)
+				if (next >= count) [[unlikely]]
 				{
 					throw std::logic_error("Tree culling encountered an invalid leaf link");
 				}
@@ -2628,7 +2628,7 @@ namespace mngl::two_d
 					if (thread_result.nodes.size() > result.nodes.max_size() - total_nodes ||
 					    thread_result.edges.size() > result.edges.max_size() - total_edges ||
 					    thread_result.leaf_link_sources.size() >
-					        result.leaf_link_sources.max_size() - total_leaf_links)
+					        result.leaf_link_sources.max_size() - total_leaf_links) [[unlikely]]
 					{
 						throw std::length_error("Tree visibility exceeds the supported range");
 					}

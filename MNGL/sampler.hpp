@@ -4,11 +4,12 @@
 #include <optional>
 
 #include "device.hpp"
-#include "utilities.hpp"
+#include "runtime.hpp"
 #include "graphics_pipeline.hpp" // Для compare_op
 
 #include <utility>
 #include <stdexcept>
+#include <format>
 
 namespace mngl::gpu
 {
@@ -145,7 +146,7 @@ namespace mngl::gpu
 
 		sampler build(SDL_GPUDevice* device) const
 		{
-			if (!device)
+			if (!device) [[unlikely]]
 			{
 				throw std::runtime_error("Cannot create sampler with null device");
 			}
@@ -163,10 +164,19 @@ namespace mngl::gpu
 			info.enable_compare = m_enable_compare;
 			info.compare_op = static_cast<SDL_GPUCompareOp>(m_compare_op);
 
+			SDL_ClearError();
 			SDL_GPUSampler* handle = SDL_CreateGPUSampler(device, &info);
-			if (!handle)
+			if (!handle) [[unlikely]]
 			{
-				throw sdl_error("Failed to create GPU sampler: ");
+				const char* driver = SDL_GetGPUDeviceDriver(device);
+				throw sdl_error(std::format(
+				    "Failed to create GPU sampler on driver '{}': min/mag/mipmap={}/{}/{}, "
+				    "address={}/{}/{}, anisotropy={} (max={}), compare={} op={}",
+				    driver ? driver : "<unknown>", static_cast<unsigned int>(m_min_filter),
+				    static_cast<unsigned int>(m_mag_filter), static_cast<unsigned int>(m_mipmap_mode),
+				    static_cast<unsigned int>(m_address_u), static_cast<unsigned int>(m_address_v),
+				    static_cast<unsigned int>(m_address_w), m_enable_anisotropy, m_max_anisotropy,
+				    m_enable_compare, static_cast<unsigned int>(m_compare_op)));
 			}
 
 			return sampler{device, handle};

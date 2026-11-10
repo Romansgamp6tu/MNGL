@@ -40,7 +40,7 @@ button.on_click([](const mngl::hit_test_result&, const mngl::hit_test_path_entry
                 { const glm::vec2 local = clicked.local_coords; });
 
 bool has_completed_frame = false;
-while (mngl::input::continue_work())
+while (mngl::input::next_frame())
 {
 	const auto mice = mngl::input::mice();
 	if (has_completed_frame)
