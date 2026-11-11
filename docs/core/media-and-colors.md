@@ -8,10 +8,24 @@
 mngl::texture image("assets/background.png");
 ```
 
+По умолчанию GPU-текстура использует `r8g8b8a8_unorm`. Если для sampling
+нужна sRGB-интерпретация или другой порядок каналов, формат можно указать при
+загрузке:
+
+```cpp
+mngl::texture image("assets/background.png", mngl::gpu::texture_format::r8g8b8a8_unorm_srgb);
+```
+
+Surface-загрузка поддерживает RGBA8 и BGRA8 в вариантах UNORM и sRGB. Для иных
+GPU-форматов передавайте пиксельные данные в соответствующем представлении.
+Формат можно узнать через `image.format()`; `mngl::sprite` использует формат
+текстуры, которую он рисует.
+
 Для анимированного изображения, которое нужно рисовать как GPU-текстуру, используйте `mngl::animated_texture`:
 
 ```cpp
-mngl::animated_texture animation("assets/animation.gif");
+mngl::animated_texture animation(
+    "assets/animation.gif", mngl::gpu::texture_format::r8g8b8a8_unorm_srgb);
 mngl::sprite image(animation.as_texture(), mngl::rectangle{0.0f, 0.0f, 2.0f, 2.0f});
 ```
 
@@ -19,7 +33,7 @@ mngl::sprite image(animation.as_texture(), mngl::rectangle{0.0f, 0.0f, 2.0f, 2.0
 
 Если нужно работать с кадрами напрямую, загрузите файл в `mngl::surface`. Метод `raw()` возвращает указатель на текущий кадр без передачи владения; `animated()` сообщает, содержит ли анимация несколько кадров, а `on_frame_changed` вызывается при переключении кадра. `mngl::texture(surface)` по-прежнему загружает только текущий кадр и не обновляется автоматически.
 
-Для разового обновления текстуры можно передать текущую `mngl::surface` или `SDL_Surface*` напрямую: `image.update_from_surface(source)`; пиксели — через `image.update_pixels(std::span<const std::uint8_t>(pixels))`. Surface должен иметь те же размеры, что и RGBA8-текстура. Эти перегрузки создают и отправляют собственный command buffer на глобальном GPU-устройстве; для пользовательского устройства передайте его явно, а для пакетной загрузки нескольких ресурсов используйте существующий overload с `gpu::command_buffer`.
+Для разового обновления текстуры можно передать текущую `mngl::surface` или `SDL_Surface*` напрямую: `image.update_from_surface(source)`; пиксели — через `image.update_pixels(std::span<const std::uint8_t>(pixels))`. Surface должен иметь те же размеры и совместимый RGBA8/BGRA8 формат. Эти перегрузки создают и отправляют собственный command buffer на глобальном GPU-устройстве; для пользовательского устройства передайте его явно, а для пакетной загрузки нескольких ресурсов используйте существующий overload с `gpu::command_buffer`.
 
 `mngl::pixel_format` описывает форматы пикселей SDL. Для форматов GPU существует отдельный тип `mngl::gpu::texture_format`; это разные пространства форматов.
 

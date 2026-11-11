@@ -351,6 +351,18 @@ namespace mngl
 
 		[[nodiscard]] two_d::renderer& renderer() { return renderer_for(swapchain_format(), true); }
 
+		// Change the SDL-selected swapchain composition/vsync between frames.
+		void set_swapchain_parameters(gpu::device::hdr_mode hdr, gpu::device::vsync_mode vsync)
+		{
+			if (m_frame || m_command_buffer) [[unlikely]]
+			{
+				throw std::logic_error("Cannot change swapchain parameters during an active frame");
+			}
+			gpu_device().set_swapchain_parameters(*this, hdr, vsync);
+		}
+
+		[[nodiscard]] gpu::texture_format swapchain_texture_format() const { return swapchain_format(); }
+
 		[[nodiscard]] ::mngl::texture create_texture(
 		    glm::uvec2 size, gpu::texture_format format = gpu::texture_format::invalid,
 		    std::uint32_t usage = ::mngl::texture::usage::sampler |
@@ -607,3 +619,4 @@ namespace mngl
 		bool m_has_sprite_size = false;
 	};
 } // namespace mngl
+

@@ -121,6 +121,43 @@ frame.draw(picture);
 
 Для GIF используется [animated_texture](../core/media-and-colors.md), для кадров из одного PNG — [анимация по атласу](sprite-animation.md).
 
+### Выбор формата текстуры и окна
+
+По умолчанию `mngl::texture("assets/image.png")` загружает изображение в
+`r8g8b8a8_unorm`. Чтобы выбрать другой цветовой формат при загрузке обычного
+изображения, передайте его явно:
+
+```cpp
+mngl::texture image("assets/image.png", mngl::gpu::texture_format::r8g8b8a8_unorm_srgb);
+mngl::sprite picture{image, mngl::rectangle{0.1f, 0.1f, 0.6f, 0.4f}};
+```
+
+Формат принадлежит `image`, а `sprite` использует эту текстуру как источник.
+`texture(path, format)` и загрузка из `surface` поддерживают RGBA8/BGRA8 в
+UNORM и sRGB вариантах. Для float, integer и сжатых форматов нужны пиксельные
+данные, уже закодированные в совместимом представлении; GPU проверит поддержку
+формата и комбинации usage при создании ресурса.
+
+Swapchain окна не принимает произвольный формат: его выбирают SDL и GPU backend.
+Можно задать режим композиции HDR/SDR и синхронизацию, а затем узнать фактический
+формат текущего swapchain:
+
+Фрагмент ниже находится в `main()` после создания `mngl::render_window window`;
+вызывайте настройку между кадрами, когда активного frame scope нет.
+
+```cpp
+window.set_swapchain_parameters(
+    mngl::gpu::device::hdr_mode::hdr10,
+    mngl::gpu::device::vsync_mode::vsync);
+const auto window_format = window.swapchain_texture_format();
+auto offscreen = window.create_texture({512, 512}, window_format);
+```
+
+Передавайте offscreen-формат явно, когда цель должна соответствовать окну.
+`create_texture(size)` без формата автоматически использует текущий swapchain.
+Настройки меняйте между кадрами; SDL может отклонить HDR-режим, если backend
+или дисплей его не поддерживает. Подробнее о текстурах — в [GPU-ресурсах](../gpu/resources.md).
+
 ## Что проверить, если результат отличается
 
 | Симптом | Проверка |

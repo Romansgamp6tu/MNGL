@@ -140,6 +140,49 @@ mngl::gpu::texture scene(
 
 Для PNG, JPEG и обычного 2D-кадра используйте `mngl::texture`. Она предоставляет `raw_gpu_texture()` для GPU-прохода и затем может отображаться через `mngl::sprite`; пример такого сочетания есть в [compute-руководстве](compute.md). Это сохраняет простой 2D lifecycle, когда собственное управление загрузкой пикселей не требуется.
 
+### Формат изображения для 2D и спрайтов
+
+По умолчанию загрузка файла, `SDL_Surface` или `mngl::surface` создаёт
+`r8g8b8a8_unorm`. Выберите формат вторым аргументом, когда важна sRGB
+интерпретация или порядок каналов:
+
+```cpp
+#include <MNGL/texture.hpp>
+#include <MNGL/renderer2d.hpp>
+
+mngl::texture color_image("assets/color.png", mngl::gpu::texture_format::r8g8b8a8_unorm_srgb);
+mngl::texture bgra_image("assets/ui.png", mngl::gpu::texture_format::b8g8r8a8_unorm);
+mngl::sprite ui{bgra_image};
+
+const auto format = bgra_image.format();
+```
+
+У `sprite` нет отдельного формата пикселей: он наследуется от исходной
+текстуры. То же относится к `texture_region` в texture store и
+`sprite_animation` — выберите формат изображения до добавления его в атлас.
+`texture::format()` возвращает фактический GPU-формат.
+
+Загрузка обычных изображений из surface поддерживает четыре формата:
+`r8g8b8a8_unorm`, `r8g8b8a8_unorm_srgb`, `b8g8r8a8_unorm` и
+`b8g8r8a8_unorm_srgb`. Другие GPU-форматы можно создать низкоуровневым
+`gpu::texture` или передать в конструктор `mngl::texture` уже согласованные
+сырые пиксельные данные. PNG-декодер не выполняет автоматическое преобразование
+в float, integer или compressed block formats. GPU также должен поддерживать
+выбранное сочетание формата и usage.
+
+`animated_texture(path, format)` сохраняет выбранный формат при загрузке
+последующих кадров GIF. Для пустой offscreen-цели применяйте формат напрямую:
+`window.create_texture(size, format)`. По умолчанию этот метод наследует формат
+swapchain окна.
+
+Формат swapchain не задаётся произвольным enum: его выбирает SDL/GPU backend.
+`render_window::set_swapchain_parameters(hdr_mode, vsync_mode)` позволяет
+попросить SDR/HDR-композицию и способ синхронизации, а
+`render_window::swapchain_texture_format()` сообщает фактически выбранный
+формат. Изменяйте параметры между кадрами; backend может отклонить режим,
+который не поддерживается на текущей системе. Полный пример есть в
+[быстром старте](../2d/quick-start.md).
+
 ## Sampler: пиксельная графика и плавное масштабирование
 
 Sampler отвечает за выбор соседних texels и поведение за краем текстуры. Для pixel art обычно нужен nearest, а для плавного увеличения — linear. Clamp останавливает координату у границы, repeat повторяет изображение.
