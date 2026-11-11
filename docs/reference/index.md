@@ -33,7 +33,7 @@
 | `vertex_layout.hpp`, `graphics_pipeline.hpp`, `render_pass.hpp` | Vertex input, графические проходы и uniform-данные в активном command buffer | [Pipeline и render pass](../gpu/pipelines-and-passes.md) |
 | `render_window.hpp`, `renderer2d.hpp`, `texture.hpp`, `view.hpp`, `transform.hpp`, `hit_test.hpp` | Высокоуровневый 2D API, включая геометрию, GPU mesh, кэшированные слои и переключатели рендеринга | [Раздел 2D](../2d/index.md), [переключатели оптимизаций 2D](../2d/advanced-rendering.md#2d-optimizations) |
 | `batcher2d.hpp` | Низкоуровневая пакетная 2D-отрисовка, GPU culling и CPU-профилирование кадров | [Расширенный 2D-рендеринг](../2d/advanced-rendering.md) |
-| `text.hpp` | Шрифты, текст, текстовые документы и атлас глифов | [Рендер текста](../2d/text-rendering.md) |
+| `text.hpp` | Шрифты, текст, автоматический перенос строкового текста, текстовые документы и атлас глифов | [Рендер текста](../2d/text-rendering.md) |
 | `mods.hpp`, `mod_loader.hpp` | Точки расширения и загрузка нативных модов | [Контракт модов](../mods/api-contract.md) |
 
 `detail/audio/sdl3_mixer_backend.hpp` — внутренняя реализация аудио; приложению
