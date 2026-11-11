@@ -43,3 +43,23 @@ mngl::color html{"#3399FFFF"};
 Строковый конструктор принимает только `#RRGGBB` или `#RRGGBBAA`, без пробелов,
 знака и префикса `0x`; регистр HEX-цифр не важен. Любой посторонний символ
 приводит к `std::invalid_argument`, даже если перед ним есть корректные цифры.
+
+Для создания оттенка между двумя цветами есть `color::lerp()`. Контраст можно
+оценить до выбора цвета текста, а `rgba_uint()` удобно передать в формат или
+протокол, который хранит RGBA одним числом. Фрагмент находится внутри функции:
+
+```cpp
+const mngl::color background{0.08f, 0.10f, 0.15f};
+const mngl::color accent{0.20f, 0.70f, 1.00f};
+const mngl::color muted_accent = mngl::color::lerp(accent, background, 0.5f);
+
+const mngl::color white{1.0f};
+const float text_contrast = mngl::color::contrast(background, white);
+const std::uint32_t accent_rgba = accent.rgba_uint();
+```
+
+`lerp(a, b, 0.5f)` даёт средний цвет; коэффициент `0.0f` возвращает `a`, а
+`1.0f` — `b`. `contrast()` возвращает отношение яркостей, а не автоматический
+выбор подходящей пары. `rgba_uint()` имеет порядок байтов `RRGGBBAA`; это не
+порядок SDL `SDL_Color` и не premultiplied-alpha формат.
+

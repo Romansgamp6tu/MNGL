@@ -28,8 +28,8 @@ MNGL — C++23 библиотека поверх SDL3 для окон, ввод�
 | Dear ImGui | Интеграция с окнами MNGL и SDL GPU |
 | Инструменты | Консольные команды и точки расширения для нативных модов |
 
-API развивается. Эта документация описывает текущий `main`; пакет другого
-релиза или ветки может содержать другой набор заголовков.
+API развивается быстрее, чем выпускаются готовые пакеты. Сверяйте примеры с
+той веткой или версией development-пакета, которую использует ваше приложение.
 
 ## Подключение к своему проекту
 
@@ -72,6 +72,7 @@ runtime-пакеты содержат нужную библиотеку; при 
 
 Полный пример проекта, подключение из исходников, настройка runtime и
 разбор типичных ошибок: [Использование MNGL](docs/getting-started/using-mngl.md).
+Готовые самостоятельные проекты находятся в [каталоге примеров](docs/examples.md).
 
 ## Первое окно
 
@@ -130,8 +131,13 @@ Windows-сборка использует бинарники из `libs/`; на 
 
 ## Документация
 
+- [Маршрут для новичка и навигация по задачам](docs/index.md)
+- [Учебные примеры с полными CMake-проектами](docs/examples.md)
 - [Начало работы и подключение](docs/getting-started/using-mngl.md)
+- [Цикл кадра, координаты и время жизни ресурсов](docs/getting-started/concepts.md)
+- [Частые ошибки и диагностика](docs/getting-started/troubleshooting.md)
 - [Окна, физические устройства, действия и контексты ввода](docs/core/windows-and-input.md)
+- [Рецепты управления, паузы и профилей](docs/core/input-recipes.md)
 - [Системные диалоги](docs/core/dialogs.md)
 - [Буфер обмена: MIME-форматы и отложенный provider callback](docs/core/clipboard.md)
 - [Хранилище и файлы](docs/core/storage.md)
@@ -139,7 +145,7 @@ Windows-сборка использует бинарники из `libs/`; на 
 - [Запуск процессов и помощников](docs/core/processes.md)
 - [Runtime, идентичность приложения и пути](docs/core/runtime-and-utilities.md)
 - [Аудио](docs/core/audio.md)
-- [2D API](docs/2d/index.md) и [SDL GPU](docs/gpu/index.md)
+- [2D API](docs/2d/index.md), [атласная анимация](docs/2d/sprite-animation.md) и [SDL GPU](docs/gpu/index.md)
 - [Создание модов](docs/mods/creating-and-debugging.md)
 - [Карта публичных заголовков](docs/reference/index.md)
 
@@ -154,3 +160,4 @@ python -m mkdocs build --strict
 Публичные заголовки сторонних библиотек находятся в `include/`, SDL3_mixer —
 в `third_party/SDL_mixer`. Полный справочник символов C++ пока не генерируется;
 карта модулей ведёт к руководствам и исходным заголовкам.
+

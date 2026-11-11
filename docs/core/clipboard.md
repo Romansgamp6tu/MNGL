@@ -4,6 +4,10 @@
 текста используйте UTF-8-функции; для изображений и других типов данных — API
 по MIME-типам.
 
+Примеры в этой главе — фрагменты функций приложения. SDL clipboard API
+вызывайте из главного потока после запуска runtime; готовое приложение может
+проверить запуск через [`runtime::ensure()`](runtime-and-utilities.md).
+
 ## Текст
 
 ```cpp
@@ -64,9 +68,11 @@ mngl::clipboard::set_data({"application/x-mngl-level", "text/plain"},
 Чтение форматов выглядит так:
 
 ```cpp
+#include <MNGL/logger.hpp>
+
 for (const auto& mime_type : mngl::clipboard::mime_types())
 {
-	logger.info("Clipboard format: ", mime_type);
+	mngl::log.info("Clipboard format: ", mime_type);
 }
 
 if (mngl::clipboard::has_data("application/x-mngl-level"))
@@ -127,3 +133,4 @@ auto clipboard_subscription = mngl::event_manager::on<mngl::clipboard_update>(
 Старые методы `mngl::window::clipboard_text()` оставлены для миграции и
 помечены `[[deprecated]]`. Используйте свободные функции из
 `mngl::clipboard`.
+

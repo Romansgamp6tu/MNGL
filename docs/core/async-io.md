@@ -35,6 +35,98 @@ if (!saved)
 в `request_value::data`, а ошибка содержит код, снимок метаданных и сообщение. Для записи `data`
 пуст, а число записанных байт указано в `request_value::info.bytes_transferred`.
 
+## Чтение во время работы окна
+
+В этом полном примере путь к существующему файлу передают первым аргументом командной строки. Окно продолжает обрабатывать события, пока читается файл. После завершения программа печатает размер, меняет заголовок и остаётся открытой.
+
+```cpp
+#include <MNGL/async_io.hpp>
+#include <MNGL/input.hpp>
+#include <MNGL/runtime.hpp>
+#include <MNGL/window.hpp>
+#include <exception>
+#include <iostream>
+
+int main(int argc, char** argv)
+{
+	if (argc != 2)
+	{
+		std::cerr << "Usage: async-example path-to-file\n";
+		return 2;
+	}
+	try
+	{
+		mngl::runtime::ensure();
+		mngl::window window("Loading...", {640, 360});
+		mngl::async_io::queue io;
+		auto load = io.read_file(argv[1]);
+		bool consumed = false;
+
+		while (mngl::input::next_frame())
+		{
+			(void)io.poll(); // input::next_frame() не обслуживает эту очередь.
+			if (consumed || !load.ready())
+				continue;
+
+			consumed = true;
+			auto outcome = io.wait(load); // Уже ready: повторно ждать не нужно.
+			if (!outcome)
+			{
+				std::cerr << outcome.error().message << '\n';
+				window.title("Loading failed");
+			}
+			else
+			{
+				std::cout << "Loaded " << outcome->data.size() << " bytes\n";
+				window.title("File loaded");
+				// outcome->data теперь принадлежит приложению.
+			}
+		}
+	} // io уничтожается до завершения runtime.
+	catch (const std::exception& error)
+	{
+		// Например, файл не удалось открыть ещё при постановке запроса.
+		std::cerr << error.what() << '\n';
+		return 1;
+	}
+}
+```
+
+`ready()` означает завершение, включая ошибку и отмену. Оно не означает успешное чтение. `poll()` обрабатывает результаты SDL, поэтому его нужно вызывать регулярно. Иначе операция может быть закончена в ОС, но состояние MNGL ещё будет `pending`. Флаг `consumed` в примере не позволяет забирать один и тот же результат каждый кадр.
+
+Открытие файла и получение его размера выполняются при `read_file()` синхронно; фоновой является передача данных и закрытие. Поэтому «async» не гарантирует, что постановка запроса вообще не займёт времени, особенно на медленном или сетевом файловом пути.
+
+## Два способа получить результат
+
+| Сценарий | Последовательность |
+|---|---|
+| Загрузка до запуска сцены или отдельная утилита | Создать request → `io.wait(request)` → проверить expected |
+| Работающий интерфейс | Каждый кадр `io.poll()` → `request.ready()` → получить результат один раз |
+| Нужны байты без typed outcome | После готовности проверить `result().status`, затем `take_data()` или `take_text()` |
+
+`result()` возвращает копию метаданных, не данные файла. `take_data()` и `queue::wait(request)` передают единственный буфер. Выберите одного потребителя: если скопировать `request`, обе копии будут ссылаться на одну операцию, а не на две копии файла. Повторное потребление даст `result_already_taken` или исключение у `take_data()`.
+
+## Запись и порядок сохранений
+
+Этот фрагмент выполняется внутри функции, когда приложение уже подготовило текст сохранения. Нужны `<MNGL/paths.hpp>` и `<iostream>` в дополнение к `async_io.hpp`:
+
+```cpp
+const auto save_path = mngl::paths::user_data_directory() / "slot1.txt";
+mngl::async_io::queue io;
+auto save = io.write_text_file(save_path, "level=3\n", true);
+auto outcome = io.wait(save);
+if (!outcome)
+	std::cerr << "Save failed: " << outcome.error().message << '\n';
+else
+	std::cout << "Saved " << outcome->info.bytes_transferred << " bytes\n";
+```
+
+Здесь ожидание подходит для точки сохранения до смены сцены или завершения утилиты. В интерактивном кадре используйте `poll()`, как в примере чтения. Третий аргумент `true` — `flush_on_close`: запрос завершится после закрытия со сбросом данных. Это не делает несколько файлов одной транзакцией.
+
+`write_text_file()` копирует переданный текст, поэтому временная строка может исчезнуть после вызова. Для бинарного вектора можно передать `std::move(bytes)`, чтобы передать владение, или `std::span<const std::byte>`, чтобы скопировать диапазон.
+
+Не запускайте два независимых сохранения в один файл одновременно: оба вызова открывают его отдельно, а `write_file()` обнуляет прежнее содержимое. Упорядочивайте записи одного слота и сообщайте «сохранено» только после успешного результата, а не сразу после создания request.
+
 ## Запросы
 
 - `queue::read_file(path)` читает весь файл в принадлежащий запросу буфер.
@@ -107,3 +199,4 @@ const auto bytes = chunk.take_data();
 а `take_data()`/`take_text()` бросают `std::logic_error`. Копии request разделяют одну
 операцию и один буфер; успешный `take_data()` или `queue::wait(request)` потребляет его
 для всех копий.
+

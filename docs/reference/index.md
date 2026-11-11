@@ -2,9 +2,14 @@
 
 Здесь перечислены основные заголовки MNGL и руководство по соответствующему модулю. Встроенные заголовки `include/SDL3`, `include/SDL3_image` и `include/glm` — сторонние библиотеки; их документация здесь не дублируется.
 
+Если вы только подключаете библиотеку, начните с
+[учебного маршрута](../index.md), [полных примеров](../examples.md) и
+[руководства по CMake](../getting-started/using-mngl.md). Эта карта полезна,
+когда уже известно, какую задачу нужно решить и какой заголовок подключить.
+
 Подключение к стороннему проекту описано в разделе [Использование MNGL](../getting-started/using-mngl.md),
 сборка самого проекта — в разделе [Сборка и пакеты](../getting-started/building.md).
-В development-пакете `main` заголовки ниже доступны с префиксом `MNGL/`,
+В актуальном development-пакете заголовки ниже доступны с префиксом `MNGL/`,
 например `<MNGL/audio.hpp>`; CMake target также поддерживает короткие include paths.
 
 | Заголовки | Назначение | Руководство |
@@ -27,6 +32,7 @@
 | `utilities.hpp`, `paths.hpp`, `logger.hpp` (`logger.h` для старых глобальных имён), `iupdate.h`, `proxy.hpp` | Runtime, идентичность приложения, пути, ошибки, logging, обновления и SDL interop | [Runtime и утилиты](../core/runtime-and-utilities.md) |
 | `console.hpp` | Реестр типизированных CLI-команд, режимы вывода и результатов обработчиков | [Консольные команды](../core/console.md) |
 | `gpu_optimizations.hpp` | Общие функции включения и выключения GPU culling, CPU culling, сортировки, scene culling и обновления dirty regions | [Переключатели оптимизаций 2D](../2d/advanced-rendering.md#2d-optimizations) |
+| `sprite_animation` в `renderer2d.hpp` | Проигрывание последовательности `texture_region` с отдельной длительностью кадра | [Анимация по атласу](../2d/sprite-animation.md) |
 | `device.hpp`, `command_buffer.hpp` | Разделяемое время жизни GPU device и явная отправка команд | [Устройство и команды](../gpu/device-and-commands.md) |
 | `gpu_buffer.hpp`, `gpu_texture.hpp`, `sampler.hpp` | Низкоуровневые GPU-ресурсы с RAII-владением | [GPU-ресурсы](../gpu/resources.md) |
 | `graphics_shader.hpp`, `shader_loader.hpp` | Загрузка/компиляция шейдеров, uniforms и bindings | [Шейдеры](../gpu/shaders.md) |
@@ -56,3 +62,4 @@
   старый `tree_renderer.hpp` перенаправляет include для совместимости.
 
 Соглашения для новых модулей: [Принципы и стиль API](../design/api-style.md).
+
