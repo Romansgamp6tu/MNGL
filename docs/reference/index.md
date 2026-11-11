@@ -17,21 +17,21 @@
 | `clipboard.hpp` | Текстовый и MIME-буфер обмена, отложенная выдача данных | [Буфер обмена](../core/clipboard.md) |
 | `storage.hpp` | RAII-хранилища приложения, пользователя и локального каталога | [Хранилище и файлы](../core/storage.md) |
 | `async_io.hpp` | Фоновый ввод-вывод с типизированным результатом и ожиданием запроса | [Асинхронный ввод-вывод](../core/async-io.md) |
-| `process.hpp` | Запуск процессов, управление потоками и получение кода завершения | [Процессы](../core/processes.md) |
+| `process.hpp` | Запуск процессов, pipe-ввод с `close_stdin()` для EOF и получение кода завершения | [Процессы](../core/processes.md) |
 | `paths.hpp` | Каталоги приложения и стандартные папки пользователя | [Runtime и утилиты](../core/runtime-and-utilities.md) |
-| `imgui_compat.hpp` | MNGL scopes и классы-виджеты с собственным состоянием поверх Dear ImGui; меню, canvas, ввод, GPU overlay и шрифты | [Окна и ввод](../core/windows-and-input.md) |
+| `imgui_compat.hpp` | MNGL scopes и классы-виджеты поверх Dear ImGui; `button::is_small()`, меню, canvas, ввод, GPU overlay и шрифты | [Окна и ввод](../core/windows-and-input.md) |
 | `event.hpp` | Типизированная система событий | [События](../core/events.md) |
 | `surface.hpp`, `pixel_format.hpp` | SDL surfaces, изображения и форматы пикселей | [Поверхности и цвета](../core/media-and-colors.md) |
-| `color.hpp` | Цвета, преобразования RGB/HSV/HSL | [Поверхности и цвета](../core/media-and-colors.md) |
-| `line.hpp`, `rectangle.hpp` | Геометрические примитивы и пересечения | [Геометрия](../core/geometry.md) |
+| `color.hpp` | Цвета, строгий HEX-парсер, RGB/RGBA-коды и преобразования HSV/HSL | [Поверхности и цвета](../core/media-and-colors.md) |
+| `line.hpp`, `rectangle.hpp` | Геометрия, пересечения с включёнными границами и bounds точек внутри clip | [Геометрия](../core/geometry.md) |
 | `utilities.hpp`, `paths.hpp`, `logger.hpp` (`logger.h` для старых глобальных имён), `iupdate.h`, `proxy.hpp` | Runtime, идентичность приложения, пути, ошибки, logging, обновления и SDL interop | [Runtime и утилиты](../core/runtime-and-utilities.md) |
 | `console.hpp` | Реестр типизированных CLI-команд, режимы вывода и результатов обработчиков | [Консольные команды](../core/console.md) |
-| `gpu_optimizations.hpp` | Общие функции включения и выключения GPU culling, CPU culling, сортировки, scene culling и обновления dirty regions | [Переключатели оптимизаций 2D](../2d/advanced-rendering.md#переключатели-оптимизаций-2d) |
+| `gpu_optimizations.hpp` | Общие функции включения и выключения GPU culling, CPU culling, сортировки, scene culling и обновления dirty regions | [Переключатели оптимизаций 2D](../2d/advanced-rendering.md#2d-optimizations) |
 | `device.hpp`, `command_buffer.hpp` | Разделяемое время жизни GPU device и явная отправка команд | [Устройство и команды](../gpu/device-and-commands.md) |
 | `gpu_buffer.hpp`, `gpu_texture.hpp`, `sampler.hpp` | Низкоуровневые GPU-ресурсы с RAII-владением | [GPU-ресурсы](../gpu/resources.md) |
 | `graphics_shader.hpp`, `shader_loader.hpp` | Загрузка/компиляция шейдеров, uniforms и bindings | [Шейдеры](../gpu/shaders.md) |
-| `vertex_layout.hpp`, `graphics_pipeline.hpp`, `render_pass.hpp` | Vertex input и графические проходы | [Pipeline и render pass](../gpu/pipelines-and-passes.md) |
-| `render_window.hpp`, `renderer2d.hpp`, `texture.hpp`, `view.hpp`, `transform.hpp`, `hit_test.hpp` | Высокоуровневый 2D API, включая геометрию, GPU mesh, кэшированные слои и переключатели рендеринга | [Раздел 2D](../2d/index.md), [переключатели оптимизаций 2D](../2d/advanced-rendering.md#переключатели-оптимизаций-2d) |
+| `vertex_layout.hpp`, `graphics_pipeline.hpp`, `render_pass.hpp` | Vertex input, графические проходы и uniform-данные в активном command buffer | [Pipeline и render pass](../gpu/pipelines-and-passes.md) |
+| `render_window.hpp`, `renderer2d.hpp`, `texture.hpp`, `view.hpp`, `transform.hpp`, `hit_test.hpp` | Высокоуровневый 2D API, включая геометрию, GPU mesh, кэшированные слои и переключатели рендеринга | [Раздел 2D](../2d/index.md), [переключатели оптимизаций 2D](../2d/advanced-rendering.md#2d-optimizations) |
 | `batcher2d.hpp` | Низкоуровневая пакетная 2D-отрисовка, GPU culling и CPU-профилирование кадров | [Расширенный 2D-рендеринг](../2d/advanced-rendering.md) |
 | `text.hpp` | Шрифты, текст, текстовые документы и атлас глифов | [Рендер текста](../2d/text-rendering.md) |
 | `mods.hpp`, `mod_loader.hpp` | Точки расширения и загрузка нативных модов | [Контракт модов](../mods/api-contract.md) |

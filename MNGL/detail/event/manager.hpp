@@ -30,6 +30,12 @@ namespace mngl
 		{
 			std::atomic_bool connected = true;
 		};
+
+		struct queued_imgui_input_event
+		{
+			SDL_Event event{};
+			std::unique_ptr<char, decltype(&SDL_free)> text{nullptr, &SDL_free};
+		};
 	} // namespace detail
 
 	class event_connection
@@ -86,7 +92,7 @@ namespace mngl
 			auto subscription = std::make_shared<listener<T>>(std::move(cb));
 			auto& listeners = listeners_for<T>();
 			std::lock_guard lock(listeners.writer_mutex);
-			const auto current = std::atomic_load_explicit(&listeners.callbacks, std::memory_order_acquire);
+			const auto current = listeners.callbacks.load(std::memory_order_acquire);
 			auto updated = std::make_shared<typename listener_collection<T>::listener_vector>();
 			updated->reserve(current->size() + 1);
 			for (const auto& existing : *current)
@@ -97,8 +103,9 @@ namespace mngl
 				}
 			}
 			updated->push_back(subscription);
-			std::shared_ptr<const typename listener_collection<T>::listener_vector> snapshot = std::move(updated);
-			std::atomic_store_explicit(&listeners.callbacks, std::move(snapshot), std::memory_order_release);
+			std::shared_ptr<const typename listener_collection<T>::listener_vector> snapshot =
+			    std::move(updated);
+			listeners.callbacks.store(std::move(snapshot), std::memory_order_release);
 			return event_connection(std::move(subscription));
 		}
 
@@ -121,9 +128,13 @@ namespace mngl
 
 		static std::vector<SDL_Event> take_imgui_input_events()
 		{
-			std::lock_guard lock(imgui_input_events_mutex);
+			// Text pointers remain valid until the next call on this thread.
+			static thread_local std::vector<detail::queued_imgui_input_event> owned_events;
+			owned_events = take_owned_imgui_input_events();
 			std::vector<SDL_Event> events;
-			events.swap(imgui_input_events);
+			events.reserve(owned_events.size());
+			for (const auto& event : owned_events)
+				events.push_back(event.event);
 			return events;
 		}
 
@@ -156,14 +167,21 @@ namespace mngl
 		static inline std::deque<pending_event_batch> pending_events;
 		static inline thread_local std::vector<deferred_callback>* event_collector = nullptr;
 		static inline std::mutex imgui_input_events_mutex;
-		static inline std::vector<SDL_Event> imgui_input_events;
+		static inline std::vector<detail::queued_imgui_input_event> imgui_input_events;
 		static inline std::atomic_bool imgui_input_enabled = false;
+
+		static std::vector<detail::queued_imgui_input_event> take_owned_imgui_input_events()
+		{
+			std::lock_guard lock(imgui_input_events_mutex);
+			std::vector<detail::queued_imgui_input_event> events;
+			events.swap(imgui_input_events);
+			return events;
+		}
 
 		template <event_payload T> static void dispatch_typed_event(const T& event)
 		{
 			std::lock_guard lock(dispatch_mutex);
-			const auto listeners =
-			    std::atomic_load_explicit(&listeners_for<T>().callbacks, std::memory_order_acquire);
+			const auto listeners = listeners_for<T>().callbacks.load(std::memory_order_acquire);
 			for (const auto& weak_listener : *listeners)
 			{
 				if (auto listener = weak_listener.lock();
@@ -268,7 +286,16 @@ namespace mngl
 				{
 					return;
 				}
-				imgui_input_events.push_back(event);
+				detail::queued_imgui_input_event queued;
+				queued.event = event;
+				if (event.type == SDL_EVENT_TEXT_INPUT && event.text.text)
+				{
+					queued.text.reset(SDL_strdup(event.text.text));
+					if (!queued.text)
+						throw std::bad_alloc();
+					queued.event.text.text = queued.text.get();
+				}
+				imgui_input_events.push_back(std::move(queued));
 			}
 			catch (const std::bad_alloc&)
 			{
@@ -313,13 +340,13 @@ namespace mngl
 			using listener_vector = std::vector<std::weak_ptr<listener<T>>>;
 
 			std::mutex writer_mutex;
-			std::shared_ptr<const listener_vector> callbacks{
+			std::atomic<std::shared_ptr<const listener_vector>> callbacks{
 			    std::make_shared<const listener_vector>()};
 
 			bool empty() const
 			{
-				for (const auto& weak_listener :
-				     *std::atomic_load_explicit(&callbacks, std::memory_order_acquire))
+				const auto snapshot = callbacks.load(std::memory_order_acquire);
+				for (const auto& weak_listener : *snapshot)
 				{
 					if (auto listener = weak_listener.lock();
 					    listener && listener->connected.load(std::memory_order_acquire))

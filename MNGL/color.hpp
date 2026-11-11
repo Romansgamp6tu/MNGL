@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <charconv>
 
 #include <cstdint>
 // GLM hashing support for color values.
@@ -81,7 +82,13 @@ namespace mngl
 				throw std::invalid_argument("hex color must be in format #RRGGBBAA or #RRGGBB");
 			if (hex[0] != '#') [[unlikely]]
 				throw std::invalid_argument("hex color must start with #");
-			std::uint32_t rgba = std::stoul(hex.substr(1), nullptr, 16);
+			std::uint32_t rgba = 0;
+			const auto* end = hex.data() + hex.size();
+			const auto parsed = std::from_chars(hex.data() + 1, end, rgba, 16);
+			if (parsed.ec != std::errc{} || parsed.ptr != end) [[unlikely]]
+			{
+				throw std::invalid_argument("hex color must contain only hexadecimal digits after #");
+			}
 			if (hex.size() == 7)
 				rgba = (rgba << 8) | 0xFF;
 			this->rgba = color(rgba).rgba;
@@ -131,7 +138,7 @@ namespace mngl
 		constexpr std::uint32_t rgba_uint() const { return static_cast<std::uint32_t>(*this); }
 		constexpr glm::vec3 rgb_glsl() const { return glm::vec3(rgba); }
 		constexpr glm::uvec3 rgb_255() const { return glm::uvec3(rgba * 255.f); }
-		constexpr std::uint32_t rgb_uint() const { return static_cast<std::uint32_t>(*this) & 0xFFFFFF; }
+		constexpr std::uint32_t rgb_uint() const { return static_cast<std::uint32_t>(*this) >> 8; }
 		constexpr std::uint8_t gray_255() const { return static_cast<std::uint8_t>(rgba.r * 255); }
 		constexpr float gray_glsl() const { return rgba.r; }
 		std::string hex() const { return static_cast<std::string>(*this); }
@@ -275,7 +282,8 @@ namespace mngl
 
 		color& unmultiply()
 		{
-			return (*this) = a == 0 ? glm::vec4{0, 0, 0, a} : glm::vec4{glm::clamp(rgb_glsl() / a, 0.f, 1.f), a};
+			return (*this) =
+			           a == 0 ? glm::vec4{0, 0, 0, a} : glm::vec4{glm::clamp(rgb_glsl() / a, 0.f, 1.f), a};
 		}
 
 		struct blends
@@ -299,7 +307,7 @@ namespace mngl
 			{
 				return glm::clamp(
 				    glm::vec4{glm::vec3(1, 1, 1) - ((~a).rgb_glsl() * (~b).rgb_glsl()), std::max(a.a, b.a)},
-				                  0.f, 1.f);
+				    0.f, 1.f);
 			}
 		};
 

@@ -12,6 +12,13 @@
 #include <utility>
 #include <vector>
 
+// Windows RPC headers define this legacy member name as a macro.
+#ifdef small
+#pragma push_macro("small")
+#undef small
+#define MNGL_IMGUI_RESTORE_SMALL_MACRO
+#endif
+
 namespace mngl::imgui_compat::widgets
 {
 	using drawing_context = ::mngl::imgui_context::window_scope;
@@ -106,15 +113,16 @@ namespace mngl::imgui_compat::widgets
 	public:
 		using widget_base::widget_base;
 
-		[[nodiscard]] bool small() const noexcept { return m_small; }
+		[[nodiscard]] bool is_small() const noexcept { return m_small; }
+		[[nodiscard]] bool small() const noexcept { return is_small(); }
 		void set_small(bool value) noexcept { m_small = value; }
 		[[nodiscard]] bool pressed() const noexcept { return m_pressed; }
 		[[nodiscard]] explicit operator bool() const noexcept { return m_pressed; }
 
 		[[nodiscard]] bool draw(const drawing_context& target)
 		{
-			m_pressed = with_enabled(target, [&]
-			                         { return m_small ? target.small_button(label()) : target.button(label()); });
+			m_pressed = with_enabled(
+			    target, [&] { return m_small ? target.small_button(label()) : target.button(label()); });
 			return m_pressed;
 		}
 
@@ -1024,3 +1032,8 @@ namespace mngl::imgui_compat::widgets
 		imgui_compat::canvas_options m_options{};
 	};
 } // namespace mngl::imgui_compat::widgets
+
+#ifdef MNGL_IMGUI_RESTORE_SMALL_MACRO
+#pragma pop_macro("small")
+#undef MNGL_IMGUI_RESTORE_SMALL_MACRO
+#endif

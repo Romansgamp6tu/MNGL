@@ -470,7 +470,7 @@ namespace mngl
 			[[nodiscard]] bool hovered() const noexcept { return item.hovered; }
 			[[nodiscard]] bool active() const noexcept { return item.active; }
 			[[nodiscard]] bool clicked(mouse_button button) const noexcept;
-			[[nodiscard]] bool double_clicked(mouse_button button) const noexcept;
+			[[nodiscard]] bool double_clicked(mouse_button button) const;
 			[[nodiscard]] bool dragging(mouse_button button, float threshold = -1.0f) const;
 			[[nodiscard]] std::optional<glm::vec2> mouse_position() const noexcept;
 			[[nodiscard]] glm::vec2 measure_text(std::string_view text) const;

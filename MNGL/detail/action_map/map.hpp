@@ -3,7 +3,9 @@
 #include "../../input.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -18,6 +20,19 @@
 
 namespace mngl
 {
+	namespace detail
+	{
+		struct action_name_hash
+		{
+			using is_transparent = void;
+
+			std::size_t operator()(std::string_view name) const noexcept
+			{
+				return std::hash<std::string_view>{}(name);
+			}
+		};
+	} // namespace detail
+
 	// Mouse motion and wheel axes are sampled once per input::next_frame() frame.
 	enum class mouse_axis : std::uint8_t
 	{
@@ -123,7 +138,8 @@ namespace mngl
 
 		struct storage
 		{
-			std::unordered_map<std::string, std::vector<binding>> actions;
+			std::unordered_map<std::string, std::vector<binding>, detail::action_name_hash, std::equal_to<>>
+			    actions;
 			std::uint64_t revision{1};
 		};
 
@@ -186,7 +202,8 @@ namespace mngl
 		                     std::optional<SDL_MouseID> mouse = std::nullopt)
 		{
 			validate_axis_parameters(scale, dead_zone, threshold);
-			if (static_cast<std::uint8_t>(axis) > static_cast<std::uint8_t>(mouse_axis::scroll_y)) [[unlikely]]
+			if (static_cast<std::uint8_t>(axis) > static_cast<std::uint8_t>(mouse_axis::scroll_y))
+			    [[unlikely]]
 				throw std::invalid_argument("invalid mouse axis");
 			append(action, mouse_axis_binding{axis, mouse, scale, dead_zone, threshold});
 		}
@@ -278,18 +295,21 @@ namespace mngl
 
 		void clear_action(std::string_view action)
 		{
-			if (m_storage->actions.erase(std::string(action)) != 0)
+			if (const auto found = m_storage->actions.find(action); found != m_storage->actions.end())
+			{
+				m_storage->actions.erase(found);
 				++m_storage->revision;
+			}
 		}
 
 		[[nodiscard]] bool contains(std::string_view action) const
 		{
-			return m_storage->actions.contains(std::string(action));
+			return m_storage->actions.contains(action);
 		}
 
 		[[nodiscard]] std::size_t binding_count(std::string_view action) const
 		{
-			const auto it = m_storage->actions.find(std::string(action));
+			const auto it = m_storage->actions.find(action);
 			return it == m_storage->actions.end() ? 0 : it->second.size();
 		}
 	};

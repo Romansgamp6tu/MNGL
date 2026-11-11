@@ -38,3 +38,10 @@ Pipeline должен быть создан для формата целевог
 Внутри прохода pipeline и буферы связываются перед draw-командами. Uniform-данные передаются отдельно для vertex и fragment stage, а draw API поддерживает обычные и индексированные примитивы. Деструктор render pass завершает активный проход, поэтому он должен быть уничтожен до `command_buffer::submit()`.
 
 Compute pipeline и RAII `compute_pass` используют тот же command buffer и GPU-ресурсы. Загрузка, bindings и dispatch описаны в разделе [Compute shaders](compute.md).
+
+`push_vertex_uniform(slot, data)` и `push_fragment_uniform(slot, data)` отправляют
+trivially copyable данные в command buffer текущего прохода. Поля должны соблюдать
+shader layout, включая 16-byte alignment для `vec3` и `vec4`. После `end_pass()`,
+перемещения или для пустого `render_pass` эти методы выбрасывают `std::logic_error`.
+Создание прохода с неактивным command buffer или с attachment от другого известного
+GPU device выбрасывает `std::invalid_argument` до вызова SDL.

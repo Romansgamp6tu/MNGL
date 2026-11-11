@@ -367,6 +367,17 @@ namespace mngl::process
 			return write_stdin(std::as_bytes(std::span(text.data(), text.size())));
 		}
 
+		// Sends EOF after any input already written to the pipe. Repeated calls
+		// are harmless; filters that read until EOF can then finish normally.
+		void close_stdin()
+		{
+			ensure_valid();
+			if (m_stdin && !SDL_CloseIO(std::exchange(m_stdin, nullptr))) [[unlikely]]
+			{
+				throw sdl_error("failed to close process standard input: ");
+			}
+		}
+
 		[[nodiscard]] static command_result run(std::vector<std::string> arguments,
 		                                        std::filesystem::path working_directory = {})
 		{

@@ -509,7 +509,8 @@ namespace mngl::audio::detail
 		{
 			if ((++audio_stream_registration_count % 64) == 0)
 			{
-				std::erase_if(audio_stream_resources, [](const auto& weak_stream) { return weak_stream.expired(); });
+				std::erase_if(audio_stream_resources,
+				              [](const auto& weak_stream) { return weak_stream.expired(); });
 			}
 			audio_stream_resources.emplace_back(stream);
 		}
@@ -539,7 +540,8 @@ namespace mngl::audio::detail
 			    (!std::isfinite(options.position->x) || !std::isfinite(options.position->y) ||
 			     !std::isfinite(options.position->z)))
 			{
-				return std::unexpected(error{error_code::invalid_argument, "3D position must contain finite values"});
+				return std::unexpected(
+				    error{error_code::invalid_argument, "3D position must contain finite values"});
 			}
 
 			const char* bus_tag = nullptr;
@@ -661,7 +663,8 @@ namespace mngl::audio::detail
 			    (!std::isfinite(options.position->x) || !std::isfinite(options.position->y) ||
 			     !std::isfinite(options.position->z)))
 			{
-				return std::unexpected(error{error_code::invalid_argument, "3D position must contain finite values"});
+				return std::unexpected(
+				    error{error_code::invalid_argument, "3D position must contain finite values"});
 			}
 
 			const char* bus_tag = nullptr;
@@ -762,17 +765,18 @@ namespace mngl::audio::detail
 		}
 
 		std::expected<std::uint64_t, error> play_stream(const std::shared_ptr<audio_stream_resource>& stream,
-		                                               play_options options)
+		                                                play_options options)
 		{
 			reap_finished_voices();
 			if (!stream || !stream->native_stream())
 			{
-				return std::unexpected(error{error_code::invalid_argument, "Cannot play an empty audio stream"});
+				return std::unexpected(
+				    error{error_code::invalid_argument, "Cannot play an empty audio stream"});
 			}
 			if (options.loop)
 			{
-				return std::unexpected(error{error_code::invalid_argument,
-				                             "Live audio streams cannot use playback looping"});
+				return std::unexpected(
+				    error{error_code::invalid_argument, "Live audio streams cannot use playback looping"});
 			}
 			if (next_voice_id == 0)
 			{
@@ -781,13 +785,15 @@ namespace mngl::audio::detail
 			}
 			if (!std::isfinite(options.volume))
 			{
-				return std::unexpected(error{error_code::invalid_argument, "voice volume must be a finite number"});
+				return std::unexpected(
+				    error{error_code::invalid_argument, "voice volume must be a finite number"});
 			}
 			if (options.position &&
 			    (!std::isfinite(options.position->x) || !std::isfinite(options.position->y) ||
 			     !std::isfinite(options.position->z)))
 			{
-				return std::unexpected(error{error_code::invalid_argument, "3D position must contain finite values"});
+				return std::unexpected(
+				    error{error_code::invalid_argument, "3D position must contain finite values"});
 			}
 
 			const char* bus_tag = nullptr;
@@ -809,7 +815,8 @@ namespace mngl::audio::detail
 			}
 			catch (const std::bad_alloc&)
 			{
-				return std::unexpected(error{error_code::stream_playback, "Failed to allocate voice tracking state"});
+				return std::unexpected(
+				    error{error_code::stream_playback, "Failed to allocate voice tracking state"});
 			}
 
 			bool expected_detached = false;
@@ -829,44 +836,46 @@ namespace mngl::audio::detail
 				}
 			} attachment{stream};
 
-			std::unique_ptr<MIX_Track, decltype(&MIX_DestroyTrack)> track(MIX_CreateTrack(mixer), MIX_DestroyTrack);
+			std::unique_ptr<MIX_Track, decltype(&MIX_DestroyTrack)> track(MIX_CreateTrack(mixer),
+			                                                              MIX_DestroyTrack);
 			if (!track)
 			{
-				return std::unexpected(
-				    error{error_code::stream_playback, sdl_error_message("Failed to create a streaming track")});
+				return std::unexpected(error{error_code::stream_playback,
+				                             sdl_error_message("Failed to create a streaming track")});
 			}
 			if (!MIX_SetTrackAudioStream(track.get(), stream->native_stream()))
 			{
-				return std::unexpected(
-				    error{error_code::stream_playback, sdl_error_message("Failed to attach audio stream to track")});
+				return std::unexpected(error{error_code::stream_playback,
+				                             sdl_error_message("Failed to attach audio stream to track")});
 			}
 
 			const float volume = std::clamp(options.volume, 0.0f, 1.0f);
 			const float bus_volume = options.bus == bus::sfx ? sfx_volume_level : music_volume_level;
 			if (!MIX_SetTrackGain(track.get(), volume * bus_volume))
 			{
-				return std::unexpected(
-				    error{error_code::volume_control, sdl_error_message("Failed to set stream voice volume")});
+				return std::unexpected(error{error_code::volume_control,
+				                             sdl_error_message("Failed to set stream voice volume")});
 			}
 			if (!MIX_TagTrack(track.get(), bus_tag))
 			{
-				return std::unexpected(error{error_code::stream_playback,
-				                             sdl_error_message("Failed to assign stream voice to audio bus")});
+				return std::unexpected(
+				    error{error_code::stream_playback,
+					      sdl_error_message("Failed to assign stream voice to audio bus")});
 			}
 			if (options.position)
 			{
 				const MIX_Point3D position{options.position->x, options.position->y, options.position->z};
 				if (!MIX_SetTrack3DPosition(track.get(), &position))
 				{
-					return std::unexpected(
-					    error{error_code::spatial_control, sdl_error_message("Failed to set stream position")});
+					return std::unexpected(error{error_code::spatial_control,
+					                             sdl_error_message("Failed to set stream position")});
 				}
 			}
 
 			properties_guard play_properties;
 			play_properties.reset(SDL_CreateProperties());
-			if (!play_properties ||
-			    !SDL_SetBooleanProperty(play_properties.get(), MIX_PROP_PLAY_HALT_WHEN_EXHAUSTED_BOOLEAN, false))
+			if (!play_properties || !SDL_SetBooleanProperty(play_properties.get(),
+			                                                MIX_PROP_PLAY_HALT_WHEN_EXHAUSTED_BOOLEAN, false))
 			{
 				return std::unexpected(error{error_code::stream_playback,
 				                             sdl_error_message("Failed to configure a live audio stream")});
@@ -875,8 +884,8 @@ namespace mngl::audio::detail
 			const std::uint64_t id = next_voice_id;
 			if (!MIX_PlayTrack(track.get(), play_properties.get()))
 			{
-				return std::unexpected(
-				    error{error_code::stream_playback, sdl_error_message("Failed to start audio stream playback")});
+				return std::unexpected(error{error_code::stream_playback,
+				                             sdl_error_message("Failed to start audio stream playback")});
 			}
 
 			voices.push_back(voice{id, track.release(), options.bus, volume, stream});
@@ -1045,10 +1054,11 @@ namespace mngl::audio::detail
 
 		std::expected<void, error> set_voice_position(std::uint64_t id, std::optional<position3d> position)
 		{
-			if (position && (!std::isfinite(position->x) || !std::isfinite(position->y) ||
-			                 !std::isfinite(position->z)))
+			if (position &&
+			    (!std::isfinite(position->x) || !std::isfinite(position->y) || !std::isfinite(position->z)))
 			{
-				return std::unexpected(error{error_code::invalid_argument, "3D position must contain finite values"});
+				return std::unexpected(
+				    error{error_code::invalid_argument, "3D position must contain finite values"});
 			}
 
 			reap_finished_voices();
@@ -1135,20 +1145,17 @@ namespace mngl::audio::detail
 
 		void reap_finished_voices()
 		{
-			for (auto voice = voices.begin(); voice != voices.end();)
-			{
-				if (!MIX_TrackPlaying(voice->track) && !MIX_TrackPaused(voice->track))
-				{
-					MIX_DestroyTrack(voice->track);
-					if (voice->stream)
-						voice->stream->attached.store(false, std::memory_order_release);
-					voice = voices.erase(voice);
-				}
-				else
-				{
-					++voice;
-				}
-			}
+			// Compact once when many voices finish together; repeated erase() shifts the tail each time.
+			std::erase_if(voices,
+			              [](const voice& finished)
+			              {
+				              if (MIX_TrackPlaying(finished.track) || MIX_TrackPaused(finished.track))
+					              return false;
+				              MIX_DestroyTrack(finished.track);
+				              if (finished.stream)
+					              finished.stream->attached.store(false, std::memory_order_release);
+				              return true;
+			              });
 		}
 
 		MIX_Mixer* mixer = nullptr;
@@ -1254,8 +1261,9 @@ namespace mngl::audio::detail
 	{
 		if (options.sample_rate <= 0 || (options.channels != 1 && options.channels != 2))
 		{
-			return std::unexpected(error{error_code::invalid_argument,
-			                             "capture format requires a positive sample rate and 1 or 2 channels"});
+			return std::unexpected(
+			    error{error_code::invalid_argument,
+				      "capture format requires a positive sample rate and 1 or 2 channels"});
 		}
 
 		SDL_AudioSpec format{SDL_AUDIO_F32, options.channels, options.sample_rate};
@@ -1322,11 +1330,12 @@ namespace mngl::audio
 		}
 
 		int count = 0;
-		std::unique_ptr<SDL_AudioDeviceID, decltype(&SDL_free)> ids(SDL_GetAudioRecordingDevices(&count), SDL_free);
-		if (count < 0 || (!ids && count > 0))
+		std::unique_ptr<SDL_AudioDeviceID, decltype(&SDL_free)> ids(SDL_GetAudioRecordingDevices(&count),
+		                                                            SDL_free);
+		if (!ids || count < 0)
 		{
-			return std::unexpected(
-			    error{error_code::capture_device, detail::sdl_error_message("Failed to list recording devices")});
+			return std::unexpected(error{error_code::capture_device,
+			                             detail::sdl_error_message("Failed to list recording devices")});
 		}
 
 		std::vector<recording_device> devices;
@@ -1337,8 +1346,9 @@ namespace mngl::audio
 			const char* name = SDL_GetAudioDeviceName(id);
 			if (!name)
 			{
-				return std::unexpected(error{error_code::capture_device,
-				                             detail::sdl_error_message("Failed to get a recording device name")});
+				return std::unexpected(
+				    error{error_code::capture_device,
+					      detail::sdl_error_message("Failed to get a recording device name")});
 			}
 			devices.push_back(detail::recording_device_access::make(id, name));
 		}
@@ -1361,7 +1371,7 @@ namespace mngl::audio
 	}
 
 	inline std::expected<capture_session, error> try_open_capture(const recording_device& device,
-	                                                             capture_options options)
+	                                                              capture_options options)
 	{
 		auto runtime = detail::ensure_sdl_runtime();
 		if (!runtime)
@@ -1385,8 +1395,9 @@ namespace mngl::audio
 	{
 		if (format.sample_rate <= 0 || (format.channels != 1 && format.channels != 2))
 		{
-			return std::unexpected(error{error_code::invalid_argument,
-			                             "audio stream format requires a positive sample rate and 1 or 2 channels"});
+			return std::unexpected(
+			    error{error_code::invalid_argument,
+				      "audio stream format requires a positive sample rate and 1 or 2 channels"});
 		}
 
 		auto engine = detail::ensure_engine();
@@ -1409,8 +1420,8 @@ namespace mngl::audio
 			return std::unexpected(
 			    error{error_code::stream_create, detail::sdl_error_message("Failed to create audio stream")});
 		}
-		std::unique_ptr<SDL_AudioStream, decltype(&SDL_DestroyAudioStream)> stream_guard(native_stream,
-		                                                                                   SDL_DestroyAudioStream);
+		std::unique_ptr<SDL_AudioStream, decltype(&SDL_DestroyAudioStream)> stream_guard(
+		    native_stream, SDL_DestroyAudioStream);
 		std::shared_ptr<detail::audio_stream_resource> resource;
 		try
 		{
@@ -1643,8 +1654,8 @@ namespace mngl::audio
 		const int available_bytes = SDL_GetAudioStreamAvailable(resource_->native_stream());
 		if (available_bytes < 0)
 		{
-			return std::unexpected(error{error_code::capture,
-			                             detail::sdl_error_message("Failed to query captured audio")});
+			return std::unexpected(
+			    error{error_code::capture, detail::sdl_error_message("Failed to query captured audio")});
 		}
 		const int frame_bytes = channels_ * static_cast<int>(sizeof(float));
 		const int readable_bytes = available_bytes - (available_bytes % frame_bytes);
@@ -1654,7 +1665,8 @@ namespace mngl::audio
 		}
 
 		std::vector<float> samples(static_cast<std::size_t>(readable_bytes) / sizeof(float));
-		const int read_bytes = SDL_GetAudioStreamData(resource_->native_stream(), samples.data(), readable_bytes);
+		const int read_bytes =
+		    SDL_GetAudioStreamData(resource_->native_stream(), samples.data(), readable_bytes);
 		if (read_bytes < 0)
 		{
 			return std::unexpected(
@@ -1700,12 +1712,15 @@ namespace mngl::audio
 		}
 		if (channels_ <= 0 || interleaved_samples.size() % static_cast<std::size_t>(channels_) != 0)
 		{
-			return std::unexpected(error{error_code::invalid_argument,
-			                             "interleaved sample count must be divisible by the stream channel count"});
+			return std::unexpected(
+			    error{error_code::invalid_argument,
+				      "interleaved sample count must be divisible by the stream channel count"});
 		}
-		if (interleaved_samples.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()) / sizeof(float))
+		if (interleaved_samples.size() >
+		    static_cast<std::size_t>(std::numeric_limits<int>::max()) / sizeof(float))
 		{
-			return std::unexpected(error{error_code::invalid_argument, "audio write exceeds SDL's size limit"});
+			return std::unexpected(
+			    error{error_code::invalid_argument, "audio write exceeds SDL's size limit"});
 		}
 		if (interleaved_samples.empty())
 		{
@@ -1729,8 +1744,8 @@ namespace mngl::audio
 		const int queued_bytes = SDL_GetAudioStreamQueued(resource_->native_stream());
 		if (queued_bytes < 0)
 		{
-			return std::unexpected(error{error_code::stream_write,
-			                             detail::sdl_error_message("Failed to query queued audio")});
+			return std::unexpected(
+			    error{error_code::stream_write, detail::sdl_error_message("Failed to query queued audio")});
 		}
 		const std::size_t frame_bytes = static_cast<std::size_t>(channels_) * sizeof(float);
 		return static_cast<std::size_t>(queued_bytes) / frame_bytes;

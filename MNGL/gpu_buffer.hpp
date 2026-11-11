@@ -61,7 +61,8 @@ namespace mngl::gpu
 				auto* command_handle = command.raw();
 				if (!command_handle) [[unlikely]]
 				{
-					throw std::invalid_argument("Cannot begin a GPU copy pass with an invalid command buffer");
+					throw std::invalid_argument(
+					    "Cannot begin a GPU copy pass with an invalid command buffer");
 				}
 				m_device = command.device_raw();
 				m_handle = SDL_BeginGPUCopyPass(command_handle);
@@ -118,9 +119,9 @@ namespace mngl::gpu
 			if (!m_handle) [[unlikely]]
 			{
 				const char* driver = SDL_GetGPUDeviceDriver(m_device);
-				throw sdl_error(std::format("Failed to create GPU buffer on driver '{}': size={} bytes, usage=0x{:X}",
-				                            driver ? driver : "<unknown>", m_size,
-				                            static_cast<std::uint32_t>(m_usage)));
+				throw sdl_error(
+				    std::format("Failed to create GPU buffer on driver '{}': size={} bytes, usage=0x{:X}",
+					            driver ? driver : "<unknown>", m_size, static_cast<std::uint32_t>(m_usage)));
 			}
 		}
 
@@ -138,6 +139,8 @@ namespace mngl::gpu
 		    : m_device_owner(std::move(other.m_device_owner)),
 		      m_device(std::exchange(other.m_device, nullptr)),
 		      m_handle(std::exchange(other.m_handle, nullptr)),
+		      m_update_buffer(std::exchange(other.m_update_buffer, nullptr)),
+		      m_update_capacity(std::exchange(other.m_update_capacity, 0)),
 		      m_transfer_buffer(std::exchange(other.m_transfer_buffer, nullptr)),
 		      m_size(std::exchange(other.m_size, 0)),
 		      m_transfer_capacity(std::exchange(other.m_transfer_capacity, 0)), m_usage(other.m_usage)
@@ -152,6 +155,8 @@ namespace mngl::gpu
 				m_device_owner = std::move(other.m_device_owner);
 				m_device = std::exchange(other.m_device, nullptr);
 				m_handle = std::exchange(other.m_handle, nullptr);
+				m_update_buffer = std::exchange(other.m_update_buffer, nullptr);
+				m_update_capacity = std::exchange(other.m_update_capacity, 0);
 				m_transfer_buffer = std::exchange(other.m_transfer_buffer, nullptr);
 				m_size = std::exchange(other.m_size, 0);
 				m_transfer_capacity = std::exchange(other.m_transfer_capacity, 0);
@@ -172,6 +177,10 @@ namespace mngl::gpu
 			if (m_device && m_handle)
 				SDL_ReleaseGPUBuffer(m_device, m_handle);
 			m_handle = nullptr;
+			if (m_device && m_update_buffer)
+				SDL_ReleaseGPUBuffer(m_device, m_update_buffer);
+			m_update_buffer = nullptr;
+			m_update_capacity = 0;
 			release_transfer_buffer();
 			m_device = nullptr;
 			m_device_owner.reset();
@@ -278,7 +287,8 @@ namespace mngl::gpu
 				return;
 			}
 			detail::gpu_copy_pass copy_pass(cmd);
-			record_upload(copy_pass, staged_size, true, destination_offset);
+			preserve_contents_for_update(copy_pass);
+			record_upload(copy_pass, staged_size, false, destination_offset);
 		}
 
 		template <typename T>
@@ -304,6 +314,35 @@ namespace mngl::gpu
 	private:
 		friend class batcher2d;
 		friend class ::mngl::two_d::mesh;
+
+		void preserve_contents_for_update(detail::gpu_copy_pass& copy_pass)
+		{
+			if (!m_update_buffer || m_update_capacity < m_size)
+			{
+				SDL_GPUBufferCreateInfo info{};
+				info.usage = static_cast<SDL_GPUBufferUsageFlags>(m_usage);
+				info.size = m_size;
+				auto* replacement = SDL_CreateGPUBuffer(m_device, &info);
+				if (!replacement) [[unlikely]]
+				{
+					throw sdl_error("Failed to allocate GPU buffer for a partial update: ");
+				}
+				if (m_update_buffer)
+				{
+					SDL_ReleaseGPUBuffer(m_device, m_update_buffer);
+				}
+				m_update_buffer = replacement;
+				m_update_capacity = m_size;
+			}
+
+			// Cycling a partial upload would discard every untouched byte. Copy into the spare
+			// buffer first; cycling that destination also preserves earlier draws of either buffer.
+			const SDL_GPUBufferLocation source{.buffer = m_handle, .offset = 0};
+			const SDL_GPUBufferLocation destination{.buffer = m_update_buffer, .offset = 0};
+			SDL_CopyGPUBufferToBuffer(copy_pass.raw(), &source, &destination, m_size, true);
+			std::swap(m_handle, m_update_buffer);
+			std::swap(m_size, m_update_capacity);
+		}
 
 		[[nodiscard]] std::uint32_t stage_upload(SDL_GPUDevice* device, std::span<const std::byte> data)
 		{
@@ -393,8 +432,10 @@ namespace mngl::gpu
 				throw std::logic_error("GPU buffer upload was not staged before recording");
 			}
 
-			SDL_GPUTransferBufferLocation src_location{.transfer_buffer = m_transfer_buffer, .offset = source_offset};
-			SDL_GPUBufferRegion dst_region{.buffer = m_handle, .offset = destination_offset, .size = upload_size};
+			SDL_GPUTransferBufferLocation src_location{.transfer_buffer = m_transfer_buffer,
+			                                           .offset = source_offset};
+			SDL_GPUBufferRegion dst_region{
+			    .buffer = m_handle, .offset = destination_offset, .size = upload_size};
 			SDL_UploadToGPUBuffer(copy_pass.raw(), &src_location, &dst_region, cycle);
 		}
 
@@ -431,6 +472,8 @@ namespace mngl::gpu
 		std::optional<device> m_device_owner;
 		SDL_GPUDevice* m_device = nullptr;
 		SDL_GPUBuffer* m_handle = nullptr;
+		SDL_GPUBuffer* m_update_buffer = nullptr;
+		std::uint32_t m_update_capacity = 0;
 		SDL_GPUTransferBuffer* m_transfer_buffer = nullptr;
 		std::uint32_t m_size = 0;
 		std::uint32_t m_transfer_capacity = 0;

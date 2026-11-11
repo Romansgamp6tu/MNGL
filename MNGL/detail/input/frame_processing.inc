@@ -108,12 +108,12 @@
 		{
 			update_info();
 			poll_events();
-			const auto imgui_events = event_manager::take_imgui_input_events();
+			const auto imgui_events = event_manager::take_owned_imgui_input_events();
 			if (ImGui::GetCurrentContext() && ImGui::GetIO().BackendPlatformUserData != nullptr)
 			{
-				for (const SDL_Event& event : imgui_events)
+				for (const auto& event : imgui_events)
 				{
-					ImGui_ImplSDL3_ProcessEvent(&event);
+					ImGui_ImplSDL3_ProcessEvent(&event.event);
 				}
 			}
 #ifndef NO_SDLINPUT_QUEUE_FLUSH

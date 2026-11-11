@@ -12,6 +12,7 @@
 #include <array>
 #include <span>
 #include <stdexcept>
+#include <type_traits>
 
 namespace mngl::gpu
 {
@@ -62,6 +63,10 @@ namespace mngl::gpu
 		render_pass(command_buffer& cmd, std::span<const color_attachment> color_targets,
 		            const depth_attachment* depth = nullptr)
 		{
+			if (!cmd.valid()) [[unlikely]]
+			{
+				throw std::invalid_argument("Render pass requires a valid command buffer");
+			}
 			if (color_targets.empty() && !depth) [[unlikely]]
 			{
 				throw std::invalid_argument("Render pass requires at least one color or depth target");
@@ -73,12 +78,17 @@ namespace mngl::gpu
 
 			std::array<SDL_GPUColorTargetInfo, 4> sdl_color_targets{};
 			std::uint32_t color_target_count = 0;
+			const auto* command_device = cmd.device_raw();
 
 			for (const auto& attachment : color_targets)
 			{
 				if (!attachment.target.has_usage(texture::usage_flags::color_target)) [[unlikely]]
 				{
 					throw std::invalid_argument("Target texture must have color_target usage flag!");
+				}
+				if (command_device && attachment.target.device_raw() != command_device) [[unlikely]]
+				{
+					throw std::invalid_argument("Render target belongs to a different GPU device");
 				}
 
 				SDL_GPUColorTargetInfo info{};
@@ -102,6 +112,10 @@ namespace mngl::gpu
 					throw std::invalid_argument(
 					    "Depth target texture must have depth_stencil_target usage flag!");
 				}
+				if (command_device && depth->target.device_raw() != command_device) [[unlikely]]
+				{
+					throw std::invalid_argument("Depth target belongs to a different GPU device");
+				}
 
 				sdl_depth_info.texture = depth->target.raw();
 				sdl_depth_info.clear_depth = depth->depth;
@@ -115,7 +129,8 @@ namespace mngl::gpu
 			}
 
 			const auto* color_target_data = color_target_count ? sdl_color_targets.data() : nullptr;
-			handle = SDL_BeginGPURenderPass(cmd.raw(), color_target_data, color_target_count, depth_ptr);
+			m_commands = cmd.raw();
+			handle = SDL_BeginGPURenderPass(m_commands, color_target_data, color_target_count, depth_ptr);
 
 			if (!handle) [[unlikely]]
 			{
@@ -151,6 +166,7 @@ namespace mngl::gpu
 				SDL_EndGPURenderPass(handle);
 				handle = nullptr;
 			}
+			m_commands = nullptr;
 		}
 
 		// =========================================================================
@@ -176,16 +192,18 @@ namespace mngl::gpu
 			                             first_instance);
 		}
 
-		template <typename T> void push_vertex_uniform(std::uint32_t slot, const T& data) const noexcept
+		template <typename T> void push_vertex_uniform(std::uint32_t slot, const T& data) const
 		{
 			static_assert(std::is_trivially_copyable_v<T>, "Uniform data must be trivially copyable!");
-			SDL_PushGPUVertexUniformData(handle, slot, &data, static_cast<std::uint32_t>(sizeof(T)));
+			ensure_active();
+			SDL_PushGPUVertexUniformData(m_commands, slot, &data, static_cast<std::uint32_t>(sizeof(T)));
 		}
 
-		template <typename T> void push_fragment_uniform(std::uint32_t slot, const T& data) const noexcept
+		template <typename T> void push_fragment_uniform(std::uint32_t slot, const T& data) const
 		{
 			static_assert(std::is_trivially_copyable_v<T>, "Uniform data must be trivially copyable!");
-			SDL_PushGPUFragmentUniformData(handle, slot, &data, static_cast<std::uint32_t>(sizeof(T)));
+			ensure_active();
+			SDL_PushGPUFragmentUniformData(m_commands, slot, &data, static_cast<std::uint32_t>(sizeof(T)));
 		}
 
 		void bind_vertex_buffers(std::uint32_t first_slot,
@@ -242,12 +260,22 @@ namespace mngl::gpu
 		}
 
 	private:
+		void ensure_active() const
+		{
+			if (!handle || !m_commands) [[unlikely]]
+			{
+				throw std::logic_error("Cannot push uniform data without an active render pass");
+			}
+		}
+
 		SDL_GPURenderPass* handle = nullptr;
+		SDL_GPUCommandBuffer* m_commands = nullptr;
 
 		friend inline void swap(render_pass& l, render_pass& r) noexcept
 		{
 			using std::swap;
 			swap(l.handle, r.handle);
+			swap(l.m_commands, r.m_commands);
 		}
 	};
 } // namespace mngl::gpu

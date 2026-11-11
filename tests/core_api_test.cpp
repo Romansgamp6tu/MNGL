@@ -2,17 +2,21 @@
 #define APP_VERSION 1
 #define APP_FLAGS (SDL_INIT_VIDEO | SDL_INIT_EVENTS)
 #include <MNGL/async_io.hpp>
+#include <MNGL/dialog.hpp>
 #include <MNGL/event.hpp>
 #include <MNGL/color.hpp>
+#include <MNGL/rectangle.hpp>
 #include <MNGL/window.hpp>
 #include <MNGL/paths.hpp>
 #include <MNGL/process.hpp>
 #include <MNGL/storage.hpp>
 
 #include <atomic>
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <stdexcept>
 #include <thread>
@@ -41,11 +45,15 @@ namespace
 	{
 		SDL_SetError("captured backend error");
 		mngl::sdl_error captured("context: ");
+		const std::string captured_message(captured.what());
 		SDL_SetError("unrelated later error");
-		require(std::string(captured.what()) == "context: captured backend error",
+		require(std::string_view(captured.what()).starts_with("context: captured backend error") &&
+		            captured_message == captured.what(),
 		        "SDL error was not captured");
 		auto invalid = mngl::paths::try_user_folder_path(static_cast<mngl::paths::user_folder>(-1));
-		require(!invalid && std::string(invalid.error().what()) == "invalid user folder",
+		require(!invalid && std::string_view(invalid.error().what()).starts_with("invalid user folder") &&
+		            std::string_view(invalid.error().what()).find("unrelated later error") ==
+		                std::string_view::npos,
 		        "try_ path retained stale SDL state");
 		bool threw = false;
 		try
@@ -75,6 +83,35 @@ namespace
 		}
 		mngl::event_manager::emit(mngl::window_resized{});
 		require(calls == 3, "destroyed event connection remained subscribed");
+	}
+
+	void test_concurrent_subscriptions()
+	{
+		std::atomic_int permanent_calls = 0;
+		std::atomic_int transient_calls = 0;
+		std::atomic_bool start = false;
+		auto permanent =
+		    mngl::event_manager::on<mngl::window_resized>([&](const auto&) { ++permanent_calls; });
+		std::jthread subscriber(
+		    [&]
+		    {
+			    while (!start.load(std::memory_order_acquire))
+				    std::this_thread::yield();
+			    for (int index = 0; index < 500; ++index)
+			    {
+				    auto temporary = mngl::event_manager::on<mngl::window_resized>([&](const auto&)
+					                                                               { ++transient_calls; });
+				    std::this_thread::yield();
+			    }
+		    });
+		start.store(true, std::memory_order_release);
+		for (int index = 0; index < 1000; ++index)
+			mngl::event_manager::emit(mngl::window_resized{});
+		subscriber.join();
+		require(permanent_calls == 1000, "Subscription churn dropped events from a permanent listener");
+		const auto before = transient_calls.load();
+		mngl::event_manager::emit(mngl::window_resized{});
+		require(transient_calls == before, "Destroyed concurrent subscription still received events");
 	}
 
 	void test_sdl_event_delivery()
@@ -133,6 +170,70 @@ namespace
 		        "resizable flag did not round-trip");
 	}
 
+	void test_color_encoding()
+	{
+		const mngl::color value(0x12345678u);
+		require(value.rgb_uint() == 0x123456u, "RGB encoding included alpha or omitted red");
+		require(mngl::color{"#aBcDeF"}.rgba_uint() == 0xABCDEFFFu,
+		        "HEX parser lost a valid mixed-case RGB color");
+		require(mngl::color{"#12345678"} == value, "HEX parser lost a valid RGBA color");
+		for (const std::string invalid : {"#12345g", "#12 345", "#-00001", "#+00001", "#0x1234"})
+		{
+			bool rejected = false;
+			try
+			{
+				(void)mngl::color(invalid);
+			}
+			catch (const std::invalid_argument&)
+			{
+				rejected = true;
+			}
+			require(rejected, "HEX parser accepted characters outside the HEX color grammar");
+		}
+	}
+
+	void test_rectangle_contracts()
+	{
+		const mngl::rectangle area{0.0f, 0.0f, 4.0f, 4.0f};
+		const SDL_FRect sdl_area = area;
+		const std::array cases{
+		    mngl::rectangle{4.0f, 1.0f, 2.0f, 2.0f}, mngl::rectangle{4.0f, 4.0f, 0.0f, 0.0f},
+		    mngl::rectangle{1.0f, 1.0f, 0.0f, 2.0f}, mngl::rectangle{2.0f, 2.0f, -1.0f, 1.0f},
+		    mngl::rectangle{10.0f, 10.0f, 1.0f, 1.0f}};
+		for (const auto& value : cases)
+		{
+			const SDL_FRect sdl_value = value;
+			const bool expected = SDL_HasRectIntersectionFloat(&sdl_area, &sdl_value);
+			require(area.intersects(value) == expected && value.intersects(area) == expected,
+			        "Rectangle intersection disagreed with SDL float rectangle semantics");
+			SDL_FRect overlap{};
+			if (SDL_GetRectIntersectionFloat(&sdl_area, &sdl_value, &overlap))
+			{
+				require(area.intersection(value).equals(overlap),
+				        "Rectangle intersection bounds differ from SDL");
+			}
+			else
+			{
+				require(area.intersection(value).empty(), "Disjoint rectangle intersection was not empty");
+			}
+		}
+
+		const mngl::rectangle empty{2.0f, 2.0f, -1.0f, -1.0f};
+		const mngl::rectangle elsewhere{10.0f, 10.0f, 4.0f, 4.0f};
+		require(empty.union_with(elsewhere) == elsewhere && elsewhere.union_with(empty) == elsewhere,
+		        "An empty rectangle expanded a union");
+		require(!empty.intersects_line({1.0f, 1.0f}, {3.0f, 3.0f}),
+		        "An empty rectangle reported a line intersection");
+
+		const std::array<glm::vec2, 3> points{{{-1.0f, -1.0f}, {2.0f, 3.0f}, {8.0f, 9.0f}}};
+		const auto bounds = enclosing_points(std::span<const glm::vec2>(points), area);
+		require(bounds == mngl::rectangle{2.0f, 3.0f, 0.0f, 0.0f},
+		        "Clipped point bounds included points outside the clip");
+		const std::array<glm::vec2, 2> outside{{{-1.0f, -1.0f}, {8.0f, 9.0f}}};
+		require(enclosing_points(std::span<const glm::vec2>(outside), area).empty(),
+		        "Point bounds were nonempty without any point inside the clip");
+	}
+
 	void test_files()
 	{
 		temporary_directory temporary;
@@ -188,6 +289,86 @@ namespace
 		}
 		require(threw, "async buffer could be consumed twice");
 	}
+
+	void test_dialog_arguments()
+	{
+		const auto rejects_argument = [](auto&& action)
+		{
+			try
+			{
+				action();
+			}
+			catch (const std::invalid_argument&)
+			{
+				return true;
+			}
+			return false;
+		};
+		mngl::dialog::file_dialog_options options;
+		options.filters = {{std::string("Text\0Files", 10), "txt"}};
+		require(rejects_argument([&] { (void)mngl::dialog::open_file(options); }),
+		        "dialog accepted a truncated filter name");
+		options.filters = {{"Text", std::string("txt\0png", 7)}};
+		require(rejects_argument([&] { (void)mngl::dialog::open_files(options); }),
+		        "dialog accepted a truncated filter pattern");
+		options.filters.clear();
+		const std::filesystem::path invalid_path(std::u8string(u8"bad\0path", 8));
+		options.default_location = invalid_path;
+		require(rejects_argument([&] { (void)mngl::dialog::save_file(options); }),
+		        "dialog accepted a truncated default file location");
+		mngl::dialog::folder_dialog_options folder_options;
+		folder_options.default_location = invalid_path;
+		require(rejects_argument([&] { (void)mngl::dialog::open_folder(folder_options); }),
+		        "dialog accepted a truncated default folder location");
+	}
+
+	void test_process_input(const std::string& executable)
+	{
+		mngl::process::launch_options options;
+		options.standard_input = mngl::process::stdio_route::pipe;
+		options.standard_error = mngl::process::stdio_route::discard;
+		auto child = mngl::process::launch({executable, "--child-eof"}, options);
+		const std::string_view input = "pipe payload";
+		std::size_t written = 0;
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+		while (written < input.size())
+		{
+			require(std::chrono::steady_clock::now() < deadline, "process input write timed out");
+			written += child.write_stdin(input.substr(written));
+			if (written < input.size())
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+		child.close_stdin();
+		child.close_stdin();
+		bool rejected_write = false;
+		try
+		{
+			(void)child.write_stdin("after EOF");
+		}
+		catch (const std::logic_error&)
+		{
+			rejected_write = true;
+		}
+		require(rejected_write, "process input accepted a write after closing stdin");
+		std::string output;
+		while (true)
+		{
+			const auto chunk = child.read_stdout();
+			require(chunk.state != mngl::process::stream_state::failed, "failed to read process output");
+			if (!chunk.data.empty())
+				output.append(reinterpret_cast<const char*>(chunk.data.data()), chunk.data.size());
+			if (chunk.state == mngl::process::stream_state::end_of_stream)
+				break;
+			if (std::chrono::steady_clock::now() >= deadline)
+			{
+				(void)child.terminate();
+				throw std::runtime_error("process did not finish after stdin EOF");
+			}
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+		require(child.wait() == 9 && output == "eof:pipe payload",
+		        "process lost input or did not observe stdin EOF");
+	}
 } // namespace
 
 int main(int argc, char** argv)
@@ -197,14 +378,25 @@ int main(int argc, char** argv)
 		std::cout << "child-result";
 		return 7;
 	}
+	if (argc == 2 && std::string_view(argv[1]) == "--child-eof")
+	{
+		const std::string input{std::istreambuf_iterator<char>(std::cin), std::istreambuf_iterator<char>()};
+		std::cout << "eof:" << input;
+		return 9;
+	}
 	try
 	{
 		mngl::runtime::ensure();
 		test_errors_and_paths();
 		test_event_connection();
+		test_concurrent_subscriptions();
 		test_sdl_event_delivery();
 		test_value_contracts();
+		test_color_encoding();
+		test_rectangle_contracts();
 		test_files();
+		test_dialog_arguments();
+		test_process_input(std::filesystem::absolute(argv[0]).string());
 		auto result =
 		    mngl::process::child_process::run({std::filesystem::absolute(argv[0]).string(), "--child"});
 		require(result.exit_code == 7 && result.output == "child-result",

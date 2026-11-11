@@ -11,12 +11,11 @@ namespace mngl
 		class texture_render_session_impl final : public texture_render_session
 		{
 		public:
-		texture_render_session_impl(::mngl::texture& target, const color& clear_color,
-		                            bool preserve_target_contents)
+			texture_render_session_impl(::mngl::texture& target, const color& clear_color,
+			                            bool preserve_target_contents)
 			    : m_device(two_d::render_context::global().gpu_device()),
-			      m_started_frame(
-			          two_d::render_context::global().begin_frame(target, clear_color, false,
-			                                                     preserve_target_contents))
+			      m_started_frame(two_d::render_context::global().begin_frame(target, clear_color, false,
+				                                                              preserve_target_contents))
 			{
 			}
 
@@ -164,8 +163,8 @@ namespace mngl
 		{
 			throw std::logic_error("Texture is already being rendered to");
 		}
-		m_render_session = std::make_unique<detail::texture_render_session_impl>(
-		    *this, clear_color, preserve_contents);
+		m_render_session =
+		    std::make_unique<detail::texture_render_session_impl>(*this, clear_color, preserve_contents);
 		if (++m_next_frame_generation == 0)
 		{
 			++m_next_frame_generation;
@@ -317,7 +316,8 @@ namespace mngl::two_d
 
 	inline void recording_context::ensure_active() const
 	{
-		if (!valid() || !m_control->owner || !m_control->owner->owns_frame(m_token) || m_finished) [[unlikely]]
+		if (!valid() || !m_control->owner || !m_control->owner->owns_frame(m_token) || m_finished)
+		    [[unlikely]]
 		{
 			throw std::logic_error("Recording context is no longer active");
 		}
@@ -334,7 +334,8 @@ namespace mngl::two_d
 
 	inline void recording_context::register_with_frame()
 	{
-		if (!m_recording_state || !m_control || !m_control->owner || !m_control->owner->owns_frame(m_token)) [[unlikely]]
+		if (!m_recording_state || !m_control || !m_control->owner || !m_control->owner->owns_frame(m_token))
+		    [[unlikely]]
 		{
 			throw std::logic_error("Cannot register a recording context for an inactive frame");
 		}
@@ -431,10 +432,10 @@ namespace mngl::two_d
 
 	inline void cached_layer::invalidate_region(const ::mngl::rectangle& bounds)
 	{
-		if (!std::isfinite(bounds.pos.x) || !std::isfinite(bounds.pos.y) ||
-		    !std::isfinite(bounds.size.x) || !std::isfinite(bounds.size.y) || bounds.size.x < 0.0f ||
-		    bounds.size.y < 0.0f || !std::isfinite(bounds.pos.x + bounds.size.x) ||
-		    !std::isfinite(bounds.pos.y + bounds.size.y)) [[unlikely]]
+		if (!std::isfinite(bounds.pos.x) || !std::isfinite(bounds.pos.y) || !std::isfinite(bounds.size.x) ||
+		    !std::isfinite(bounds.size.y) || bounds.size.x < 0.0f || bounds.size.y < 0.0f ||
+		    !std::isfinite(bounds.pos.x + bounds.size.x) || !std::isfinite(bounds.pos.y + bounds.size.y))
+		    [[unlikely]]
 		{
 			throw std::invalid_argument("cached_layer dirty bounds must be finite and non-negative");
 		}
@@ -445,8 +446,8 @@ namespace mngl::two_d
 
 		const auto pixel_size = m_texture.size();
 		const auto coordinate_size = m_texture.coordinate_size();
-		const rectangle clipped = bounds.intersection(
-		    rectangle{0.0f, 0.0f, coordinate_size.x, coordinate_size.y});
+		const rectangle clipped =
+		    bounds.intersection(rectangle{0.0f, 0.0f, coordinate_size.x, coordinate_size.y});
 		if (clipped.size.x <= 0.0f || clipped.size.y <= 0.0f)
 		{
 			return;
@@ -454,16 +455,13 @@ namespace mngl::two_d
 
 		const double scale = static_cast<double>(std::min(pixel_size.x, pixel_size.y));
 		const auto clamp_pixel = [](double value, std::uint32_t limit)
-		{
-			return static_cast<int>(std::clamp(value, 0.0, static_cast<double>(limit)));
-		};
+		{ return static_cast<int>(std::clamp(value, 0.0, static_cast<double>(limit))); };
 		const int x0 = clamp_pixel(std::floor(static_cast<double>(clipped.pos.x) * scale), pixel_size.x);
-		const int x1 = clamp_pixel(
-		    std::ceil(static_cast<double>(clipped.pos.x + clipped.size.x) * scale), pixel_size.x);
-		const int y0 = clamp_pixel(
-		    std::floor(static_cast<double>(pixel_size.y) -
-	               static_cast<double>(clipped.pos.y + clipped.size.y) * scale),
-		    pixel_size.y);
+		const int x1 =
+		    clamp_pixel(std::ceil(static_cast<double>(clipped.pos.x + clipped.size.x) * scale), pixel_size.x);
+		const int y0 = clamp_pixel(std::floor(static_cast<double>(pixel_size.y) -
+		                                      static_cast<double>(clipped.pos.y + clipped.size.y) * scale),
+		                           pixel_size.y);
 		const int y1 = clamp_pixel(
 		    std::ceil(static_cast<double>(pixel_size.y) - static_cast<double>(clipped.pos.y) * scale),
 		    pixel_size.y);
@@ -502,8 +500,7 @@ namespace mngl::two_d
 		if (!dirty_region_updates_enabled())
 		{
 			const rectangle full_bounds{glm::vec2(0.0f), m_texture.coordinate_size()};
-			return update_if_dirty(
-			    [&](frame_2d& frame) { std::invoke(draw_region, frame, full_bounds); });
+			return update_if_dirty([&](frame_2d& frame) { std::invoke(draw_region, frame, full_bounds); });
 		}
 
 		if (!dirty())
@@ -544,13 +541,14 @@ namespace mngl::two_d
 						        [&](frame_2d& clipped_frame)
 						        {
 							        rectangle_shape clear_region{
-							            rectangle{glm::vec2(0.0f), m_texture.coordinate_size()}, m_clear_color};
+							            rectangle{glm::vec2(0.0f), m_texture.coordinate_size()},
+							            m_clear_color};
 							        clear_region.blend = gpu::sprite_blend_mode::opaque;
 							        clipped_frame.draw(clear_region);
 							        std::invoke(draw_region, clipped_frame, region);
-					        });
+						        });
 					    }
-			    });
+				    });
 				target_frame.display();
 			}
 		}
@@ -598,7 +596,7 @@ namespace mngl::two_d
 	}
 
 	inline mesh::mesh(const gpu::device& device, gpu::command_buffer& command_buffer,
-	                   std::span<const glm::vec2> triangle_vertices)
+	                  std::span<const glm::vec2> triangle_vertices)
 	{
 		if (triangle_vertices.empty()) [[unlikely]]
 		{
@@ -620,8 +618,8 @@ namespace mngl::two_d
 		{
 			throw std::invalid_argument("2D mesh and command buffer must use the same GPU device");
 		}
-		if (triangle_vertices.size() > std::numeric_limits<std::uint32_t>::max() /
-		                                   sizeof(detail::resident_mesh_vertex)) [[unlikely]]
+		if (triangle_vertices.size() >
+		    std::numeric_limits<std::uint32_t>::max() / sizeof(detail::resident_mesh_vertex)) [[unlikely]]
 		{
 			throw std::length_error("2D mesh exceeds SDL's 32-bit GPU buffer size limit");
 		}
@@ -673,13 +671,13 @@ namespace mngl::two_d
 	}
 
 	inline mesh::mesh(const gpu::device& device, gpu::command_buffer& command_buffer,
-	                   const vertex_array& source)
+	                  const vertex_array& source)
 	    : mesh(device, command_buffer, prepared_vertex_array(source))
 	{
 	}
 
 	inline mesh::mesh(const gpu::device& device, gpu::command_buffer& command_buffer,
-	                   const prepared_vertex_array& source)
+	                  const prepared_vertex_array& source)
 	    : mesh(device, command_buffer, source.triangle_vertices())
 	{
 		tint = source.tint;
@@ -745,7 +743,8 @@ namespace mngl::two_d
 		{
 			throw std::invalid_argument("Cannot update a 2D mesh with an invalid command buffer");
 		}
-		if (command_buffer.device_raw() && command_buffer.device_raw() != m_storage->device.raw()) [[unlikely]]
+		if (command_buffer.device_raw() && command_buffer.device_raw() != m_storage->device.raw())
+		    [[unlikely]]
 		{
 			throw std::invalid_argument("2D mesh and command buffer must use the same GPU device");
 		}
@@ -789,12 +788,12 @@ namespace mngl::two_d
 
 			pending_upload upload;
 			upload.block_index = update.index;
-			upload.destination_offset = static_cast<std::uint32_t>(
-			    block.first_vertex * sizeof(detail::resident_mesh_vertex));
-			upload.source_offset = static_cast<std::uint32_t>(packed_vertices.size() *
-			                                                 sizeof(detail::resident_mesh_vertex));
-			upload.size = static_cast<std::uint32_t>(update.vertices.size() *
-			                                        sizeof(detail::resident_mesh_vertex));
+			upload.destination_offset =
+			    static_cast<std::uint32_t>(block.first_vertex * sizeof(detail::resident_mesh_vertex));
+			upload.source_offset =
+			    static_cast<std::uint32_t>(packed_vertices.size() * sizeof(detail::resident_mesh_vertex));
+			upload.size =
+			    static_cast<std::uint32_t>(update.vertices.size() * sizeof(detail::resident_mesh_vertex));
 			upload.bounds_min = glm::vec2(std::numeric_limits<float>::max());
 			upload.bounds_max = glm::vec2(std::numeric_limits<float>::lowest());
 			for (const auto vertex : update.vertices)
@@ -814,15 +813,14 @@ namespace mngl::two_d
 
 		command_buffer.retain_resource(m_storage);
 		const auto staged_size = m_storage->vertex_buffer.stage_upload(
-		    m_storage->device.raw(), std::as_bytes(std::span<const detail::resident_mesh_vertex>(packed_vertices)));
+		    m_storage->device.raw(),
+		    std::as_bytes(std::span<const detail::resident_mesh_vertex>(packed_vertices)));
 		gpu::detail::gpu_copy_pass copy_pass(command_buffer);
-		bool cycle_vertex_buffer = true;
+		m_storage->vertex_buffer.preserve_contents_for_update(copy_pass);
 		for (const auto& upload : pending)
 		{
-			m_storage->vertex_buffer.record_upload(copy_pass, upload.size, cycle_vertex_buffer,
-			                                      upload.destination_offset,
-			                                      upload.source_offset);
-			cycle_vertex_buffer = false;
+			m_storage->vertex_buffer.record_upload(copy_pass, upload.size, false, upload.destination_offset,
+			                                       upload.source_offset);
 		}
 		(void)staged_size;
 
@@ -893,13 +891,13 @@ namespace mngl::two_d
 		gpu_transform.object_transform = value.transform;
 		if (value.source_texture)
 		{
-			m_control->owner->submit_texture(m_recording_context, *value.source_texture,
-			                                 gpu_transform, value.tint, value.state, value.click_callback);
+			m_control->owner->submit_texture(m_recording_context, *value.source_texture, gpu_transform,
+			                                 value.tint, value.state, value.click_callback);
 		}
 		else
 		{
-			m_control->owner->submit_quad(m_recording_context, value.source, gpu_transform,
-			                              value.tint, value.state, ::mngl::detail::hit_test_shape::quad, 0.0f,
+			m_control->owner->submit_quad(m_recording_context, value.source, gpu_transform, value.tint,
+			                              value.state, ::mngl::detail::hit_test_shape::quad, 0.0f,
 			                              value.click_callback);
 		}
 	}
@@ -921,8 +919,8 @@ namespace mngl::two_d
 
 	inline void frame_2d::submit_rectangle_shape(const rectangle_shape& value)
 	{
-		m_control->owner->submit_rectangle(m_recording_context, value.bounds, value.tint,
-		                                   value.transform, value.blend);
+		m_control->owner->submit_rectangle(m_recording_context, value.bounds, value.tint, value.transform,
+		                                   value.blend);
 	}
 
 	inline void frame_2d::submit_vertex_array(const vertex_array& value)
@@ -949,8 +947,8 @@ namespace mngl::two_d
 	{
 		if (value.m_document)
 		{
-			m_control->owner->submit_text_document(m_recording_context, *value.m_typeface,
-			                                       *value.m_document, value.m_top_left, value.m_options);
+			m_control->owner->submit_text_document(m_recording_context, *value.m_typeface, *value.m_document,
+			                                       value.m_top_left, value.m_options);
 		}
 		else
 		{

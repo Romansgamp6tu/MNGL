@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace
@@ -109,6 +110,50 @@ namespace
 		require(registry.property<float>(mngl_mod_demo::tree_node_gap_property_id).get() == 24.0f,
 		        "host numeric property did not return to its default value");
 	}
+
+	template <typename Return> void verify_around_propagates_builtin_failure()
+	{
+		mngl::mods::registry registry;
+		bool fail = true;
+		int default_calls = 0;
+		int hook_calls = 0;
+		auto& function =
+		    registry.define_function<Return()>("test.throwing-default",
+			                                   [&]() -> Return
+			                                   {
+			                                       ++default_calls;
+			                                       if (fail)
+				                                       throw std::runtime_error("built-in failure");
+			                                       if constexpr (!std::is_void_v<Return>)
+				                                       return 42;
+		                                       });
+		function.around("test.passthrough", 0,
+		                [&](auto next) -> Return
+		                {
+			                ++hook_calls;
+			                return next();
+		                });
+		for (int attempt = 0; attempt != 2; ++attempt)
+		{
+			bool threw = false;
+			try
+			{
+				function();
+			}
+			catch (const std::runtime_error& error)
+			{
+				threw = std::string_view(error.what()) == "built-in failure";
+			}
+			require(threw, "around hook swallowed the built-in implementation's exception");
+		}
+		fail = false;
+		if constexpr (std::is_void_v<Return>)
+			function();
+		else
+			require(function() == 42, "around hook did not recover after a built-in failure");
+		require(default_calls == 3, "built-in implementation ran more than once per call");
+		require(hook_calls == 3, "built-in failure disabled an otherwise valid around hook");
+	}
 } // namespace
 
 REGISTER_MODDABLE_CLASS(tree_base, "demo.tree");
@@ -123,6 +168,8 @@ int main(int argc, char** argv)
 {
 	try
 	{
+		verify_around_propagates_builtin_failure<int>();
+		verify_around_propagates_builtin_failure<void>();
 		require(argc == 4, "expected paths to the working, conflicting, and dependency probe modules");
 		const std::filesystem::path example_module = argv[1];
 		const std::filesystem::path conflict_module = argv[2];
