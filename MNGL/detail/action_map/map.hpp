@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -312,5 +313,9 @@ namespace mngl
 			const auto it = m_storage->actions.find(action);
 			return it == m_storage->actions.end() ? 0 : it->second.size();
 		}
+
+		// Profiles store bindings only; loading replaces the shared mapping in-place.
+		void save_profile(const std::filesystem::path& path) const;
+		void load_profile(const std::filesystem::path& path);
 	};
 } // namespace mngl
