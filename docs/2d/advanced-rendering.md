@@ -10,7 +10,7 @@
 
 ## Атласы и материалы
 
-`two_d::texture_store` хранит страницы текстур и создаёт `texture_region` по нормализованным UV-границам. Это удобно для набора спрайтов, собранных в атлас. Для одиночного изображения atlas store не обязателен — передавайте `mngl::texture` напрямую.
+`two_d::texture_store` хранит страницы текстур и создаёт `texture_region` по нормализованным UV-границам. Это удобно для набора спрайтов, собранных в атлас. Для анимации по списку регионов используйте `mngl::sprite_animation` (пример — в [руководстве по 2D API](index.md#анимация-по-кадрам-атласа)). Для одиночного изображения atlas store не обязателен — передавайте `mngl::texture` напрямую.
 
 `two_d::renderer` также предоставляет создание custom materials и material instances. Материалы используют fragment shader и bindings для uniform blocks, sampled/storage textures и storage buffers. Низкоуровневая настройка этих ресурсов описана в разделе [GPU и шейдеры](../gpu/shaders.md).
 

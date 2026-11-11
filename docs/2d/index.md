@@ -20,6 +20,40 @@ frame.display();
 
 Те же операции доступны у `mngl::texture`, поэтому текстура может быть самостоятельной целью рендеринга. Frame scope не владеет окном или целевой текстурой: они должны жить до `display()` либо отмены кадра. Спрайты, стандартные фигуры, пользовательская геометрия и текст реализуют `drawable`; изображение показывается через `mngl::sprite`, который хранит его положение, размер и поворот.
 
+## Анимация по кадрам атласа
+
+Для анимации из регионов атласа текстур используйте `mngl::sprite_animation`. У каждого кадра есть свой `texture_region` и длительность в секундах. По умолчанию анимация зациклена; `sprite_animation::playback_mode::once` останавливает её на последнем кадре. Вызовите `update(dt)` из игрового цикла и примените текущий регион к спрайту через `apply_to(sprite)`. Контроллер не владеет страницами атласа: создавайте регионы в `window.textures()`, использованном для отрисовки.
+
+```cpp
+#include "input.hpp"
+#include "render_window.hpp"
+#include "texture.hpp"
+
+mngl::render_window window("Animation", {1280, 720});
+const auto page = window.textures().add(mngl::texture("assets/player.png"));
+const auto& atlas = window.textures();
+
+mngl::sprite_animation walk({
+	{atlas.region(page, {0.00f, 0.0f, 0.25f, 1.0f}), 0.12},
+	{atlas.region(page, {0.25f, 0.0f, 0.50f, 1.0f}), 0.12},
+	{atlas.region(page, {0.50f, 0.0f, 0.75f, 1.0f}), 0.12},
+	{atlas.region(page, {0.75f, 0.0f, 1.00f, 1.0f}), 0.12},
+});
+mngl::sprite player(walk.current_region(), {0.0f, 0.0f, 1.0f, 1.0f});
+
+while (mngl::input::next_frame())
+{
+	walk.update(mngl::input::delta_time());
+	walk.apply_to(player);
+
+	auto frame = window.frame();
+	frame.draw(player);
+	frame.display();
+}
+```
+
+`pause()` приостанавливает анимацию, `play()` возобновляет её, а `restart()` начинает заново. Для однократного воспроизведения передайте `sprite_animation::playback_mode::once`; `finished()` сообщает о достижении последнего кадра.
+
 ## Пользовательские отрисовщики
 
 Для повторно используемого пользовательского объекта унаследуйте класс от `mngl::drawable` и реализуйте `draw(two_d::frame_2d&) const`. После этого объект можно передавать в обычный `draw()` на окне или текстуре — новые перегрузки для него не нужны:
