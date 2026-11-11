@@ -11,7 +11,7 @@
 |---|---|---|
 | `mngl.hpp` | Необязательный umbrella-заголовок для обычного приложения: окна, ввод, 2D и его настройки, аудио, файлы и платформенные сервисы | [Подключение MNGL](../getting-started/using-mngl.md) |
 | `window.hpp`, `input.hpp` | Окна, дисплеи, отдельные устройства и состояния ввода | [Окна и ввод](../core/windows-and-input.md) |
-| `action_map.hpp` | Привязки действий, контексты и пресеты ввода | [Действия и контексты](../core/windows-and-input.md#actions-and-contexts) |
+| `action_map.hpp` | Привязки действий, контексты, пресеты и сохранение профилей | [Действия и контексты](../core/windows-and-input.md#actions-and-contexts) |
 | `audio.hpp` | `sound`, потоковая `music`, capture, живой PCM и пространственные голоса | [Аудио](../core/audio.md) |
 | `dialog.hpp` | Системные диалоги выбора файлов и папок | [Системные диалоги](../core/dialogs.md) |
 | `clipboard.hpp` | Текстовый и MIME-буфер обмена, отложенная выдача данных | [Буфер обмена](../core/clipboard.md) |
