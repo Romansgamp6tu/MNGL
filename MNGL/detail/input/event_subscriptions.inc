@@ -78,20 +78,17 @@
 			    [](const key_down& e)
 			    {
 				    std::lock_guard lock(state_mutex);
-				    if (e.keyboard_id != 0)
+				    auto& state = ensure_keyboard_state_locked(e.keyboard_id);
+				    std::size_t index{};
+				    if (key_index(e.code, index))
 				    {
-					    auto& state = ensure_keyboard_state_locked(e.keyboard_id);
-					    std::size_t index{};
-					    if (key_index(e.code, index))
+					    const bool was_down = state.down.test(index);
+					    state.down.set(index);
+					    state.key_windows[index] = e.window_id;
+					    if (!was_down && !e.repeat)
 					    {
-						    const bool was_down = state.down.test(index);
-						    state.down.set(index);
-						    state.key_windows[index] = e.window_id;
-						    if (!was_down && !e.repeat)
-						    {
-							    state.pressed.set(index);
-							    state.pressed_windows[index] = e.window_id;
-						    }
+						    state.pressed.set(index);
+						    state.pressed_windows[index] = e.window_id;
 					    }
 				    }
 			    });
@@ -99,22 +96,19 @@
 			    [](const key_up& e)
 			    {
 				    std::lock_guard lock(state_mutex);
-				    if (e.keyboard_id != 0)
+				    auto& state = ensure_keyboard_state_locked(e.keyboard_id);
+				    std::size_t index{};
+				    if (key_index(e.code, index))
 				    {
-					    auto& state = ensure_keyboard_state_locked(e.keyboard_id);
-					    std::size_t index{};
-					    if (key_index(e.code, index))
+					    if (state.down.test(index))
 					    {
-						    if (state.down.test(index))
-						    {
-							    state.released.set(index);
-							    state.release_reasons[index] = input_release_reason::physical_release;
-							    state.released_windows[index] =
-							        state.key_windows[index] ? state.key_windows[index] : e.window_id;
-						    }
-						    state.down.reset(index);
-						    state.key_windows[index] = 0;
+						    state.released.set(index);
+						    state.release_reasons[index] = input_release_reason::physical_release;
+						    state.released_windows[index] =
+						        state.key_windows[index] ? state.key_windows[index] : e.window_id;
 					    }
+					    state.down.reset(index);
+					    state.key_windows[index] = 0;
 				    }
 			    });
 
@@ -422,3 +416,4 @@
 				        button.down = false;
 			        });
 		}
+

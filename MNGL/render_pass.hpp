@@ -175,21 +175,24 @@ namespace mngl::gpu
 		// МЕТОДЫ ОТРИСОВКИ И СВЯЗЫВАНИЯ (binding / drawing commands)
 		// =========================================================================
 
-		void bind_pipeline(const graphics_pipeline& pipeline) const noexcept
+		void bind_pipeline(const graphics_pipeline& pipeline) const
 		{
+			ensure_active();
 			SDL_BindGPUGraphicsPipeline(handle, pipeline.raw());
 		}
 
 		void draw_primitives(std::uint32_t num_vertices, std::uint32_t num_instances = 1,
-		                     std::uint32_t first_vertex = 0, std::uint32_t first_instance = 0) const noexcept
+		                     std::uint32_t first_vertex = 0, std::uint32_t first_instance = 0) const
 		{
+			ensure_active();
 			SDL_DrawGPUPrimitives(handle, num_vertices, num_instances, first_vertex, first_instance);
 		}
 
 		void draw_indexed_primitives(std::uint32_t num_indices, std::uint32_t num_instances = 1,
 		                             std::uint32_t first_index = 0, std::int32_t vertex_offset = 0,
-		                             std::uint32_t first_instance = 0) const noexcept
+		                             std::uint32_t first_instance = 0) const
 		{
+			ensure_active();
 			SDL_DrawGPUIndexedPrimitives(handle, num_indices, num_instances, first_index, vertex_offset,
 			                             first_instance);
 		}
@@ -209,21 +212,24 @@ namespace mngl::gpu
 		}
 
 		void bind_vertex_buffers(std::uint32_t first_slot,
-		                         std::span<const SDL_GPUBufferBinding> bindings) const noexcept
+		                         std::span<const SDL_GPUBufferBinding> bindings) const
 		{
+			ensure_active();
 			SDL_BindGPUVertexBuffers(handle, first_slot, bindings.data(),
 			                         static_cast<std::uint32_t>(bindings.size()));
 		}
 
 		void bind_vertex_buffer(std::uint32_t slot, SDL_GPUBuffer* buffer,
-		                        std::uint32_t offset = 0) const noexcept
+		                        std::uint32_t offset = 0) const
 		{
+			ensure_active();
 			const SDL_GPUBufferBinding binding{.buffer = buffer, .offset = offset};
 			SDL_BindGPUVertexBuffers(handle, slot, &binding, 1);
 		}
 
 		void bind_vertex_buffer(std::uint32_t slot, const buffer& buffer, std::uint32_t offset = 0) const
 		{
+			ensure_active();
 			if (!buffer.valid() || !has_usage(buffer.usage(), buffer_usage::vertex)) [[unlikely]]
 			{
 				throw std::invalid_argument("Vertex binding requires a valid vertex-usage GPU buffer");
@@ -245,22 +251,25 @@ namespace mngl::gpu
 		// Связывание индексного буфера (16-bit или 32-bit)
 		void bind_index_buffer(SDL_GPUBuffer* buffer,
 		                       SDL_GPUIndexElementSize index_element_size = SDL_GPU_INDEXELEMENTSIZE_16BIT,
-		                       std::uint32_t offset = 0) const noexcept
+		                       std::uint32_t offset = 0) const
 		{
+			ensure_active();
 			const SDL_GPUBufferBinding binding{.buffer = buffer, .offset = offset};
 			SDL_BindGPUIndexBuffer(handle, &binding, index_element_size);
 		}
 
 		void bind_fragment_samplers(std::uint32_t first_slot,
-		                            std::span<const SDL_GPUTextureSamplerBinding> bindings) const noexcept
+		                            std::span<const SDL_GPUTextureSamplerBinding> bindings) const
 		{
+			ensure_active();
 			SDL_BindGPUFragmentSamplers(handle, first_slot, bindings.data(),
 			                            static_cast<std::uint32_t>(bindings.size()));
 		}
 
 		void bind_fragment_sampler(std::uint32_t slot, SDL_GPUTexture* texture,
-		                           SDL_GPUSampler* sampler) const noexcept
+		                           SDL_GPUSampler* sampler) const
 		{
+			ensure_active();
 			const SDL_GPUTextureSamplerBinding binding{.texture = texture, .sampler = sampler};
 			SDL_BindGPUFragmentSamplers(handle, slot, &binding, 1);
 		}
@@ -270,7 +279,7 @@ namespace mngl::gpu
 		{
 			if (!handle || !m_commands) [[unlikely]]
 			{
-				throw std::logic_error("Cannot push uniform data without an active render pass");
+				throw std::logic_error("Cannot use GPU render-pass commands without an active render pass");
 			}
 		}
 

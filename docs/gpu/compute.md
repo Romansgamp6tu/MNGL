@@ -66,7 +66,7 @@ window.display();
 
 ## GLSL, байткод и явные bindings
 
-`compile_compute()` также принимает GLSL при `source_language = shader_source_language::glsl`: для SPIR-V используется `glslangValidator`, для других форматов — `shadercross`. Размеры из literal-объявления `layout(local_size_x = ..., local_size_y = ..., local_size_z = ...) in;` определяются автоматически. Для макросов и других нелитеральных объявлений задайте `compute_threadgroup_size` явно. `load_compute_binary()` принимает ту же опцию; укажите размер workgroup либо matching source, из которого его можно определить.
+`compile_compute()` также принимает GLSL при `source_language = shader_source_language::glsl`: для SPIR-V используется `glslangValidator`, для других форматов — `shadercross`. Размеры из literal-объявления `layout(local_size_x = ..., local_size_y = ..., local_size_z = ...) in;` определяются автоматически. Для макросов и других нелитеральных объявлений задайте `compute_threadgroup_size` явно. `load_compute_binary()` принимает ту же опцию; укажите размер workgroup либо matching source, из которого его можно определить. Если заданы и явный размер, и исходник с распознаваемым literal-размером, загрузчик сверяет их и отклоняет несовпадение. Если размер исходника определить нельзя, явное значение остаётся fallback.
 
 Для GLSL и precompiled assets количество ресурсов pipeline задаётся в `shader_compile_options::resources`. Compute-специфичные поля — `read_write_storage_textures` и `read_write_storage_buffers`; также доступны `samplers`, `storage_textures`, `storage_buffers` и `uniform_buffers`. Для таких layout используйте slot-based bindings:
 

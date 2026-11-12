@@ -8,9 +8,10 @@ HEX-конструктор отвергает частично распозна�
 У `rectangle` касание границ считается пересечением, как у SDL float rectangles;
 пустые области не расширяют union. `enclosing_points(points, clip)` игнорирует
 точки за пределами clip, вместо пересечения общего bounding box с clip.
-Методы `render_pass::push_vertex_uniform()` и `push_fragment_uniform()` больше
-не объявлены `noexcept`: пустой, завершённый или перемещённый проход сообщает
-`std::logic_error`. Данные передаются в SDL command buffer, а не в render-pass handle.
+Методы draw, bind и uniform в `gpu::render_pass` больше не объявлены `noexcept`:
+пустой, завершённый или перемещённый проход сообщает `std::logic_error`, вместо
+передачи недействительного handle в SDL. Данные uniform передаются в SDL command
+buffer, а не в render-pass handle.
 
 `two_d::text_draw_options::wrap_width` задаёт автоматический перенос строкового
 `text` в координатах сцены; `0.0f` его отключает. Поле добавлено в конец
