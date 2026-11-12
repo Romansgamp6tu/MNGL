@@ -12,9 +12,6 @@ permissions:
 jobs:
   mkdocs:
     runs-on: [self-hosted, linux, x64]
-    container:
-      image: python:3.12-bookworm
-      options: --user 0:0
     defaults:
       run:
         shell: bash
@@ -25,12 +22,13 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install documentation dependencies
         run: python -m pip install -r requirements-docs.txt
 
       - name: Build documentation with strict link checking
         run: python -m mkdocs build --strict
-
-      - name: Restore runner workspace ownership
-        if: always()
-        run: chown -R 1000:1000 "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
