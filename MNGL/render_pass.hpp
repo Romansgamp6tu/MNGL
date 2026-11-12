@@ -129,6 +129,7 @@ namespace mngl::gpu
 			}
 
 			const auto* color_target_data = color_target_count ? sdl_color_targets.data() : nullptr;
+			auto pass_lease = cmd.begin_pass();
 			m_commands = cmd.raw();
 			m_device = command_device;
 			handle = SDL_BeginGPURenderPass(m_commands, color_target_data, color_target_count, depth_ptr);
@@ -137,6 +138,7 @@ namespace mngl::gpu
 			{
 				throw sdl_error("Failed to begin GPU render pass: ");
 			}
+			m_pass_lease = std::move(pass_lease);
 		}
 
 		~render_pass() { end_pass(); }
@@ -169,6 +171,7 @@ namespace mngl::gpu
 			}
 			m_commands = nullptr;
 			m_device = nullptr;
+			m_pass_lease.reset();
 		}
 
 		// =========================================================================
@@ -286,6 +289,7 @@ namespace mngl::gpu
 		SDL_GPURenderPass* handle = nullptr;
 		SDL_GPUCommandBuffer* m_commands = nullptr;
 		SDL_GPUDevice* m_device = nullptr;
+		command_buffer::pass_lease m_pass_lease;
 
 		friend inline void swap(render_pass& l, render_pass& r) noexcept
 		{
@@ -293,6 +297,7 @@ namespace mngl::gpu
 			swap(l.handle, r.handle);
 			swap(l.m_commands, r.m_commands);
 			swap(l.m_device, r.m_device);
+			swap(l.m_pass_lease, r.m_pass_lease);
 		}
 	};
 } // namespace mngl::gpu
