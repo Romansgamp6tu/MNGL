@@ -8,7 +8,7 @@
 
 Этот пример записывает compute-команду в transient-текстуру, а затем рисует её обычным 2D renderer-ом в окно. Оконный кадр намеренно остаётся вне графа:
 
-Положите HLSL-файл из раздела [compute](compute.md#hlsl-запись-в-текстуру) в `shaders/fill.hlsl`. Проект должен ссылаться на `MNGL::MNGL`, как в [инструкции подключения](../getting-started/using-mngl.md).
+Положите HLSL-файл из раздела [compute](compute.md#hlsl-texture-writing) в `shaders/fill.hlsl`. Проект должен ссылаться на `MNGL::MNGL`, как в [инструкции подключения](../getting-started/using-mngl.md).
 
 ```cpp
 #include <MNGL/compute_pass.hpp>

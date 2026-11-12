@@ -51,7 +51,7 @@ mngl::color html{"#3399FFFF"};
 
 Компоненты доступны напрямую через `r`, `g`, `b`, `a`; векторные представления возвращают `rgb_glsl()`, `rgb_255()`, `rgba_glsl()` и `rgba_255()`. Для целочисленных цветовых литералов используйте стандартные суффиксы с подчёркиванием: `0x3399FF_rgb` или `0x3399FFFF_rgba`.
 
-Дополнительно `color` поддерживает представления HSV/HSL, смешивание, вычисление яркости и преобразования premultiplied alpha. Это утилиты цвета, а не состояние GPU-текстуры.
+Дополнительно `color` поддерживает представления HSV/HSL, смешивание, вычисление яркости и преобразования premultiplied alpha. Переводы HSV/HSL, яркость, контраст, `linearize()` и `gamma()` доступны в constant expressions по C++23. HSV/HSL принимают и возвращают нормализованные компоненты `float`; для ввода с градусами и байтовыми насыщенностью/яркостью используйте overload с `glm::uvec3`.
 
 `rgb_uint()` возвращает `0xRRGGBB`, а `rgba_uint()` — `0xRRGGBBAA`.
 Строковый конструктор принимает только `#RRGGBB` или `#RRGGBBAA`, без пробелов,
@@ -76,4 +76,26 @@ const std::uint32_t accent_rgba = accent.rgba_uint();
 `1.0f` — `b`. `contrast()` возвращает отношение яркостей, а не автоматический
 выбор подходящей пары. `rgba_uint()` имеет порядок байтов `RRGGBBAA`; это не
 порядок SDL `SDL_Color` и не premultiplied-alpha формат.
+
+`color::blends::normal(foreground, background)` выполняет source-over compositing.
+Аргументы и результат используют straight alpha: RGB остаётся несвязанным с `a`,
+так что результат можно передать в следующий blend без повторного premultiply.
+Например, полупрозрачный красный над синим:
+
+```cpp
+const mngl::color red{1.0f, 0.0f, 0.0f, 0.5f};
+const mngl::color blue{0.0f, 0.0f, 1.0f, 0.5f};
+const mngl::color purple = mngl::color::blends::normal(red, blue);
+const mngl::color transparent{0.0f, 0.0f, 0.0f, 0.0f};
+const mngl::color final_color = mngl::color::blends::normal(purple, transparent);
+```
+
+`purple` имеет straight RGB `(2/3, 0, 1/3)` и alpha `0.75`; последующий слой с
+полностью прозрачным фоном не затемняет его. Если backend ожидает premultiplied
+pixels, создайте копию и вызовите `premultiply()` перед передачей данных:
+
+```cpp
+mngl::color gpu_color = purple;
+gpu_color.premultiply();
+```
 

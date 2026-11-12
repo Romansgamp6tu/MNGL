@@ -293,3 +293,4 @@ auto voice = mngl::audio::play(click);
 mngl::audio::set_master_volume(0.8f);
 mngl::audio::stop(voice);
 ```
+

@@ -2,7 +2,7 @@ name: Package MNGL runtime
 
 on:
   push:
-    branches: [main]
+    branches: [main, "V-*"]
     tags: ["v*"]
     paths-ignore:
       - ".github/workflows/**"
@@ -30,7 +30,7 @@ jobs:
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             version="${GITHUB_REF_NAME#v}"
           else
-            version="0.0.0+ci.${GITHUB_RUN_NUMBER}"
+            version="0.0.0+ci.${GITHUB_SHA:0:12}"
           fi
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
             echo "Expected a semantic version such as 1.2.3; got: $version" >&2

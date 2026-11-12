@@ -173,11 +173,11 @@ overlay.end_pass();
 
 ## Uniforms и индексированная геометрия
 
-`push_vertex_uniform(slot, data)` и `push_fragment_uniform(slot, data)` передают trivially copyable данные в command buffer активного прохода. Slot должен совпадать с shader binding, а размер, типы и padding — с shader layout. Для сложных HLSL uniform-блоков полезно [именованное отражение](shaders.md#uniform-поля-и-ресурсы); ручная C++-структура требует проверки offsets, особенно для `vec3`, `vec4` и матриц.
+`push_vertex_uniform(slot, data)` и `push_fragment_uniform(slot, data)` передают trivially copyable данные в command buffer активного прохода. Slot должен совпадать с shader binding, а размер, типы и padding — с shader layout. Для сложных HLSL uniform-блоков полезно [именованное отражение](shaders.md#uniform-fields-and-resources); ручная C++-структура требует проверки offsets, особенно для `vec3`, `vec4` и матриц.
 
 После `end_pass()`, перемещения или для пустого `render_pass` draw-, bind- и uniform-вызовы сообщают `std::logic_error`, не передавая недействительный SDL handle. Поэтому эти операции не объявлены `noexcept`.
 
-Для indexed draw сначала свяжите vertex buffer, затем index buffer и вызовите `draw_indexed_primitives()`. Размер индекса задаётся в binding; 32-битному массиву соответствует `SDL_GPU_INDEXELEMENTSIZE_32BIT`. Подготовка индексов показана в [ресурсах](resources.md#обычный-buffer-и-usage).
+Для indexed draw сначала свяжите vertex buffer, затем index buffer и вызовите `draw_indexed_primitives()`. Размер индекса задаётся в binding; 32-битному массиву соответствует `SDL_GPU_INDEXELEMENTSIZE_32BIT`. Подготовка индексов показана в [ресурсах](resources.md#regular-buffer-usage).
 
 ## Если вместо треугольника ничего нет
 

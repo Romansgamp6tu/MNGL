@@ -94,9 +94,11 @@ int main()
 
 Запускайте приложение из каталога, где существует `shaders/tint.hlsl`, и убедитесь, что runtime-компилятор доступен в `PATH` или задан в `shader_compile_options`. Спрайт хранит невладеющую ссылку на `tint`; поэтому asset объявлен раньше спрайта и живёт весь цикл. Такой приём полезен для полноэкранного градиента, виньетки или цветовой коррекции; для картинки возьмите пример sampled texture из раздела ниже.
 
+<a id="uniform-fields-and-resources"></a>
+
 ## Uniform-поля и ресурсы
 
-`compile_fragment()` автоматически включает отражение именованных uniform-полей и ресурсов для HLSL. Отражатель принимает один `cbuffer` в `register(b0, space3)` для графического fragment shader и понимает scalar-, vector- и matrix-поля, а также фиксированные массивы таких значений. Для compute shader соглашение другое: uniform-block находится в `register(b0, space2)`; см. [таблицу slots](compute.md#glsl-байткод-и-явные-bindings). Reflection для GLSL не реализован: у GLSL задайте число ресурсов в `shader_compile_options::resources` и используйте ручные bindings.
+`compile_fragment()` автоматически включает отражение именованных uniform-полей и ресурсов для HLSL. Отражатель принимает один `cbuffer` в `register(b0, space3)` для графического fragment shader и понимает scalar-, vector- и matrix-поля, а также фиксированные массивы таких значений. Для compute shader соглашение другое: uniform-block находится в `register(b0, space2)`; см. [таблицу slots](compute.md#glsl-bytecode-bindings). Reflection для GLSL не реализован: у GLSL задайте число ресурсов в `shader_compile_options::resources` и используйте ручные bindings.
 
 Имена uniforms доступны по строке или по нулевому индексу в порядке объявления:
 

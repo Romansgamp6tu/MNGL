@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <optional>
 
 namespace mngl
@@ -68,10 +69,16 @@ namespace mngl
 			}
 
 			const double denominator = cross(rx, ry, sx, sy);
-			const double parallel_tolerance = tolerance * r_length * s_length;
+			// `epsilon` is a distance in coordinate space, so it must not decide
+			// whether two directions are parallel. Use a round-off bound for the
+			// cross product instead; otherwise long, shallow crossings can be
+			// mistaken for parallel segments.
+			const double denominator_error =
+			    4.0 * std::numeric_limits<double>::epsilon() *
+			    (std::abs(rx * sy) + std::abs(ry * sx));
 			const double t_tolerance = tolerance / r_length;
 
-			if (std::abs(denominator) <= parallel_tolerance)
+			if (std::abs(denominator) <= denominator_error)
 			{
 				if (std::abs(cross(qx, qy, rx, ry)) > tolerance * r_length)
 					return std::nullopt;
@@ -143,3 +150,4 @@ namespace mngl
 		return lines_intersect(a, b, c, d, epsilon);
 	}
 } // namespace mngl
+

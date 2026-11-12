@@ -10,7 +10,7 @@
 
 ## Атласы и материалы
 
-`two_d::texture_store` хранит страницы текстур и создаёт `texture_region` по нормализованным UV-границам. Это удобно для набора спрайтов, собранных в атлас. Для анимации по списку регионов используйте `mngl::sprite_animation` (пример — в [руководстве по 2D API](index.md#анимация-по-кадрам-атласа)). Для одиночного изображения atlas store не обязателен — передавайте `mngl::texture` напрямую.
+`two_d::texture_store` хранит страницы текстур и создаёт `texture_region` по нормализованным UV-границам. Это удобно для набора спрайтов, собранных в атлас. Для анимации по списку регионов используйте `mngl::sprite_animation` (пример — в [руководстве по 2D API](index.md#sprite-atlas-animation)). Для одиночного изображения atlas store не обязателен — передавайте `mngl::texture` напрямую.
 
 `two_d::renderer` также предоставляет создание custom materials и material instances. Материалы используют fragment shader и bindings для uniform blocks, sampled/storage textures и storage buffers. Низкоуровневая настройка этих ресурсов описана в разделе [GPU и шейдеры](../gpu/shaders.md).
 
@@ -117,3 +117,4 @@ const double flush_ms = std::chrono::duration<double, std::milli>(stats.flush_cp
 SDL GPU в используемой MNGL версии не предоставляет переносимых timestamp-запросов для времени исполнения GPU-команд. Эти счётчики не измеряют выполнение GPU. Время `frame()`, вызовов `frame.draw()` и `frame.display()` измеряйте на стороне приложения; benchmark из репозитория выводит эти интервалы отдельно. Для повторяемых замеров используйте Release-сборку и исключайте первые кадры после переключения сцены или режима.
 
 В репозитории есть интерактивная сцена `mngl_2d_benchmark`; её сборка и клавиши описаны в [руководстве по benchmark](benchmarking.md).
+

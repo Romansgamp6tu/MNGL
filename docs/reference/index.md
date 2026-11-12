@@ -19,15 +19,15 @@
 | `action_map.hpp` | Привязки действий, контексты, пресеты и сохранение профилей | [Действия и контексты](../core/windows-and-input.md#actions-and-contexts) |
 | `audio.hpp` | `sound`, потоковая `music`, capture, живой PCM и пространственные голоса | [Аудио](../core/audio.md) |
 | `dialog.hpp` | Системные диалоги выбора файлов и папок | [Системные диалоги](../core/dialogs.md) |
-| `clipboard.hpp` | Текстовый и MIME-буфер обмена, отложенная выдача данных | [Буфер обмена](../core/clipboard.md) |
+| `clipboard.hpp` | Текстовый и MIME-буфер обмена, выдача снимка данных с одним буфером на формат | [Буфер обмена](../core/clipboard.md) |
 | `storage.hpp` | RAII-хранилища приложения, пользователя и локального каталога | [Хранилище и файлы](../core/storage.md) |
 | `async_io.hpp` | Фоновый ввод-вывод с типизированным результатом и ожиданием запроса | [Асинхронный ввод-вывод](../core/async-io.md) |
 | `process.hpp` | Запуск процессов, pipe-ввод с `close_stdin()` для EOF и получение кода завершения | [Процессы](../core/processes.md) |
 | `paths.hpp` | Каталоги приложения и стандартные папки пользователя | [Runtime и утилиты](../core/runtime-and-utilities.md) |
 | `imgui_compat.hpp` | MNGL scopes и классы-виджеты поверх Dear ImGui; `button::is_small()`, меню, canvas, ввод, GPU overlay и шрифты | [Окна и ввод](../core/windows-and-input.md) |
-| `event.hpp` | Типизированная система событий | [События](../core/events.md) |
+| `event.hpp` | Типизированная система событий SDL и приложения, снимок подписчиков на момент получения события и управляемая доставка очереди | [События](../core/events.md) |
 | `surface.hpp`, `pixel_format.hpp` | SDL surfaces, изображения и форматы пикселей | [Поверхности и цвета](../core/media-and-colors.md) |
-| `color.hpp` | Цвета, строгий HEX-парсер, RGB/RGBA-коды и преобразования HSV/HSL | [Поверхности и цвета](../core/media-and-colors.md) |
+| `color.hpp` | Цвета, строгий HEX-парсер, RGB/RGBA-коды, constexpr HSV/HSL и sRGB-преобразования, straight-alpha compositing | [Поверхности и цвета](../core/media-and-colors.md) |
 | `line.hpp`, `rectangle.hpp` | Геометрия, пересечения с включёнными границами и bounds точек внутри clip | [Геометрия](../core/geometry.md) |
 | `utilities.hpp`, `paths.hpp`, `logger.hpp` (`logger.h` для старых глобальных имён), `iupdate.h`, `proxy.hpp` | Runtime, идентичность приложения, пути, ошибки, logging, обновления и SDL interop | [Runtime и утилиты](../core/runtime-and-utilities.md) |
 | `console.hpp` | Реестр типизированных CLI-команд, режимы вывода и результатов обработчиков | [Консольные команды](../core/console.md) |

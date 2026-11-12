@@ -4,6 +4,8 @@ Compute shader запускается для набора потоков и за
 
 Загрузка compute-шейдеров использует те же `shader_compile_options`, выбор языка, компиляторы, форматы байткода и интерфейс именованных asset-полей, что и графические шейдеры. `shader_loader::compile_compute()` возвращает `compute_shader_asset`; `compute_pipeline_builder` создаёт из него GPU pipeline, а `compute_pass` записывает dispatch-команды в `command_buffer`.
 
+<a id="hlsl-texture-writing"></a>
+
 ## HLSL: запись в текстуру
 
 По соглашению MNGL HLSL reflection использует `b0, space2` для compute uniform-блока. Read-only textures, buffers и samplers находятся в `space0`, writable `RWTexture2D` и `RWStructuredBuffer` — в `space1`. Это соглашение отличается от fragment shader: его uniform-блок находится в `b0, space3`, а ресурсы — в `space2`.
@@ -63,6 +65,8 @@ window.display();
 Конструктор pass, принимающий asset, связывает отражённые ресурсы и перед dispatch отправляет uniform-блок. `dispatch_for()` принимает число потоков шейдера и округляет размеры вверх до целого количества workgroup; шейдер всё равно должен проверять границы dispatch ID. `dispatch(x, y, z)` принимает количество workgroup напрямую. Compute pass завершается при уничтожении или вызове `end_pass()`; завершите его до отправки command buffer.
 
 Для HLSL reflection поддерживает один `cbuffer` в `b0, space2`. Read-only `Texture2D`, `StructuredBuffer` и `SamplerState` размещаются в `space0`; writable `RWTexture2D` и `RWStructuredBuffer` — в `space1`. Sampled-текстуры связываются с sampler на том же register index; слоты каждого типа должны идти подряд с нуля. Назначьте поля ресурсов до создания pass. Для sampled-текстуры без явно заданного sampler можно передать default sampler в `compute_pass`.
+
+<a id="glsl-bytecode-bindings"></a>
 
 ## GLSL, байткод и явные bindings
 
