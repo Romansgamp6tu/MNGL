@@ -130,6 +130,7 @@ namespace mngl::gpu
 
 			const auto* color_target_data = color_target_count ? sdl_color_targets.data() : nullptr;
 			m_commands = cmd.raw();
+			m_device = command_device;
 			handle = SDL_BeginGPURenderPass(m_commands, color_target_data, color_target_count, depth_ptr);
 
 			if (!handle) [[unlikely]]
@@ -167,6 +168,7 @@ namespace mngl::gpu
 				handle = nullptr;
 			}
 			m_commands = nullptr;
+			m_device = nullptr;
 		}
 
 		// =========================================================================
@@ -226,6 +228,10 @@ namespace mngl::gpu
 			{
 				throw std::invalid_argument("Vertex binding requires a valid vertex-usage GPU buffer");
 			}
+			if (m_device && buffer.device_raw() != m_device) [[unlikely]]
+			{
+				throw std::invalid_argument("Vertex buffer belongs to a different GPU device");
+			}
 			bind_vertex_buffer(slot, buffer.raw(), offset);
 		}
 
@@ -270,12 +276,15 @@ namespace mngl::gpu
 
 		SDL_GPURenderPass* handle = nullptr;
 		SDL_GPUCommandBuffer* m_commands = nullptr;
+		SDL_GPUDevice* m_device = nullptr;
 
 		friend inline void swap(render_pass& l, render_pass& r) noexcept
 		{
 			using std::swap;
 			swap(l.handle, r.handle);
 			swap(l.m_commands, r.m_commands);
+			swap(l.m_device, r.m_device);
 		}
 	};
 } // namespace mngl::gpu
+

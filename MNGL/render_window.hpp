@@ -149,26 +149,50 @@ namespace mngl
 			begin_target_frame(&target, clear_color);
 		}
 
-		void draw(const drawable& value) { active_frame().draw(value); }
+		void draw(const drawable& value)
+		{
+			if (m_frame_skipped)
+				return;
+			active_frame().draw(value);
+		}
 
 		template <typename DrawFunction>
 		    requires std::invocable<DrawFunction, two_d::frame_2d&>
 		void draw(DrawFunction&& draw_function)
 		{
+			if (m_frame_skipped)
+				return;
 			active_frame().draw(std::forward<DrawFunction>(draw_function));
 		}
 
-		void prepare(const drawable& value) { active_frame().prepare(value); }
+		void prepare(const drawable& value)
+		{
+			if (m_frame_skipped)
+				return;
+			active_frame().prepare(value);
+		}
 
 		[[nodiscard]] two_d::recording_context create_recording_context(std::size_t expected_draw_count = 0)
 		{
+			if (m_frame_skipped)
+				return {};
 			return active_frame().create_recording_context(expected_draw_count);
 		}
 
-		void merge(two_d::recording_context&& context) { active_frame().merge(std::move(context)); }
+		void merge(two_d::recording_context&& context)
+		{
+			if (m_frame_skipped)
+				return;
+			active_frame().merge(std::move(context));
+		}
 
 		void display()
 		{
+			if (m_frame_skipped)
+			{
+				reset_frame_state();
+				return;
+			}
 			if (!m_frame || !m_command_buffer) [[unlikely]]
 			{
 				throw std::logic_error("Cannot display a render_window without an active frame");
@@ -218,6 +242,8 @@ namespace mngl
 
 			void draw(const drawable& value)
 			{
+				if (is_skipped())
+					return;
 				ensure_active();
 				m_owner->draw(value);
 			}
@@ -226,12 +252,16 @@ namespace mngl
 			    requires std::invocable<DrawFunction, two_d::frame_2d&>
 			void draw(DrawFunction&& draw_function)
 			{
+				if (is_skipped())
+					return;
 				ensure_active();
 				m_owner->draw(std::forward<DrawFunction>(draw_function));
 			}
 
 			void prepare(const drawable& value)
 			{
+				if (is_skipped())
+					return;
 				ensure_active();
 				m_owner->prepare(value);
 			}
@@ -239,18 +269,32 @@ namespace mngl
 			[[nodiscard]] two_d::recording_context create_recording_context(
 			    std::size_t expected_draw_count = 0)
 			{
+				if (is_skipped())
+					return {};
 				ensure_active();
 				return m_owner->create_recording_context(expected_draw_count);
 			}
 
 			void merge(two_d::recording_context&& context)
 			{
+				if (is_skipped())
+					return;
 				ensure_active();
 				m_owner->merge(std::move(context));
 			}
 
 			void display()
 			{
+				if (is_skipped())
+				{
+					if (m_owner)
+					{
+						if (m_owner->m_frame_skipped)
+							m_owner->reset_frame_state();
+						m_owner = nullptr;
+					}
+					return;
+				}
 				ensure_active();
 				m_owner->display();
 				m_owner = nullptr;
@@ -279,6 +323,8 @@ namespace mngl
 					throw std::logic_error("Render-window frame scope is no longer active");
 				}
 			}
+
+			[[nodiscard]] bool is_skipped() const noexcept { return m_generation == 0; }
 
 			void cancel() noexcept
 			{
@@ -407,10 +453,11 @@ namespace mngl
 
 		void begin_target_frame(::mngl::texture* target, const color& clear_color)
 		{
-			if (m_frame || m_command_buffer) [[unlikely]]
+			if (m_frame || m_command_buffer || m_frame_skipped) [[unlikely]]
 			{
 				throw std::logic_error("A render_window frame is already active");
 			}
+			m_frame_skipped = false;
 
 			// Target textures are borrowed through display().
 			two_d::renderer* active_renderer =
@@ -431,6 +478,13 @@ namespace mngl
 				{
 					auto swapchain_target =
 					    ::mngl::texture(m_command_buffer->acquire_swapchain_texture(*this));
+					if (!swapchain_target.valid())
+					{
+						// No swapchain texture was acquired, so discard the empty command buffer and skip.
+						reset_frame_state();
+						m_frame_skipped = true;
+						return;
+					}
 					m_swapchain_texture.emplace(std::move(swapchain_target));
 					m_swapchain_texture->enable_hit_testing(m_hit_testing_enabled);
 					m_frame.emplace(active_renderer->begin_frame(*m_swapchain_texture, clear_color));
@@ -510,6 +564,7 @@ namespace mngl
 		std::optional<gpu::command_buffer> m_command_buffer;
 		std::optional<::mngl::texture> m_swapchain_texture;
 		std::optional<two_d::frame_2d> m_frame;
+		bool m_frame_skipped = false;
 		std::uint64_t m_next_frame_generation = 0;
 		std::uint64_t m_active_frame_generation = 0;
 		detail::render_window_overlay* m_overlay = nullptr;
@@ -521,12 +576,17 @@ namespace mngl
 		release_active_texture_target();
 		m_swapchain_texture.reset();
 		m_command_buffer.reset();
+		m_frame_skipped = false;
 		m_active_frame_generation = 0;
 	}
 
 	inline void render_window::cancel_active_frame(std::uint64_t generation) noexcept
 	{
-		if (generation != 0 && generation == m_active_frame_generation)
+		if (generation == 0 && m_frame_skipped)
+		{
+			reset_frame_state();
+		}
+		else if (generation != 0 && generation == m_active_frame_generation)
 		{
 			reset_frame_state();
 		}

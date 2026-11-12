@@ -9,6 +9,7 @@
 #include <glm/glm.hpp>
 #include <functional>
 #include <initializer_list>
+#include <ios>
 #include <ostream>
 #include <concepts>
 #include <stdexcept>
@@ -19,6 +20,13 @@ namespace mngl
 {
 	class color
 	{
+	private:
+		static int stream_format_index()
+		{
+			static const int index = std::ios_base::xalloc();
+			return index;
+		}
+
 	public:
 		template <std::integral R, std::integral G, std::integral B>
 		constexpr color(R r, G g, B b) : color(r, g, b, 255)
@@ -332,11 +340,22 @@ namespace mngl
 				frgb,
 				hex
 			};
-			inline static fmts last_format = fmts::standard;
 			struct color_fmt
 			{
 				fmts fmt;
 				explicit color_fmt(fmts fmt) : fmt(fmt) {}
+
+			private:
+				std::ostream& apply(std::ostream& out) const
+				{
+					out.iword(color::stream_format_index()) = static_cast<long>(fmt);
+					return out;
+				}
+
+				friend std::ostream& operator<<(std::ostream& out, color_fmt fmt)
+				{
+					return fmt.apply(out);
+				}
 			};
 
 			inline static const auto rgba255 = color_fmt(fmts::rgba255);
@@ -345,12 +364,6 @@ namespace mngl
 			inline static const auto frgb = color_fmt(fmts::frgb);
 			inline static const auto hex = color_fmt(fmts::hex);
 			inline static const auto standard = color_fmt(fmts::standard);
-
-			friend std::ostream& operator<<(std::ostream& out, color_fmt fmt)
-			{
-				last_format = fmt.fmt;
-				return out;
-			}
 		};
 
 		static constexpr color fromHSV(glm::vec3 value) { return from_hsv(value); }
@@ -366,7 +379,11 @@ namespace mngl
 
 		friend std::ostream& operator<<(std::ostream& out, color col)
 		{
-			auto fmt = formats::last_format;
+			const auto raw_format = out.iword(stream_format_index());
+			const auto fmt = raw_format >= static_cast<long>(formats::fmts::standard) &&
+			                         raw_format <= static_cast<long>(formats::fmts::hex)
+			                     ? static_cast<formats::fmts>(raw_format)
+			                     : formats::fmts::standard;
 			switch (fmt)
 			{
 			case formats::fmts::standard:
@@ -532,3 +549,4 @@ namespace std
 		}
 	};
 } // namespace std
+
