@@ -98,7 +98,7 @@ int main()
 
 ## Uniform-поля и ресурсы
 
-`compile_fragment()` автоматически включает отражение именованных uniform-полей и ресурсов для HLSL. Отражатель принимает один `cbuffer` в `register(b0, space3)` для графического fragment shader и понимает scalar-, vector- и matrix-поля, а также фиксированные массивы таких значений. Для compute shader соглашение другое: uniform-block находится в `register(b0, space2)`; см. [таблицу slots](compute.md#glsl-bytecode-bindings). Reflection для GLSL не реализован: у GLSL задайте число ресурсов в `shader_compile_options::resources` и используйте ручные bindings.
+`compile_fragment()` автоматически включает отражение именованных uniform-полей и ресурсов для HLSL. Отражатель принимает один `cbuffer` в `register(b0, space3)` для графического fragment shader и понимает scalar-, vector- и matrix-поля, а также фиксированные массивы таких значений. Поддерживаются обычные HLSL числовые типы и типы фиксированной ширины `int8_t`, `uint8_t`, `int16_t`, `uint16_t`, `int64_t`, `uint64_t`; значения в C++ должны иметь подходящий signedness и помещаться в объявленный тип. Отражатель не выполняет HLSL preprocessing: исходник с `#include`, `#if`, `#define` и связанными директивами отклоняется, чтобы не создавать layout из неактивных или недоступных объявлений. Передайте отражателю уже подготовленный HLSL без таких директив. Для ручного layout вызовите `shader_loader::compile()` со stage `fragment`, `reflect_uniforms = false` и заполненными `shader_compile_options::resources`, либо загрузите bytecode без `reflection_source`. Для compute shader соглашение другое: uniform-block находится в `register(b0, space2)`; см. [таблицу slots](compute.md#glsl-bytecode-bindings). Reflection для GLSL не реализован: у GLSL задайте число ресурсов в `shader_compile_options::resources` и используйте ручные bindings.
 
 Имена uniforms доступны по строке или по нулевому индексу в порядке объявления:
 
@@ -131,6 +131,8 @@ fragment["image"] = mngl::gpu::texture_binding{image, linear_sampler};
 ```
 
 Для отражения shader должен объявить `Texture2D` и парный `SamplerState` с одинаковым индексом register в `space2`; `image` — точное имя поля HLSL. Если sampler не задавать явно, обычный 2D renderer подставляет свой default sampler. У sprite с исходной текстурой MNGL автоматически связывает source texture с первым ещё не назначенным sampled-texture полем. Остальные resources следует назначить до начала кадра.
+
+HLSL registers `t` общие для `Texture2D` и `StructuredBuffer`, а `u` — для `RWTexture2D` и `RWStructuredBuffer`. Их абсолютные номера должны идти подряд от нуля внутри каждого register-пространства. MNGL переводит этот общий порядок в независимые SDL binding slots для каждого вида ресурса: например, `Texture2D` в `t0` и `StructuredBuffer` в `t1` отражаются как sampled-texture slot `0` и storage-buffer slot `0`. Пара `SamplerState` остаётся на том же абсолютном номере, что и её texture, а получает соответствующий локальный sampler slot.
 
 ## Выбор компилятора и готового bytecode
 

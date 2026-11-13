@@ -242,8 +242,8 @@ namespace mngl::gpu
 		          std::size_t initial_sprite_capacity = 1024)
 		    : m_device(dev), m_target_format(target_format),
 		      m_instance_buffer(dev, instance_buffer_size(initial_sprite_capacity),
-		                        buffer_usage::vertex | buffer_usage::compute_storage_read |
-		                            buffer_usage::compute_storage_write)
+			                    buffer_usage::vertex | buffer_usage::compute_storage_read |
+			                        buffer_usage::compute_storage_write)
 		{
 			if (!m_device.raw()) [[unlikely]]
 			{
@@ -305,7 +305,8 @@ namespace mngl::gpu
 
 		explicit batcher2d(const device& dev, texture_format target_format,
 		                   std::size_t initial_sprite_capacity = 1024)
-		    : batcher2d(dev, target_format, batcher2d_shader_assets::load_default(), initial_sprite_capacity)
+		    : batcher2d(dev, target_format, batcher2d_shader_assets::load_default(dev),
+			            initial_sprite_capacity)
 		{
 		}
 
@@ -682,9 +683,8 @@ namespace mngl::gpu
 				}
 			}
 			const auto culling_started_at = profile ? profile_clock::now() : profile_clock::time_point{};
-			const std::uint32_t visible_batch_count =
-			    cull_offscreen_primitives(view_projection, m_gpu_culling_enabled,
-			                             ::mngl::gpu::cpu_culling_enabled());
+			const std::uint32_t visible_batch_count = cull_offscreen_primitives(
+			    view_projection, m_gpu_culling_enabled, ::mngl::gpu::cpu_culling_enabled());
 			if (::mngl::gpu::order_independent_batch_sorting_enabled())
 			{
 				sort_order_independent_batches();
@@ -711,13 +711,13 @@ namespace mngl::gpu
 			if (instance_bytes > std::numeric_limits<std::uint32_t>::max() ||
 			    geometry_bytes > std::numeric_limits<std::uint32_t>::max() - instance_bytes ||
 			    culling_bytes > std::numeric_limits<std::uint32_t>::max() - instance_bytes - geometry_bytes ||
-			    instance_culling_bytes >
-			        std::numeric_limits<std::uint32_t>::max() - instance_bytes - geometry_bytes - culling_bytes)
-			    [[unlikely]]
+			    instance_culling_bytes > std::numeric_limits<std::uint32_t>::max() - instance_bytes -
+			                                 geometry_bytes - culling_bytes) [[unlikely]]
 			{
 				throw std::length_error("batcher2d frame upload exceeds SDL's 32-bit buffer size limit");
 			}
-			const std::size_t upload_bytes = instance_bytes + geometry_bytes + culling_bytes + instance_culling_bytes;
+			const std::size_t upload_bytes =
+			    instance_bytes + geometry_bytes + culling_bytes + instance_culling_bytes;
 			m_last_stats.upload_bytes = static_cast<std::uint32_t>(upload_bytes);
 			ensure_instance_culling_capacity(static_cast<std::uint32_t>(instance_culling_bytes));
 
@@ -797,9 +797,9 @@ namespace mngl::gpu
 				culling_pass.bind_storage_buffer(0, m_instance_culling_input);
 				culling_pass.push_uniform(
 				    0, instance_culling_uniforms{view_projection,
-				                                static_cast<std::uint32_t>(m_instances.size()),
-				                                static_cast<std::uint32_t>(m_instance_culling_ranges.size()),
-				                                {}});
+					                             static_cast<std::uint32_t>(m_instances.size()),
+					                             static_cast<std::uint32_t>(m_instance_culling_ranges.size()),
+					                             {}});
 				culling_pass.dispatch_for({static_cast<std::uint32_t>(m_instances.size()), 1, 1});
 			}
 			if (!m_geometry_culling_blocks.empty())
@@ -817,7 +817,8 @@ namespace mngl::gpu
 			}
 
 			render_pass pass(cmd, target, m_clear_color,
-			                m_preserve_target_contents ? render_pass::loader::load : render_pass::loader::clear);
+			                 m_preserve_target_contents ? render_pass::loader::load
+			                                            : render_pass::loader::clear);
 			const SDL_GPUViewport viewport{.x = 0.0f,
 			                               .y = 0.0f,
 			                               .w = static_cast<float>(target.width()),
@@ -1043,8 +1044,8 @@ namespace mngl::gpu
 		{
 			if (enabled && !m_vertex_instance_culling_supported) [[unlikely]]
 			{
-				throw std::logic_error(
-				    "GPU culling requires a vertex shader that declares and consumes the instance-visibility mask");
+				throw std::logic_error("GPU culling requires a vertex shader that declares and consumes the "
+				                       "instance-visibility mask");
 			}
 			if (enabled && (!m_geometry_culling_pipeline.valid() || !m_instance_culling_pipeline.valid()))
 			{
@@ -1470,10 +1471,10 @@ namespace mngl::gpu
 			}
 			if (left.scissor && right.scissor)
 			{
-				const auto left_rect = std::array{left.scissor->x, left.scissor->y, left.scissor->w,
-				                                 left.scissor->h};
-				const auto right_rect = std::array{right.scissor->x, right.scissor->y, right.scissor->w,
-				                                  right.scissor->h};
+				const auto left_rect =
+				    std::array{left.scissor->x, left.scissor->y, left.scissor->w, left.scissor->h};
+				const auto right_rect =
+				    std::array{right.scissor->x, right.scissor->y, right.scissor->w, right.scissor->h};
 				if (left_rect != right_rect)
 				{
 					return left_rect < right_rect;
@@ -1632,8 +1633,7 @@ namespace mngl::gpu
 
 			auto* raw_texture = source.page ? source.page->raw() : nullptr;
 			if (allow_extension && !batches.empty() && !batches.back().geometry &&
-			    !batches.back().resident_mesh &&
-			    same_batch_key(batches.back(), raw_texture, state))
+			    !batches.back().resident_mesh && same_batch_key(batches.back(), raw_texture, state))
 			{
 				instances.push_back(instance);
 				++batches.back().instance_count;
@@ -2086,17 +2086,16 @@ namespace mngl::gpu
 		{
 			shader_compile_options geometry_options{};
 			geometry_options.stage = shader_stage::compute;
-			geometry_options.format = static_cast<shader_format>(default_shader_format);
+			geometry_options.format = detail::select_2d_shader_format(m_device.shader_format());
 			geometry_options.resources.storage_buffers = 1;
 			geometry_options.resources.read_write_storage_buffers = 1;
 			geometry_options.resources.uniform_buffers = 1;
 			const auto geometry_shader = shader_loader::compile_compute(
 			    paths::application_directory() / "shaders" / "batcher2d.cull.hlsl", geometry_options);
-			auto geometry_pipeline =
-			    compute_pipeline_builder{}
-			        .set_debug_name("MNGL 2D geometry block culling")
-			        .set_compute_shader(geometry_shader)
-			        .build(m_device);
+			auto geometry_pipeline = compute_pipeline_builder{}
+			                             .set_debug_name("MNGL 2D geometry block culling")
+			                             .set_compute_shader(geometry_shader)
+			                             .build(m_device);
 
 			auto instance_options = geometry_options;
 			instance_options.resources.storage_buffers = 1;
@@ -2104,11 +2103,10 @@ namespace mngl::gpu
 			const auto instance_shader = shader_loader::compile_compute(
 			    paths::application_directory() / "shaders" / "batcher2d.cull_instances.hlsl",
 			    instance_options);
-			auto instance_pipeline =
-			    compute_pipeline_builder{}
-			        .set_debug_name("MNGL 2D instance culling")
-			        .set_compute_shader(instance_shader)
-			        .build(m_device);
+			auto instance_pipeline = compute_pipeline_builder{}
+			                             .set_debug_name("MNGL 2D instance culling")
+			                             .set_compute_shader(instance_shader)
+			                             .build(m_device);
 
 			m_geometry_culling_pipeline = std::move(geometry_pipeline);
 			m_instance_culling_pipeline = std::move(instance_pipeline);
@@ -2157,7 +2155,8 @@ namespace mngl::gpu
 				}
 				if (capacity < required) [[unlikely]]
 				{
-					throw std::length_error("batcher2d instance-culling buffer exceeds SDL's 32-bit size limit");
+					throw std::length_error(
+					    "batcher2d instance-culling buffer exceeds SDL's 32-bit size limit");
 				}
 				return static_cast<std::uint32_t>(capacity);
 			};
@@ -2165,9 +2164,9 @@ namespace mngl::gpu
 			if (range_bytes != 0 &&
 			    (!m_instance_culling_input.valid() || m_instance_culling_input.size() < range_bytes))
 			{
-				m_instance_culling_input = buffer(
-				    m_device, grow_capacity(m_instance_culling_input.size(), range_bytes),
-				    buffer_usage::compute_storage_read);
+				m_instance_culling_input =
+				    buffer(m_device, grow_capacity(m_instance_culling_input.size(), range_bytes),
+					       buffer_usage::compute_storage_read);
 			}
 		}
 
@@ -2263,8 +2262,7 @@ namespace mngl::gpu
 			if (gpu_culling_enabled || !cpu_culling_enabled)
 			{
 				return static_cast<std::uint32_t>(std::count_if(
-				    m_batches.begin(), m_batches.end(),
-				    [](const draw_batch& batch)
+				    m_batches.begin(), m_batches.end(), [](const draw_batch& batch)
 				    { return batch.instance_count != 0 && (!batch.geometry || batch.vertex_count != 0); }));
 			}
 

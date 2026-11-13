@@ -1,9 +1,23 @@
 #pragma once
 
 #include "map.hpp"
+#include <functional>
 
 namespace mngl
 {
+	namespace detail
+	{
+		struct action_name_hash
+		{
+			using is_transparent = void;
+
+			[[nodiscard]] std::size_t operator()(std::string_view name) const noexcept
+			{
+				return std::hash<std::string_view>{}(name);
+			}
+		};
+	} // namespace detail
+
 	// A per-window, enableable view over an action_map. Contexts do not consume input.
 	class input_context
 	{
@@ -114,9 +128,15 @@ namespace mngl
 			if (mice)
 				(void)input::mice();
 			if (joysticks)
+			{
+				input::joystick_action_bindings_requested.store(true, std::memory_order_release);
 				(void)input::joysticks();
+			}
 			if (gamepads)
+			{
+				input::gamepad_action_bindings_requested.store(true, std::memory_order_release);
 				(void)input::gamepads();
+			}
 			if (touches)
 				(void)input::touch_devices();
 			if (pens)
@@ -497,3 +517,4 @@ namespace mngl
 		}
 	};
 } // namespace mngl
+

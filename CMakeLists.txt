@@ -146,6 +146,14 @@ function(mngl_copy_windows_runtime_dlls target)
 	endif()
 endfunction()
 
+function(mngl_copy_default_2d_shaders target)
+	add_custom_command(TARGET "${target}" POST_BUILD
+		COMMAND "${CMAKE_COMMAND}" -E copy_directory
+			"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/shaders"
+			"$<TARGET_FILE_DIR:${target}>/shaders"
+		VERBATIM)
+endfunction()
+
 set(MNGL_HAS_SDL3_MIXER FALSE)
 if(NOT MNGL_CUSTOM_AUDIO_BACKEND AND NOT MNGL_CUSTOM_AUDIO_INTERFACE)
 	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL_mixer/CMakeLists.txt")
@@ -429,13 +437,57 @@ if(BUILD_TESTING)
 	set_tests_properties(mngl_gpu_swapchain_lifetime_test PROPERTIES
 		TIMEOUT 30
 		SKIP_RETURN_CODE 77)
+	add_executable(mngl_frame_clock_regression_test tests/frame_clock_regression_test.cpp)
+	target_link_libraries(mngl_frame_clock_regression_test PRIVATE mngl)
+	add_test(NAME mngl_frame_clock_regression_test COMMAND mngl_frame_clock_regression_test)
+	set_tests_properties(mngl_frame_clock_regression_test PROPERTIES
+		TIMEOUT 30
+		ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+	add_executable(mngl_input_hotplug_window_regression_test tests/input_hotplug_window_regression_test.cpp)
+	target_link_libraries(mngl_input_hotplug_window_regression_test PRIVATE mngl)
+	add_test(NAME mngl_input_hotplug_window_regression_test COMMAND mngl_input_hotplug_window_regression_test)
+	set_tests_properties(mngl_input_hotplug_window_regression_test PROPERTIES
+		TIMEOUT 40
+		ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+	add_executable(mngl_shader_reflection_regression_test tests/shader_reflection_regression_test.cpp)
+	target_link_libraries(mngl_shader_reflection_regression_test PRIVATE mngl)
+	add_test(NAME mngl_shader_reflection_regression_test COMMAND mngl_shader_reflection_regression_test)
+	set_tests_properties(mngl_shader_reflection_regression_test PROPERTIES TIMEOUT 30)
+	add_executable(mngl_two_d_shader_format_selection_test tests/two_d_shader_format_selection_test.cpp)
+	target_link_libraries(mngl_two_d_shader_format_selection_test PRIVATE mngl)
+	add_test(NAME mngl_two_d_shader_format_selection_test COMMAND mngl_two_d_shader_format_selection_test)
+	add_executable(mngl_two_d_vulkan_shader_smoke_test tests/two_d_vulkan_shader_smoke_test.cpp)
+	target_link_libraries(mngl_two_d_vulkan_shader_smoke_test PRIVATE mngl)
+	mngl_copy_default_2d_shaders(mngl_two_d_vulkan_shader_smoke_test)
+	add_test(NAME mngl_two_d_vulkan_shader_smoke_test COMMAND mngl_two_d_vulkan_shader_smoke_test)
+	set_tests_properties(mngl_two_d_vulkan_shader_smoke_test PROPERTIES
+		TIMEOUT 60
+		SKIP_RETURN_CODE 77)
+	add_executable(mngl_imgui_offscreen_mouse_routing_test tests/imgui_offscreen_mouse_routing_test.cpp)
+	target_link_libraries(mngl_imgui_offscreen_mouse_routing_test PRIVATE mngl)
+	add_test(NAME mngl_imgui_offscreen_mouse_routing_test COMMAND mngl_imgui_offscreen_mouse_routing_test)
+	set_tests_properties(mngl_imgui_offscreen_mouse_routing_test PROPERTIES TIMEOUT 15)
+	add_executable(mngl_imgui_swapchain_format_regression_test tests/imgui_swapchain_format_regression_test.cpp)
+	target_link_libraries(mngl_imgui_swapchain_format_regression_test PRIVATE mngl)
+	mngl_copy_default_2d_shaders(mngl_imgui_swapchain_format_regression_test)
+	add_test(NAME mngl_imgui_swapchain_format_regression_test COMMAND mngl_imgui_swapchain_format_regression_test)
+	set_tests_properties(mngl_imgui_swapchain_format_regression_test PROPERTIES
+		TIMEOUT 60
+		SKIP_RETURN_CODE 77)
 	if(WIN32 AND MSVC)
 		foreach(MNGL_TEST_TARGET IN ITEMS
 				mngl_event_regression_test
 				mngl_line_intersection_test
 				mngl_color_api_test
 				mngl_clipboard_provider_cache_test
-				mngl_gpu_swapchain_lifetime_test)
+				mngl_gpu_swapchain_lifetime_test
+				mngl_frame_clock_regression_test
+				mngl_input_hotplug_window_regression_test
+				mngl_shader_reflection_regression_test
+				mngl_two_d_shader_format_selection_test
+				mngl_two_d_vulkan_shader_smoke_test
+				mngl_imgui_offscreen_mouse_routing_test
+				mngl_imgui_swapchain_format_regression_test)
 			mngl_copy_windows_runtime_dlls(${MNGL_TEST_TARGET})
 		endforeach()
 		add_executable(mngl_sdl_image_codec_deployment_test tests/sdl_image_codec_deployment_test.cpp)

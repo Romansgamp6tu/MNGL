@@ -12,7 +12,13 @@
 			[[maybe_unused]] static auto app_terminating_subscription = event_manager::on<app_terminating>(
 			    [](const app_terminating&) { should_work.store(false, std::memory_order_release); });
 			[[maybe_unused]] static auto window_close_subscription = event_manager::on<window_close_request>(
-			    [](const window_close_request&) { should_work.store(false, std::memory_order_release); });
+			    [](const window_close_request&)
+			    {
+				    int count = 0;
+				    std::unique_ptr<SDL_Window*, decltype(&SDL_free)> windows(SDL_GetWindows(&count), &SDL_free);
+				    if (count <= 1)
+					    should_work.store(false, std::memory_order_release);
+			    });
 			[[maybe_unused]] static auto window_focus_lost_subscription =
 			    event_manager::on<window_focus_lost>(
 			        [](const window_focus_lost& e)
@@ -256,7 +262,9 @@
 				    if (e.which == 0)
 					    return;
 				    std::lock_guard lock(state_mutex);
-				    ensure_joystick_state_locked(e.which);
+				    auto& state = ensure_joystick_state_locked(e.which);
+				    if (joystick_action_bindings_requested.load(std::memory_order_acquire))
+					    open_joystick_locked(e.which, state);
 			    });
 			[[maybe_unused]] static auto joystick_removed_subscription = event_manager::on<joystick_removed>(
 			    [](const joystick_removed& e)
@@ -348,7 +356,9 @@
 				    if (e.which == 0)
 					    return;
 				    std::lock_guard lock(state_mutex);
-				    ensure_gamepad_state_locked(e.which);
+				    auto& state = ensure_gamepad_state_locked(e.which);
+				    if (gamepad_action_bindings_requested.load(std::memory_order_acquire))
+					    open_gamepad_locked(e.which, state);
 			    });
 			[[maybe_unused]] static auto gamepad_removed_subscription = event_manager::on<gamepad_removed>(
 			    [](const gamepad_removed& e)

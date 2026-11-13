@@ -78,7 +78,7 @@ namespace mngl::gpu
 
 			std::array<SDL_GPUColorTargetInfo, 4> sdl_color_targets{};
 			std::uint32_t color_target_count = 0;
-			const auto* command_device = cmd.device_raw();
+			auto* command_device = cmd.device_raw();
 
 			for (const auto& attachment : color_targets)
 			{

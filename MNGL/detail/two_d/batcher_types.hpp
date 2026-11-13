@@ -74,6 +74,24 @@ namespace mngl::two_d::detail
 
 namespace mngl::gpu
 {
+	namespace detail
+	{
+		[[nodiscard]] inline shader_format select_2d_shader_format(SDL_GPUShaderFormat supported_formats)
+		{
+			// Prefer the packaged DXIL shaders, then native formats used by Metal and Vulkan.
+			if ((supported_formats & shader_formats::dxil) != 0)
+				return shader_format::dxil;
+			if ((supported_formats & shader_formats::msl) != 0)
+				return shader_format::msl;
+			if ((supported_formats & shader_formats::spirv) != 0)
+				return shader_format::spirv;
+			if ((supported_formats & shader_formats::dxbc) != 0)
+				return shader_format::dxbc;
+			throw std::invalid_argument(
+			    "GPU device does not support an MNGL 2D shader format (DXIL, MSL, SPIR-V, or DXBC)");
+		}
+	} // namespace detail
+
 	enum class sprite_blend_mode : std::uint8_t
 	{
 		alpha,
@@ -427,11 +445,26 @@ namespace mngl::gpu
 		// Set only when the vertex shader recognizes the NaN sentinel in TEXCOORD4.y and clips it.
 		bool supports_instance_culling = false;
 
+		static batcher2d_shader_assets load_default(const device& gpu_device)
+		{
+			if (!gpu_device.raw()) [[unlikely]]
+			{
+				throw std::invalid_argument("Cannot load default 2D shaders for a null GPU device");
+			}
+			return load_default_format(detail::select_2d_shader_format(gpu_device.shader_format()));
+		}
+
+		// Retained for source compatibility; batcher2d uses the active-device overload above.
 		static batcher2d_shader_assets load_default()
+		{
+			return load_default_format(static_cast<shader_format>(::mngl::gpu::default_shader_format));
+		}
+
+	private:
+		static batcher2d_shader_assets load_default_format(shader_format format)
 		{
 			const auto base_path = paths::application_directory();
 			const auto directory = base_path / "shaders";
-			const auto format = static_cast<shader_format>(::mngl::gpu::default_shader_format);
 			if (format == shader_format::dxil)
 			{
 				return load_dxil(directory);
@@ -452,6 +485,7 @@ namespace mngl::gpu
 			        shader_loader::compile(directory / "batcher2d.frag.hlsl", fragment_options), true};
 		}
 
+	public:
 		static batcher2d_shader_assets load_dxil(const std::filesystem::path& directory)
 		{
 			batcher2d_shader_assets shaders{};

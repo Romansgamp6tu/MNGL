@@ -33,6 +33,8 @@ void main(uint3 thread_id : SV_DispatchThreadID)
 
 Загрузчик автоматически определяет literal-размер `[numthreads]` и отражает поддерживаемые HLSL-ресурсы. В примере `window` — уже созданный `mngl::render_window`; uniforms и ресурсы задаются так же, как для графического asset:
 
+Ресурсы `t` используют общее пространство регистров для sampled textures и read-only buffers; `u` — для writable textures и buffers. Номера внутри каждого набора должны быть непрерывными от нуля, а SDL slots затем нумеруются отдельно для каждого вида ресурса. Например, `Texture2D` в `t0` и `StructuredBuffer` в `t1` получают по slot `0`. Отражение не запускает HLSL preprocessor: исходник с `#include`, условными директивами (`#if`, `#ifdef` и т. п.) или макросами (`#define`, `#undef`) завершается ошибкой. Это также относится к автоматическому чтению `[numthreads]`. Передайте готовый HLSL без этих директив; для уже скомпилированного compute bytecode можно не передавать исходник, указать `compute_threadgroup_size`, задать counts вручную и оставить `reflect_uniforms = false`.
+
 ```cpp
 constexpr uint32_t width = 512;
 constexpr uint32_t height = 512;

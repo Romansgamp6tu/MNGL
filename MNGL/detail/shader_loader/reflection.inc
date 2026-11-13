@@ -171,6 +171,21 @@
 			return reflect_hlsl_uniforms(source_path, options.stage);
 		}
 
+		static void reject_unsupported_hlsl_preprocessing(const std::string& source)
+		{
+			static const std::regex unsupported_directive(
+			    R"(^[\t ]*#[\t ]*(include|if|ifdef|ifndef|elif|else|endif|define|undef)\b)",
+			    std::regex_constants::ECMAScript | std::regex_constants::multiline);
+			std::smatch match;
+			if (std::regex_search(source, match, unsupported_directive)) [[unlikely]]
+			{
+				throw std::invalid_argument(std::format(
+				    "MNGL HLSL reflection does not preprocess '#{}'; pass preprocessed HLSL or use explicit "
+				    "resource counts and compute_threadgroup_size",
+				    match[1].str()));
+			}
+		}
+
 		static void apply_uniform_reflection(shader_asset& asset, const shader_compile_options& options,
 		                                     const uniform_reflection& reflected_uniforms)
 		{
@@ -236,7 +251,7 @@
 			static const std::regex cbuffer(
 			    R"(\bcbuffer\s+\w+\s*:\s*register\s*\(\s*b(\d+)\s*,\s*space(\d+)\s*\)\s*\{([^}]*)\})");
 			static const std::regex uniform_field(
-			    R"((?:(row_major|column_major)\s+)?(std::int64_t|std::uint64_t|float16_t|std::int16_t|std::uint16_t|std::int8_t|std::uint8_t|min16float|min10float|min16int|min16uint|double|float|half|int|uint|bool|dword)([1-4]?)(?:x([1-4]))?\s+([A-Za-z_]\w*)\s*(?:\[\s*(\d+)\s*\])?\s*;)");
+			    R"((?:(row_major|column_major)\s+)?(std::int64_t|std::uint64_t|std::int16_t|std::uint16_t|std::int8_t|std::uint8_t|int64_t|uint64_t|int16_t|uint16_t|int8_t|uint8_t|float16_t|min16float|min10float|min16int|min16uint|double|float|half|int|uint|bool|dword)([1-4]?)(?:x([1-4]))?\s+([A-Za-z_]\w*)\s*(?:\[\s*(\d+)\s*\])?\s*;)");
 			static const std::regex texture_resource(
 			    R"(\bTexture2D(?:\s*<[^>]+>)?\s+([A-Za-z_]\w*)\s*:\s*register\s*\(\s*t(\d+)\s*,\s*space\s*(\d+)\s*\)\s*;)");
 			static const std::regex buffer_resource(
@@ -251,6 +266,7 @@
 			static const std::regex row_major_default(R"(#\s*pragma\s+pack_matrix\s*\(\s*row_major\s*\))");
 
 			source = std::regex_replace(source, comments, "");
+			reject_unsupported_hlsl_preprocessing(source);
 			const bool default_row_major = std::regex_search(source, row_major_default);
 			std::size_t keyword_count = 0;
 			for (auto it = std::sregex_iterator(source.begin(), source.end(), cbuffer_keyword);
@@ -322,30 +338,31 @@
 						field.scalar_size = 4;
 						field.is_boolean = true;
 					}
-					else if (scalar_type == "std::int8_t")
+					else if (scalar_type == "std::int8_t" || scalar_type == "int8_t")
 					{
 						field.scalar_size = 1;
 						field.is_signed = true;
 					}
-					else if (scalar_type == "std::uint8_t")
+					else if (scalar_type == "std::uint8_t" || scalar_type == "uint8_t")
 					{
 						field.scalar_size = 1;
 					}
-					else if (scalar_type == "std::int16_t")
+					else if (scalar_type == "std::int16_t" || scalar_type == "int16_t")
 					{
 						field.scalar_size = 2;
 						field.is_signed = true;
 					}
-					else if (scalar_type == "std::uint16_t")
+					else if (scalar_type == "std::uint16_t" || scalar_type == "uint16_t")
 					{
 						field.scalar_size = 2;
 					}
-					else if (scalar_type == "std::int64_t")
+					else if (scalar_type == "std::int64_t" || scalar_type == "int64_t")
 					{
 						field.scalar_size = 8;
 						field.is_signed = true;
 					}
-					else if (scalar_type == "std::uint64_t" || scalar_type == "dword")
+					else if (scalar_type == "std::uint64_t" || scalar_type == "uint64_t" ||
+					         scalar_type == "dword")
 					{
 						field.scalar_size = scalar_type == "dword" ? 4 : 8;
 					}
@@ -372,16 +389,21 @@
 						const std::uint32_t stride =
 						    (vector_components * field.scalar_size + 15) & ~std::uint32_t(15);
 						field.byte_offset = byte_offset;
-						field.element_size = vector_count * stride;
-						field.array_stride = field.is_array ? field.element_size : 0;
-						if (field.is_array && field.array_count > std::numeric_limits<std::uint32_t>::max() /
-						                                              field.array_stride) [[unlikely]]
+						field.element_size = (vector_count - 1) * stride + vector_components * field.scalar_size;
+						field.array_stride = field.is_array
+						                        ? (field.element_size + 15) & ~std::uint32_t(15)
+						                        : 0;
+						if (field.is_array &&
+						    (field.array_count - 1) >
+						        (std::numeric_limits<std::uint32_t>::max() - field.element_size) /
+						            field.array_stride) [[unlikely]]
 						{
 							throw std::length_error(
 							    "HLSL matrix array exceeds the supported uniform block size");
 						}
-						field.storage_size =
-						    field.is_array ? field.array_count * field.array_stride : field.element_size;
+						field.storage_size = field.is_array
+						                        ? (field.array_count - 1) * field.array_stride + field.element_size
+						                        : field.element_size;
 						if (field.storage_size > std::numeric_limits<std::uint32_t>::max() - byte_offset) [[unlikely]]
 						{
 							throw std::length_error("HLSL cbuffer exceeds the supported size");
@@ -398,13 +420,15 @@
 							field.byte_offset = byte_offset;
 							field.element_size = field_size;
 							field.array_stride = (field_size + 15) & ~std::uint32_t(15);
-							if (field.array_count >
-							    std::numeric_limits<std::uint32_t>::max() / field.array_stride) [[unlikely]]
+							if ((field.array_count - 1) >
+							    (std::numeric_limits<std::uint32_t>::max() - field.element_size) /
+							        field.array_stride) [[unlikely]]
 							{
 								throw std::length_error(
 								    "HLSL uniform array exceeds the supported block size");
 							}
-							field.storage_size = field.array_count * field.array_stride;
+							field.storage_size =
+							    (field.array_count - 1) * field.array_stride + field.element_size;
 							if (field.storage_size > std::numeric_limits<std::uint32_t>::max() - byte_offset) [[unlikely]]
 							{
 								throw std::length_error("HLSL cbuffer exceeds the supported size");
@@ -447,6 +471,7 @@
 				std::string name;
 				std::uint32_t slot = 0;
 				std::uint32_t space = 0;
+				std::uint32_t binding_slot = 0;
 			};
 			std::vector<resource_declaration> textures;
 			std::vector<resource_declaration> buffers;
@@ -543,72 +568,104 @@
 				return static_cast<std::uint32_t>(slots.size());
 			};
 
-			std::vector<std::uint32_t> sampled_texture_slots;
-			std::vector<std::uint32_t> storage_texture_slots;
-			std::vector<std::uint32_t> storage_buffer_slots;
-			std::vector<std::uint32_t> read_write_storage_texture_slots;
-			std::vector<std::uint32_t> read_write_storage_buffer_slots;
-			std::vector<std::uint32_t> sampler_slots;
-			for (const auto& declaration : buffers)
-			{
-				storage_buffer_slots.push_back(declaration.slot);
-				result.resources.push_back({.name = declaration.name,
-				                            .kind = shader_resource_kind::storage_buffer,
-				                            .slot = declaration.slot});
-			}
-			for (const auto& declaration : read_write_buffers)
-			{
-				read_write_storage_buffer_slots.push_back(declaration.slot);
-				result.resources.push_back({.name = declaration.name,
-				                            .kind = shader_resource_kind::read_write_storage_buffer,
-				                            .slot = declaration.slot});
-			}
+			std::vector<std::uint32_t> read_only_registers;
 			for (const auto& declaration : textures)
+				read_only_registers.push_back(declaration.slot);
+			for (const auto& declaration : buffers)
+				read_only_registers.push_back(declaration.slot);
+			contiguous_slot_count(std::move(read_only_registers), "t-register");
+
+			std::vector<std::uint32_t> writable_registers;
+			for (const auto& declaration : read_write_textures)
+				writable_registers.push_back(declaration.slot);
+			for (const auto& declaration : read_write_buffers)
+				writable_registers.push_back(declaration.slot);
+			contiguous_slot_count(std::move(writable_registers), "u-register");
+
+			using resource_list = std::vector<resource_declaration*>;
+			resource_list sampled_textures;
+			resource_list storage_textures;
+			resource_list storage_buffers;
+			resource_list read_write_storage_textures;
+			resource_list read_write_storage_buffers;
+			for (auto& declaration : textures)
 			{
 				const auto matching_sampler =
 				    std::find_if(samplers.begin(), samplers.end(), [&](const resource_declaration& sampler)
 					             { return sampler.slot == declaration.slot; });
-				const bool sampled = matching_sampler != samplers.end();
-				auto& slots = sampled ? sampled_texture_slots : storage_texture_slots;
-				slots.push_back(declaration.slot);
-				result.resources.push_back({.name = declaration.name,
-				                            .kind = sampled ? shader_resource_kind::sampled_texture
-				                                            : shader_resource_kind::storage_texture,
-				                            .slot = declaration.slot});
+				(matching_sampler != samplers.end() ? sampled_textures : storage_textures)
+				    .push_back(&declaration);
 			}
-			for (const auto& declaration : read_write_textures)
+			for (auto& declaration : buffers)
+				storage_buffers.push_back(&declaration);
+			for (auto& declaration : read_write_textures)
+				read_write_storage_textures.push_back(&declaration);
+			for (auto& declaration : read_write_buffers)
+				read_write_storage_buffers.push_back(&declaration);
+
+			auto assign_binding_slots = [](resource_list& declarations)
 			{
-				read_write_storage_texture_slots.push_back(declaration.slot);
-				result.resources.push_back({.name = declaration.name,
-				                            .kind = shader_resource_kind::read_write_storage_texture,
-				                            .slot = declaration.slot});
-			}
-			for (const auto& declaration : samplers)
+				std::sort(declarations.begin(), declarations.end(),
+				          [](const resource_declaration* left, const resource_declaration* right)
+				          { return left->slot < right->slot; });
+				for (std::size_t index = 0; index < declarations.size(); ++index)
+					declarations[index]->binding_slot = static_cast<std::uint32_t>(index);
+			};
+			assign_binding_slots(sampled_textures);
+			assign_binding_slots(storage_textures);
+			assign_binding_slots(storage_buffers);
+			assign_binding_slots(read_write_storage_textures);
+			assign_binding_slots(read_write_storage_buffers);
+
+			std::vector<std::uint32_t> sampler_registers;
+			for (auto& sampler : samplers)
 			{
-				if (std::none_of(textures.begin(), textures.end(), [&](const resource_declaration& texture)
-				                 { return texture.slot == declaration.slot; })) [[unlikely]]
+				auto matching_texture =
+				    std::find_if(sampled_textures.begin(), sampled_textures.end(),
+				                 [&](const resource_declaration* texture) { return texture->slot == sampler.slot; });
+				if (matching_texture == sampled_textures.end()) [[unlikely]]
 				{
 					throw std::invalid_argument(
 					    "Each MNGL SamplerState must pair with a Texture2D at the same register index");
 				}
-				sampler_slots.push_back(declaration.slot);
+				sampler.binding_slot = (*matching_texture)->binding_slot;
+				sampler_registers.push_back(sampler.slot);
 			}
-
-			result.resource_counts.samplers =
-			    contiguous_slot_count(std::move(sampled_texture_slots), "sampled texture");
-			if (contiguous_slot_count(std::move(sampler_slots), "sampler") != result.resource_counts.samplers) [[unlikely]]
+			std::sort(sampler_registers.begin(), sampler_registers.end());
+			if (std::adjacent_find(sampler_registers.begin(), sampler_registers.end()) != sampler_registers.end())
+			    [[unlikely]]
+			{
+				throw std::invalid_argument("MNGL HLSL sampler registers must be unique");
+			}
+			if (samplers.size() != sampled_textures.size()) [[unlikely]]
 			{
 				throw std::invalid_argument(
 				    "MNGL sampled textures and samplers must use matching register indices");
 			}
-			result.resource_counts.storage_textures =
-			    contiguous_slot_count(std::move(storage_texture_slots), "storage texture");
-			result.resource_counts.storage_buffers =
-			    contiguous_slot_count(std::move(storage_buffer_slots), "storage buffer");
-			result.resource_counts.read_write_storage_textures = contiguous_slot_count(
-			    std::move(read_write_storage_texture_slots), "read-write storage texture");
-			result.resource_counts.read_write_storage_buffers = contiguous_slot_count(
-			    std::move(read_write_storage_buffer_slots), "read-write storage buffer");
+
+			auto append_resources = [&](const resource_list& declarations, shader_resource_kind kind)
+			{
+				for (const auto* declaration : declarations)
+				{
+					result.resources.push_back({.name = declaration->name,
+					                            .kind = kind,
+					                            .slot = declaration->binding_slot});
+				}
+			};
+			append_resources(sampled_textures, shader_resource_kind::sampled_texture);
+			append_resources(storage_textures, shader_resource_kind::storage_texture);
+			append_resources(storage_buffers, shader_resource_kind::storage_buffer);
+			append_resources(read_write_storage_textures,
+			                 shader_resource_kind::read_write_storage_texture);
+			append_resources(read_write_storage_buffers,
+			                 shader_resource_kind::read_write_storage_buffer);
+			result.resource_counts.samplers = static_cast<std::uint32_t>(sampled_textures.size());
+			result.resource_counts.storage_textures = static_cast<std::uint32_t>(storage_textures.size());
+			result.resource_counts.storage_buffers = static_cast<std::uint32_t>(storage_buffers.size());
+			result.resource_counts.read_write_storage_textures =
+			    static_cast<std::uint32_t>(read_write_storage_textures.size());
+			result.resource_counts.read_write_storage_buffers =
+			    static_cast<std::uint32_t>(read_write_storage_buffers.size());
 			return result;
 		}
 
@@ -643,6 +700,10 @@
 
 			static const std::regex comments(R"(//[^\r\n]*|/\*[\s\S]*?\*/)");
 			source = std::regex_replace(source, comments, "");
+			if (options.source_language == shader_source_language::hlsl)
+			{
+				reject_unsupported_hlsl_preprocessing(source);
+			}
 
 			auto parse_dimension = [](const std::string& value)
 			{
@@ -740,3 +801,4 @@
 
 			throw std::invalid_argument("Unsupported shader source language");
 		}
+

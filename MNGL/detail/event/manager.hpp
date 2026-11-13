@@ -13,14 +13,17 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace mngl
 {
 	class input;
+	class imgui_context;
 	inline void poll_events();
 
 	template <typename T>
@@ -28,6 +31,134 @@ namespace mngl
 
 	namespace detail
 	{
+		struct mouse_pointer_event
+		{
+			SDL_MouseID mouse_id{};
+			SDL_WindowID window_id{};
+			float x{};
+			float y{};
+		};
+
+		class mouse_pointer_tracker
+		{
+		public:
+			void observe(const SDL_Event& event)
+			{
+				SDL_WindowID window_id = 0;
+				SDL_MouseID mouse_id = 0;
+				float x = 0.0f;
+				float y = 0.0f;
+
+				switch (event.type)
+				{
+				case SDL_EVENT_MOUSE_MOTION:
+					window_id = event.motion.windowID;
+					mouse_id = event.motion.which;
+					x = event.motion.x;
+					y = event.motion.y;
+					break;
+				case SDL_EVENT_MOUSE_BUTTON_DOWN:
+				case SDL_EVENT_MOUSE_BUTTON_UP:
+					window_id = event.button.windowID;
+					mouse_id = event.button.which;
+					x = event.button.x;
+					y = event.button.y;
+					break;
+				case SDL_EVENT_MOUSE_WHEEL:
+					window_id = event.wheel.windowID;
+					mouse_id = event.wheel.which;
+					x = event.wheel.mouse_x;
+					y = event.wheel.mouse_y;
+					break;
+				case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+				{
+					std::lock_guard lock(m_mutex);
+					if (const auto window = m_windows.find(event.window.windowID); window != m_windows.end())
+					{
+						window->second.latest_mouse_id.reset();
+					}
+					return;
+				}
+				case SDL_EVENT_MOUSE_REMOVED:
+				{
+					std::lock_guard lock(m_mutex);
+					for (auto window = m_windows.begin(); window != m_windows.end();)
+					{
+						window->second.positions.erase(event.mdevice.which);
+						if (window->second.latest_mouse_id == event.mdevice.which)
+						{
+							window->second.latest_mouse_id.reset();
+						}
+						if (window->second.positions.empty() && !window->second.latest_mouse_id)
+						{
+							window = m_windows.erase(window);
+						}
+						else
+						{
+							++window;
+						}
+					}
+					return;
+				}
+				case SDL_EVENT_WINDOW_DESTROYED:
+				{
+					std::lock_guard lock(m_mutex);
+					m_windows.erase(event.window.windowID);
+					return;
+				}
+				default:
+					return;
+				}
+
+				if (window_id == 0)
+				{
+					return;
+				}
+
+				std::lock_guard lock(m_mutex);
+				auto& window = m_windows[window_id];
+				window.latest_mouse_id = mouse_id;
+				window.positions.insert_or_assign(mouse_id, mouse_pointer_event{mouse_id, window_id, x, y});
+			}
+
+			[[nodiscard]] std::optional<mouse_pointer_event> latest_for_window(SDL_WindowID window_id) const
+			{
+				std::lock_guard lock(m_mutex);
+				const auto window = m_windows.find(window_id);
+				if (window == m_windows.end() || !window->second.latest_mouse_id)
+				{
+					return std::nullopt;
+				}
+				const auto position = window->second.positions.find(*window->second.latest_mouse_id);
+				return position == window->second.positions.end() ? std::nullopt
+				                                                  : std::optional(position->second);
+			}
+
+			[[nodiscard]] std::optional<mouse_pointer_event> for_mouse(SDL_WindowID window_id,
+			                                                           SDL_MouseID mouse_id) const
+			{
+				std::lock_guard lock(m_mutex);
+				const auto window = m_windows.find(window_id);
+				if (window == m_windows.end())
+				{
+					return std::nullopt;
+				}
+				const auto position = window->second.positions.find(mouse_id);
+				return position == window->second.positions.end() ? std::nullopt
+				                                                  : std::optional(position->second);
+			}
+
+		private:
+			struct window_state
+			{
+				std::optional<SDL_MouseID> latest_mouse_id;
+				std::unordered_map<SDL_MouseID, mouse_pointer_event> positions;
+			};
+
+			mutable std::mutex m_mutex;
+			std::unordered_map<SDL_WindowID, window_state> m_windows;
+		};
+
 		struct event_subscription_state
 		{
 			std::atomic_bool connected = true;
@@ -120,8 +251,8 @@ namespace mngl
 					auto listeners = snapshot_listeners<T>();
 					if (!listeners.empty())
 					{
-						event_collector->emplace_back(
-						    [event, listeners = std::move(listeners)] { dispatch_typed_event(event, listeners); });
+						event_collector->emplace_back([event, listeners = std::move(listeners)]
+						                              { dispatch_typed_event(event, listeners); });
 					}
 				}
 				else
@@ -158,6 +289,7 @@ namespace mngl
 	private:
 		friend class event_connection;
 		friend class input;
+		friend class imgui_context;
 		friend void poll_events();
 
 		using deferred_callback = detail::move_only_function<void()>;
@@ -175,7 +307,20 @@ namespace mngl
 		static inline thread_local std::vector<deferred_callback>* event_collector = nullptr;
 		static inline std::mutex imgui_input_events_mutex;
 		static inline std::vector<detail::queued_imgui_input_event> imgui_input_events;
+		static inline detail::mouse_pointer_tracker mouse_pointer_events;
 		static inline std::atomic_bool imgui_input_enabled = false;
+
+		[[nodiscard]] static std::optional<detail::mouse_pointer_event> latest_mouse_pointer_for_window(
+		    SDL_WindowID window_id)
+		{
+			return mouse_pointer_events.latest_for_window(window_id);
+		}
+
+		[[nodiscard]] static std::optional<detail::mouse_pointer_event> mouse_pointer_for_window(
+		    SDL_WindowID window_id, SDL_MouseID mouse_id)
+		{
+			return mouse_pointer_events.for_mouse(window_id, mouse_id);
+		}
 
 		static std::vector<detail::queued_imgui_input_event> take_owned_imgui_input_events()
 		{
@@ -195,7 +340,7 @@ namespace mngl
 
 		template <event_payload T>
 		static void dispatch_typed_event(const T& event,
-		                                const std::vector<std::shared_ptr<listener<T>>>& listeners)
+		                                 const std::vector<std::shared_ptr<listener<T>>>& listeners)
 		{
 			std::lock_guard lock(dispatch_mutex);
 			for (const auto& listener : listeners)
@@ -225,7 +370,8 @@ namespace mngl
 
 		void queue_sdl_event(const SDL_Event& event)
 		{
-			// Copy pointer-backed SDL fields into typed payloads before the event leaves the watcher.
+			// Copy pointer-backed SDL fields into typed payloads before the event
+			// leaves the watcher.
 			std::vector<deferred_callback> callbacks;
 			auto* previous_collector = std::exchange(event_collector, &callbacks);
 			try
@@ -344,6 +490,7 @@ namespace mngl
 			auto* manager = static_cast<event_manager*>(user_data);
 			try
 			{
+				mouse_pointer_events.observe(*event);
 				queue_imgui_input_event(*event);
 				manager->queue_sdl_event(*event);
 			}
@@ -633,9 +780,10 @@ namespace mngl
 			case event_type::text_editing_candidates:
 				if (!listeners_for<text_editing_candidates>().empty())
 				{
-					text_editing_candidates candidates{
-					    {{type, ts}, e.edit_candidates.windowID}, {}, e.edit_candidates.selected_candidate,
-					    e.edit_candidates.horizontal};
+					text_editing_candidates candidates{{{type, ts}, e.edit_candidates.windowID},
+					                                   {},
+					                                   e.edit_candidates.selected_candidate,
+					                                   e.edit_candidates.horizontal};
 					const auto candidate_count = std::max(e.edit_candidates.num_candidates, 0);
 					if (e.edit_candidates.candidates)
 					{
@@ -1072,8 +1220,11 @@ namespace mngl
 				if (e.type >= SDL_EVENT_USER && e.type < SDL_EVENT_LAST &&
 				    !listeners_for<user_event>().empty())
 				{
-					emit(user_event{{static_cast<event_type>(e.type), ts}, e.user.windowID, e.user.code,
-					                e.user.data1, e.user.data2});
+					emit(user_event{{static_cast<event_type>(e.type), ts},
+					                e.user.windowID,
+					                e.user.code,
+					                e.user.data1,
+					                e.user.data2});
 				}
 				break;
 			}
@@ -1114,9 +1265,9 @@ namespace mngl
 	{
 		SDL_PumpEvents();
 
-		// Consume a fixed snapshot of the SDL queue. This keeps the standalone event loop
-		// from filling SDL's bounded queue while leaving events posted during this drain
-		// for the next call.
+		// Consume a fixed snapshot of the SDL queue. This keeps the standalone event
+		// loop from filling SDL's bounded queue while leaving events posted during
+		// this drain for the next call.
 		constexpr std::size_t event_batch_size = 64;
 		std::array<SDL_Event, event_batch_size> events{};
 		int remaining_events = SDL_PeepEvents(nullptr, 0, SDL_PEEKEVENT, SDL_EVENT_FIRST, SDL_EVENT_LAST);
@@ -1129,8 +1280,8 @@ namespace mngl
 		while (remaining_events > 0)
 		{
 			const int requested = std::min(remaining_events, static_cast<int>(events.size()));
-			const int removed = SDL_PeepEvents(events.data(), requested, SDL_GETEVENT, SDL_EVENT_FIRST,
-			                                   SDL_EVENT_LAST);
+			const int removed =
+			    SDL_PeepEvents(events.data(), requested, SDL_GETEVENT, SDL_EVENT_FIRST, SDL_EVENT_LAST);
 			if (removed < 0)
 			{
 				SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Unable to drain the SDL event queue: %s",
@@ -1147,4 +1298,3 @@ namespace mngl
 		event_manager::dispatch_pending_events();
 	}
 } // namespace mngl
-

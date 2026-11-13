@@ -8,8 +8,8 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -101,7 +101,8 @@ namespace mngl
 
 		[[nodiscard]] bool hit_testing_enabled() const noexcept { return m_hit_testing_enabled; }
 
-		// The position is in logical window coordinates, with the origin at the top-left.
+		// The position is in logical window coordinates, with the origin at the
+		// top-left.
 		[[nodiscard]] std::optional<hit_test_result> hit_test(glm::vec2 window_position) const
 		{
 			if (!m_hit_testing_enabled) [[unlikely]]
@@ -318,7 +319,8 @@ namespace mngl
 
 			void ensure_active() const
 			{
-				if (!m_owner || m_generation == 0 || m_owner->m_active_frame_generation != m_generation) [[unlikely]]
+				if (!m_owner || m_generation == 0 || m_owner->m_active_frame_generation != m_generation)
+				    [[unlikely]]
 				{
 					throw std::logic_error("Render-window frame scope is no longer active");
 				}
@@ -354,15 +356,16 @@ namespace mngl
 		{
 			if (!m_frame || !m_swapchain_texture) [[unlikely]]
 			{
-				throw std::logic_error(
-				    "The swapchain texture is only available during an active window frame");
+				throw std::logic_error("The swapchain texture is only available during "
+				                       "an active window frame");
 			}
 			return *m_swapchain_texture;
 		}
 
 		[[nodiscard]] const gpu::device& gpu_device() const noexcept { return m_context.gpu_device(); }
 
-		// Without a custom view, coordinates start at the bottom-left and the shorter target side is 1.
+		// Without a custom view, coordinates start at the bottom-left and the shorter
+		// target side is 1.
 		[[nodiscard]] glm::vec2 coordinate_size() const
 		{
 			if (m_active_texture_target)
@@ -480,7 +483,8 @@ namespace mngl
 					    ::mngl::texture(m_command_buffer->acquire_swapchain_texture(*this));
 					if (!swapchain_target.valid())
 					{
-						// No swapchain texture was acquired, so discard the empty command buffer and skip.
+						// No swapchain texture was acquired, so discard the empty command
+						// buffer and skip.
 						reset_frame_state();
 						m_frame_skipped = true;
 						return;
@@ -617,8 +621,8 @@ namespace mngl
 			synchronize_texture();
 			if (!m_target.valid()) [[unlikely]]
 			{
-				throw std::logic_error(
-				    "Cannot access a resizable texture while its window has zero pixel size");
+				throw std::logic_error("Cannot access a resizable texture while its "
+				                       "window has zero pixel size");
 			}
 			return m_target;
 		}
@@ -643,8 +647,14 @@ namespace mngl
 		void synchronize_texture()
 		{
 			const auto requested_size = m_window.pixel_size();
-			if (requested_size.x == 0 || requested_size.y == 0 ||
-			    (m_target.valid() && m_target.size() == requested_size))
+			if (requested_size.x == 0 || requested_size.y == 0)
+			{
+				return;
+			}
+			const auto requested_format =
+			    m_format == gpu::texture_format::invalid ? m_window.swapchain_texture_format() : m_format;
+			if (m_target.valid() && m_target.size() == requested_size &&
+			    m_target.format() == requested_format)
 			{
 				return;
 			}
@@ -653,7 +663,7 @@ namespace mngl
 				throw std::logic_error("Cannot resize a texture while it is being rendered to");
 			}
 
-			auto replacement = m_window.create_texture(requested_size, m_format, m_usage);
+			auto replacement = m_window.create_texture(requested_size, requested_format, m_usage);
 			if (m_target.valid())
 			{
 				if (const auto target_view = m_target.current_view())
@@ -679,4 +689,3 @@ namespace mngl
 		bool m_has_sprite_size = false;
 	};
 } // namespace mngl
-
