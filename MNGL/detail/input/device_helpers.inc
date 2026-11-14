@@ -266,8 +266,9 @@
 				{
 					button.down = false;
 					button.released = true;
-					button.release_reason = input_release_reason::device_removed;
 				}
+				if (button.released)
+					button.release_reason = input_release_reason::device_removed;
 			}
 			std::fill(state.axes.begin(), state.axes.end(), 0);
 			std::fill(state.hats.begin(), state.hats.end(), hat_position::centered);
@@ -285,8 +286,9 @@
 				{
 					button.down = false;
 					button.released = true;
-					button.release_reason = input_release_reason::device_removed;
 				}
+				if (button.released)
+					button.release_reason = input_release_reason::device_removed;
 			}
 			state.axes.fill(0);
 			state.handle.reset();
@@ -316,3 +318,4 @@
 			for (std::size_t i = 0; i < state.axes.size(); ++i)
 				state.axes[i] = SDL_GetGamepadAxis(state.handle.get(), static_cast<SDL_GamepadAxis>(i));
 		}
+

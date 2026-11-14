@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <charconv>
 
@@ -9,6 +10,7 @@
 #include <glm/glm.hpp>
 #include <functional>
 #include <initializer_list>
+#include <ios>
 #include <ostream>
 #include <concepts>
 #include <stdexcept>
@@ -19,6 +21,13 @@ namespace mngl
 {
 	class color
 	{
+	private:
+		static int stream_format_index()
+		{
+			static const int index = std::ios_base::xalloc();
+			return index;
+		}
+
 	public:
 		template <std::integral R, std::integral G, std::integral B>
 		constexpr color(R r, G g, B b) : color(r, g, b, 255)
@@ -105,15 +114,15 @@ namespace mngl
 		}
 		constexpr explicit operator SDL_Color() const
 		{
-			return SDL_Color{static_cast<std::uint8_t>(rgba.r * 255), static_cast<std::uint8_t>(rgba.g * 255),
-			                 static_cast<std::uint8_t>(rgba.b * 255),
-			                 static_cast<std::uint8_t>(rgba.a * 255)};
+			return SDL_Color{static_cast<std::uint8_t>(rgba.x * 255), static_cast<std::uint8_t>(rgba.y * 255),
+			                 static_cast<std::uint8_t>(rgba.z * 255),
+			                 static_cast<std::uint8_t>(rgba.w * 255)};
 		}
 		constexpr explicit operator std::uint32_t() const
 		{
-			return (static_cast<std::uint32_t>(rgba.r * 255) << 24) |
-			       (static_cast<std::uint32_t>(rgba.g * 255) << 16) |
-			       (static_cast<std::uint32_t>(rgba.b * 255) << 8) | static_cast<std::uint32_t>(rgba.a * 255);
+			return (static_cast<std::uint32_t>(rgba.x * 255) << 24) |
+			       (static_cast<std::uint32_t>(rgba.y * 255) << 16) |
+			       (static_cast<std::uint32_t>(rgba.z * 255) << 8) | static_cast<std::uint32_t>(rgba.w * 255);
 		}
 		template <std::floating_point RGB, glm::qualifier Q> constexpr operator glm::vec<3, RGB, Q>() const
 		{
@@ -139,8 +148,8 @@ namespace mngl
 		constexpr glm::vec3 rgb_glsl() const { return glm::vec3(rgba); }
 		constexpr glm::uvec3 rgb_255() const { return glm::uvec3(rgba * 255.f); }
 		constexpr std::uint32_t rgb_uint() const { return static_cast<std::uint32_t>(*this) >> 8; }
-		constexpr std::uint8_t gray_255() const { return static_cast<std::uint8_t>(rgba.r * 255); }
-		constexpr float gray_glsl() const { return rgba.r; }
+		constexpr std::uint8_t gray_255() const { return static_cast<std::uint8_t>(rgba.x * 255); }
+		constexpr float gray_glsl() const { return rgba.x; }
 		std::string hex() const { return static_cast<std::string>(*this); }
 
 		// hsv or hsl
@@ -150,14 +159,14 @@ namespace mngl
 
 		constexpr static color from_hsv(glm::uvec3 hsv)
 		{
-			return from_hsv(glm::vec3{hsv.r / 360.f, hsv.g / 255.f, hsv.b / 255.f});
+			return from_hsv(glm::vec3{hsv.x / 360.f, hsv.y / 255.f, hsv.z / 255.f});
 		}
 		constexpr glm::uvec3 to_hsv_255() const
 		{
 			auto hsv = to_hsv();
-			return {static_cast<std::uint32_t>(hsv.r * 360.f + 0.5f),
-			        static_cast<std::uint32_t>(hsv.g * 255.f + 0.5f),
-			        static_cast<std::uint32_t>(hsv.b * 255.f + 0.5f)};
+			return {static_cast<std::uint32_t>(hsv.x * 360.f + 0.5f),
+			        static_cast<std::uint32_t>(hsv.y * 255.f + 0.5f),
+			        static_cast<std::uint32_t>(hsv.z * 255.f + 0.5f)};
 		}
 
 		constexpr static color from_hsl(glm::vec3 hsl) { return {hsl_to_rgb(hsl), 1.f}; }
@@ -165,14 +174,14 @@ namespace mngl
 
 		constexpr static color from_hsl(glm::uvec3 hsl)
 		{
-			return from_hsl(glm::vec3{hsl.r / 360.f, hsl.g / 255.f, hsl.b / 255.f});
+			return from_hsl(glm::vec3{hsl.x / 360.f, hsl.y / 255.f, hsl.z / 255.f});
 		}
 		constexpr glm::uvec3 to_hsl_255() const
 		{
 			auto hsl = to_hsl();
-			return {static_cast<std::uint32_t>(hsl.r * 360.f + 0.5f),
-			        static_cast<std::uint32_t>(hsl.g * 255.f + 0.5f),
-			        static_cast<std::uint32_t>(hsl.b * 255.f + 0.5f)};
+			return {static_cast<std::uint32_t>(hsl.x * 360.f + 0.5f),
+			        static_cast<std::uint32_t>(hsl.y * 255.f + 0.5f),
+			        static_cast<std::uint32_t>(hsl.z * 255.f + 0.5f)};
 		}
 
 		color& operator=(const color& other)
@@ -219,14 +228,14 @@ namespace mngl
 
 		constexpr color operator&(const color& other) const
 		{
-			return color(glm::vec4(std::min(rgba.r, other.rgba.r), std::min(rgba.g, other.rgba.g),
-			                       std::min(rgba.b, other.rgba.b), std::min(rgba.a, other.rgba.a)));
+			return color(glm::vec4(std::min(rgba.x, other.rgba.x), std::min(rgba.y, other.rgba.y),
+			                       std::min(rgba.z, other.rgba.z), std::min(rgba.w, other.rgba.w)));
 		}
 
 		constexpr color operator|(const color& other) const
 		{
-			return color(glm::vec4(std::max(rgba.r, other.rgba.r), std::max(rgba.g, other.rgba.g),
-			                       std::max(rgba.b, other.rgba.b), std::max(rgba.a, other.rgba.a)));
+			return color(glm::vec4(std::max(rgba.x, other.rgba.x), std::max(rgba.y, other.rgba.y),
+			                       std::max(rgba.z, other.rgba.z), std::max(rgba.w, other.rgba.w)));
 		}
 
 		constexpr static color lerp(const color& a, const color& b, float factor)
@@ -236,7 +245,7 @@ namespace mngl
 
 		constexpr float luminance() const
 		{
-			return linearize(rgba.r) * 0.2126f + linearize(rgba.g) * 0.7152f + linearize(rgba.b) * 0.0722f;
+			return linearize(rgba.x) * 0.2126f + linearize(rgba.y) * 0.7152f + linearize(rgba.z) * 0.0722f;
 		}
 
 		constexpr static float luminance(const color& c) { return c.luminance(); }
@@ -260,7 +269,7 @@ namespace mngl
 			if (c <= 0.04045f)
 				return c / 12.92f;
 			else
-				return std::pow((c + 0.055f) / 1.055f, 2.4f);
+				return pow_12_over_5((c + 0.055f) / 1.055f);
 		}
 
 		constexpr static float gamma(float c)
@@ -268,32 +277,41 @@ namespace mngl
 			if (c <= 0.0031308f)
 				return c * 12.92f;
 			else
-				return 1.055f * std::pow(c, 1 / 2.4f) - 0.055f;
+				return 1.055f * pow_5_over_12(c) - 0.055f;
 		}
 
-		constexpr color premultiplied() { return {glm::clamp(rgb_glsl() * a, 0.f, 1.f), a}; }
+		constexpr color premultiplied() { return {glm::clamp(rgb_glsl() * rgba.w, 0.f, 1.f), rgba.w}; }
 
-		color& premultiply() { return (*this) = {glm::clamp(rgb_glsl() * a, 0.f, 1.f), a}; }
+		color& premultiply() { return (*this) = {glm::clamp(rgb_glsl() * rgba.w, 0.f, 1.f), rgba.w}; }
 
 		constexpr color unmultiplied()
 		{
-			return a == 0 ? glm::vec4{0, 0, 0, a} : glm::vec4{glm::clamp(rgb_glsl() / a, 0.f, 1.f), a};
+			return rgba.w == 0 ? glm::vec4{0, 0, 0, rgba.w}
+			                   : glm::vec4{glm::clamp(rgb_glsl() / rgba.w, 0.f, 1.f), rgba.w};
 		}
 
 		color& unmultiply()
 		{
-			return (*this) =
-			           a == 0 ? glm::vec4{0, 0, 0, a} : glm::vec4{glm::clamp(rgb_glsl() / a, 0.f, 1.f), a};
+			return (*this) = rgba.w == 0 ? glm::vec4{0, 0, 0, rgba.w}
+			                            : glm::vec4{glm::clamp(rgb_glsl() / rgba.w, 0.f, 1.f), rgba.w};
 		}
 
 		struct blends
 		{
-			// premultiplied делается внутри!!!
-			static color normal(color a, color b)
+			// Arguments and result use straight alpha; a is composited over b.
+			static constexpr color normal(color a, color b)
 			{
-				a.premultiply();
-				b.premultiply();
-				return glm::clamp(a.rgba + b.rgba * (1 - a.a), 0.f, 1.f);
+				if (a.rgba.w == 0.f)
+					return b;
+				if (b.rgba.w == 0.f)
+					return a;
+
+				const float out_alpha = a.rgba.w + b.rgba.w * (1.f - a.rgba.w);
+				const glm::vec3 out_premultiplied =
+				    a.rgb_glsl() * a.rgba.w + b.rgb_glsl() * b.rgba.w * (1.f - a.rgba.w);
+				const glm::vec3 out_rgb = out_premultiplied / out_alpha;
+				return {std::clamp(out_rgb.x, 0.f, 1.f), std::clamp(out_rgb.y, 0.f, 1.f),
+				        std::clamp(out_rgb.z, 0.f, 1.f), out_alpha};
 			}
 
 			static color additive(color a, color b)
@@ -332,11 +350,22 @@ namespace mngl
 				frgb,
 				hex
 			};
-			inline static fmts last_format = fmts::standard;
 			struct color_fmt
 			{
 				fmts fmt;
 				explicit color_fmt(fmts fmt) : fmt(fmt) {}
+
+			private:
+				std::ostream& apply(std::ostream& out) const
+				{
+					out.iword(color::stream_format_index()) = static_cast<long>(fmt);
+					return out;
+				}
+
+				friend std::ostream& operator<<(std::ostream& out, color_fmt fmt)
+				{
+					return fmt.apply(out);
+				}
 			};
 
 			inline static const auto rgba255 = color_fmt(fmts::rgba255);
@@ -345,12 +374,6 @@ namespace mngl
 			inline static const auto frgb = color_fmt(fmts::frgb);
 			inline static const auto hex = color_fmt(fmts::hex);
 			inline static const auto standard = color_fmt(fmts::standard);
-
-			friend std::ostream& operator<<(std::ostream& out, color_fmt fmt)
-			{
-				last_format = fmt.fmt;
-				return out;
-			}
 		};
 
 		static constexpr color fromHSV(glm::vec3 value) { return from_hsv(value); }
@@ -366,7 +389,11 @@ namespace mngl
 
 		friend std::ostream& operator<<(std::ostream& out, color col)
 		{
-			auto fmt = formats::last_format;
+			const auto raw_format = out.iword(stream_format_index());
+			const auto fmt = raw_format >= static_cast<long>(formats::fmts::standard) &&
+			                         raw_format <= static_cast<long>(formats::fmts::hex)
+			                     ? static_cast<formats::fmts>(raw_format)
+			                     : formats::fmts::standard;
 			switch (fmt)
 			{
 			case formats::fmts::standard:
@@ -399,26 +426,80 @@ namespace mngl
 		}
 
 	private:
-		static glm::vec3 rgb_to_hsv(glm::vec3 c)
+		// C++23 does not make std::pow constant-evaluable. These roots cover the
+		// non-negative inputs used by the sRGB transfer functions above.
+		static constexpr float nth_root(float value, int degree)
 		{
-			float mn = glm::min(c.r, glm::min(c.g, c.b));
-			float mx = glm::max(c.r, glm::max(c.g, c.b));
+			if (value <= 0.f)
+				return 0.f;
+
+			int scale_exponent = 0;
+			while (value > 1.f && scale_exponent < 256)
+			{
+				value *= 0.5f;
+				++scale_exponent;
+			}
+			if (scale_exponent == 256)
+				return value;
+
+			const int root_scale_exponent = scale_exponent / degree;
+			float remainder_scale = 1.f;
+			for (int exponent = 0; exponent < scale_exponent % degree; ++exponent)
+				remainder_scale *= 2.f;
+			value *= remainder_scale;
+
+			float guess = value > 1.f ? value : 1.f;
+			for (int iteration = 0; iteration < 64; ++iteration)
+			{
+				float denominator = 1.f;
+				for (int exponent = 1; exponent < degree; ++exponent)
+					denominator *= guess;
+
+				const float next =
+				    ((degree - 1) * guess + value / denominator) / static_cast<float>(degree);
+				if (next == guess)
+					return guess;
+				guess = next;
+			}
+
+			float result_scale = 1.f;
+			for (int exponent = 0; exponent < root_scale_exponent; ++exponent)
+				result_scale *= 2.f;
+			return guess * result_scale;
+		}
+
+		static constexpr float pow_12_over_5(float value)
+		{
+			const float square = value * value;
+			return square * nth_root(square, 5);
+		}
+
+		static constexpr float pow_5_over_12(float value)
+		{
+			const float cube_root = nth_root(value, 3);
+			return cube_root * nth_root(nth_root(cube_root, 2), 2);
+		}
+
+		static constexpr glm::vec3 rgb_to_hsv(glm::vec3 c)
+		{
+			float mn = glm::min(c.x, glm::min(c.y, c.z));
+			float mx = glm::max(c.x, glm::max(c.y, c.z));
 			float d = mx - mn, h = 0.f, s = (mx < 1e-6f) ? 0.f : d / mx;
 
 			if (d > 1e-6f)
 			{
-				if (c.r == mx)
-					h = (c.g - c.b) / d + (c.g < c.b ? 6.f : 0.f);
-				else if (c.g == mx)
-					h = (c.b - c.r) / d + 2.f;
+				if (c.x == mx)
+					h = (c.y - c.z) / d + (c.y < c.z ? 6.f : 0.f);
+				else if (c.y == mx)
+					h = (c.z - c.x) / d + 2.f;
 				else
-					h = (c.r - c.g) / d + 4.f;
+					h = (c.x - c.y) / d + 4.f;
 				h /= 6.f;
 			}
 			return {h, s, mx};
 		}
 
-		static glm::vec3 hsv_to_rgb(glm::vec3 c)
+		static constexpr glm::vec3 hsv_to_rgb(glm::vec3 c)
 		{
 			float h = c.x * 6.f, s = c.y, v = c.z;
 			if (s < 1e-6f)
@@ -443,27 +524,27 @@ namespace mngl
 			return {v, v, v};
 		}
 
-		static glm::vec3 rgb_to_hsl(glm::vec3 c)
+		static constexpr glm::vec3 rgb_to_hsl(glm::vec3 c)
 		{
-			float mn = glm::min(c.r, glm::min(c.g, c.b));
-			float mx = glm::max(c.r, glm::max(c.g, c.b));
+			float mn = glm::min(c.x, glm::min(c.y, c.z));
+			float mx = glm::max(c.x, glm::max(c.y, c.z));
 			float d = mx - mn, l = (mx + mn) * 0.5f;
 			float h = 0.f, s = (d < 1e-6f) ? 0.f : d / (l > 0.5f ? 2.f - mx - mn : mx + mn);
 
 			if (d > 1e-6f)
 			{
-				if (c.r == mx)
-					h = (c.g - c.b) / d + (c.g < c.b ? 6.f : 0.f);
-				else if (c.g == mx)
-					h = (c.b - c.r) / d + 2.f;
+				if (c.x == mx)
+					h = (c.y - c.z) / d + (c.y < c.z ? 6.f : 0.f);
+				else if (c.y == mx)
+					h = (c.z - c.x) / d + 2.f;
 				else
-					h = (c.r - c.g) / d + 4.f;
+					h = (c.x - c.y) / d + 4.f;
 				h /= 6.f;
 			}
 			return {h, s, l};
 		}
 
-		static glm::vec3 hsl_to_rgb(glm::vec3 c)
+		static constexpr glm::vec3 hsl_to_rgb(glm::vec3 c)
 		{
 			float h = c.x, s = c.y, l = c.z;
 			if (s < 1e-6f)
@@ -532,3 +613,4 @@ namespace std
 		}
 	};
 } // namespace std
+

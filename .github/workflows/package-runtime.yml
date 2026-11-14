@@ -2,10 +2,9 @@ name: Package MNGL runtime
 
 on:
   push:
-    branches: [main]
+    branches: [main, "V-*"]
     tags: ["v*"]
     paths-ignore:
-      - ".github/workflows/**"
       - "README.md"
       - "docs/**"
   workflow_dispatch:
@@ -30,7 +29,7 @@ jobs:
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             version="${GITHUB_REF_NAME#v}"
           else
-            version="0.0.0+ci.${GITHUB_RUN_NUMBER}"
+            version="0.0.0+ci.${GITHUB_SHA:0:12}"
           fi
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
             echo "Expected a semantic version such as 1.2.3; got: $version" >&2
@@ -42,7 +41,7 @@ jobs:
     needs: version
     runs-on: [self-hosted, linux, x64]
     container:
-      image: node:24-bookworm
+      image: node:24-trixie
       options: --user 0:0
     defaults:
       run:
@@ -76,7 +75,7 @@ jobs:
       - name: Install Linux runtime build tools
         run: |
           apt-get update
-          apt-get install --yes sudo build-essential cmake ninja-build git pkg-config python3 bison flex patchelf binutils libjson-perl libvulkan-dev libfreetype-dev libxrandr-dev
+          apt-get install --yes sudo build-essential cmake ninja-build git pkg-config python3 bison flex patchelf binutils libjson-perl libvulkan-dev libfreetype-dev libxrandr-dev gh
 
       - name: Set up pinned SDL3 and SDL3_image
         id: sdl
@@ -109,7 +108,10 @@ jobs:
 
       - name: Restore runner workspace ownership
         if: always()
-        run: chown -R 1000:1000 "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+        run: |
+          runner_uid="$(stat -c '%u' "$RUNNER_TEMP/_github_workflow/event.json")"
+          runner_gid="$(stat -c '%g' "$RUNNER_TEMP/_github_workflow/event.json")"
+          chown -R "$runner_uid:$runner_gid" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
 
   publish-release:
     needs: [version, runtime-linux]

@@ -100,6 +100,9 @@ namespace mngl
 	{
 		float content_scale;
 	};
+	struct display_usable_bounds_changed : display_event
+	{
+	};
 
 	// --- Window ---
 	struct window_shown : window_event
@@ -178,7 +181,11 @@ namespace mngl
 	struct window_destroyed : window_event
 	{
 	};
+	struct window_hdr_state_changed : window_event
+	{
+	};
 
 	// --- Keyboard ---
 
 } // namespace mngl
+

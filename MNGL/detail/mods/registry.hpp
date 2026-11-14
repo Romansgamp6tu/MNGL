@@ -1,6 +1,7 @@
 #pragma once
 
 #include "slots.hpp"
+#include "../atomic_file.hpp"
 
 namespace mngl::mods
 {
@@ -389,12 +390,9 @@ namespace mngl::mods
 
 			if (!path.parent_path().empty())
 				std::filesystem::create_directories(path.parent_path());
-			auto temporary = path;
-			temporary += ".tmp";
+			::mngl::detail::atomic_temporary_file temporary_file(path);
 			{
-				std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-				if (!output) [[unlikely]]
-					throw std::runtime_error("cannot create temporary settings file: " + temporary.string());
+				auto& output = temporary_file.stream();
 				output << "MNGL_MOD_SETTINGS\t1\n"
 				       << "# columns: mod_id, property_id, type, value (percent-encoded UTF-8)\n";
 				for (const auto& setting : records)
@@ -402,11 +400,9 @@ namespace mngl::mods
 					       << encode_setting_field(setting.property_id) << '\t'
 					       << encode_setting_field(setting.type) << '\t'
 					       << encode_setting_field(setting.value) << '\n';
-				output.flush();
-				if (!output) [[unlikely]]
-					throw std::runtime_error("failed while writing settings file: " + temporary.string());
 			}
-			replace_settings_file(temporary, path);
+			temporary_file.close();
+			temporary_file.replace(path);
 		}
 
 		[[nodiscard]] std::vector<diagnostic> diagnostics() const { return m_diagnostics->snapshot(); }
@@ -469,36 +465,6 @@ namespace mngl::mods
 				i += 2;
 			}
 			return result;
-		}
-
-		static void replace_settings_file(const std::filesystem::path& temporary,
-		                                  const std::filesystem::path& target)
-		{
-			std::error_code error;
-			std::filesystem::rename(temporary, target, error);
-			if (!error)
-				return;
-			if (!std::filesystem::exists(target)) [[unlikely]]
-				throw std::runtime_error("cannot replace settings file: " + error.message());
-
-			auto backup = target;
-			backup += ".bak";
-			std::error_code ignored;
-			std::filesystem::remove(backup, ignored);
-			error.clear();
-			std::filesystem::rename(target, backup, error);
-			if (error) [[unlikely]]
-				throw std::runtime_error("cannot back up existing settings file: " + error.message());
-
-			error.clear();
-			std::filesystem::rename(temporary, target, error);
-			if (error)
-			{
-				std::error_code restore_error;
-				std::filesystem::rename(backup, target, restore_error);
-				throw std::runtime_error("cannot install new settings file: " + error.message());
-			}
-			std::filesystem::remove(backup, ignored);
 		}
 
 		[[nodiscard]] mod_context for_mod(std::string mod_id,
@@ -627,3 +593,4 @@ namespace mngl::mods
 	}
 
 } // namespace mngl::mods
+

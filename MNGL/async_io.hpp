@@ -96,6 +96,7 @@ namespace mngl::async_io
 			bool io_succeeded = false;
 			bool io_cancelled = false;
 			bool close_queued = false;
+			bool close_queue_failed = false;
 			bool close_done = false;
 			bool close_succeeded = false;
 			bool close_cancelled = false;
@@ -415,7 +416,7 @@ namespace mngl::async_io
 				process_outcome(outcome, completed_requests);
 			}
 
-			retry_closes();
+			completed_requests += retry_closes();
 			return completed_requests;
 		}
 
@@ -434,22 +435,21 @@ namespace mngl::async_io
 			{
 				return 0;
 			}
-			retry_closes();
-
 			const auto max_timeout = static_cast<std::int64_t>(std::numeric_limits<Sint32>::max());
 			const auto timeout_ms = static_cast<Sint32>(std::min<std::int64_t>(timeout.count(), max_timeout));
 			SDL_AsyncIOOutcome outcome{};
-			std::size_t completed_requests = 0;
-			if (SDL_WaitAsyncIOResult(m_queue, &outcome, timeout_ms))
+			std::size_t completed_requests = retry_closes();
+			if (completed_requests == 0 && has_pending_tasks() &&
+			    SDL_WaitAsyncIOResult(m_queue, &outcome, timeout_ms))
 			{
 				process_outcome(outcome, completed_requests);
-				while (SDL_GetAsyncIOResult(m_queue, &outcome))
-				{
-					process_outcome(outcome, completed_requests);
-				}
+			}
+			while (SDL_GetAsyncIOResult(m_queue, &outcome))
+			{
+				process_outcome(outcome, completed_requests);
 			}
 
-			retry_closes();
+			completed_requests += retry_closes();
 			return completed_requests;
 		}
 
@@ -509,6 +509,19 @@ namespace mngl::async_io
 			{
 				throw std::logic_error("async I/O queue is closed");
 			}
+		}
+
+		[[nodiscard]] bool has_pending_tasks() const
+		{
+			for (const auto& [_, state] : m_requests)
+			{
+				std::lock_guard state_lock(state->mutex);
+				if (!state->io_done || state->close_queued)
+				{
+					return true;
+				}
+			}
+			return false;
 		}
 
 		request start_read(SDL_AsyncIO* file, std::uint64_t offset, std::uint64_t size,
@@ -573,8 +586,9 @@ namespace mngl::async_io
 			return request(std::move(state));
 		}
 
-		void retry_closes() noexcept
+		std::size_t retry_closes()
 		{
+			std::size_t completed_requests = 0;
 			for (auto& [_, state] : m_requests)
 			{
 				bool should_retry_close = false;
@@ -584,17 +598,18 @@ namespace mngl::async_io
 				}
 				if (should_retry_close)
 				{
-					try_queue_close(state);
+					completed_requests += try_queue_close(state) ? 1u : 0u;
 				}
 			}
+			return completed_requests;
 		}
 
-		void try_queue_close(const std::shared_ptr<detail::request_state>& state) noexcept
+		bool try_queue_close(const std::shared_ptr<detail::request_state>& state)
 		{
 			std::lock_guard state_lock(state->mutex);
 			if (!state->file || state->close_queued || !m_queue)
 			{
-				return;
+				return false;
 			}
 
 			if (SDL_CloseAsyncIO(state->file, state->flush_on_close, m_queue, state.get()))
@@ -602,7 +617,35 @@ namespace mngl::async_io
 				// A successful SDL_CloseAsyncIO invalidates the handle immediately.
 				state->file = nullptr;
 				state->close_queued = true;
+				return false;
 			}
+
+			// SDL leaves the handle valid when it cannot enqueue a close. Once the
+			// read/write itself has finished, expose this as a terminal operation
+			// failure, but keep the handle in the queue state and retry cleanup on
+			// subsequent poll/wait calls.
+			if (!state->io_done)
+			{
+				return false;
+			}
+			if (!state->close_queue_failed)
+			{
+				const auto close_error = detail::sdl_error_message("failed to queue async file close: ");
+				if (!state->error.empty())
+				{
+					state->error += "; ";
+				}
+				state->error += close_error;
+				state->close_queue_failed = true;
+			}
+			if (state->status == request_status::pending)
+			{
+				state->status = request_status::failed;
+				// The read/write has finished, so SDL no longer references this buffer.
+				std::vector<std::byte>().swap(state->buffer);
+				return true;
+			}
+			return false;
 		}
 
 		void process_outcome(const SDL_AsyncIOOutcome& outcome, std::size_t& completed_requests)
@@ -647,27 +690,32 @@ namespace mngl::async_io
 
 			bool retry_close = false;
 			bool final = false;
+			bool became_final = false;
 			{
 				std::lock_guard state_lock(state->mutex);
 				retry_close = state->io_done && state->file && !state->close_queued;
 				final = state->io_done && state->close_done;
 				if (final)
 				{
-					if (state->io_cancelled || state->close_cancelled)
+					if (state->status == request_status::pending)
 					{
-						state->status = request_status::cancelled;
-					}
-					else if (state->io_succeeded && state->close_succeeded)
-					{
-						state->status = request_status::completed;
-					}
-					else
-					{
-						state->status = request_status::failed;
-						if (state->error.empty())
+						if (state->io_cancelled || state->close_cancelled)
 						{
-							state->error = "async file request failed";
+							state->status = request_status::cancelled;
 						}
+						else if (state->io_succeeded && state->close_succeeded)
+						{
+							state->status = request_status::completed;
+						}
+						else
+						{
+							state->status = request_status::failed;
+							if (state->error.empty())
+							{
+								state->error = "async file request failed";
+							}
+						}
+						became_final = true;
 					}
 					// SDL has finished using the buffer. Only successful reads
 					// expose data; polling clients may retain request handles.
@@ -680,12 +728,12 @@ namespace mngl::async_io
 
 			if (retry_close)
 			{
-				try_queue_close(state);
+				completed_requests += try_queue_close(state) ? 1u : 0u;
 			}
 			if (final)
 			{
 				m_requests.erase(found);
-				++completed_requests;
+				completed_requests += became_final ? 1u : 0u;
 			}
 		}
 
@@ -699,19 +747,64 @@ namespace mngl::async_io
 
 			for (auto& [_, state] : m_requests)
 			{
-				try_queue_close(state);
+				try
+				{
+					try_queue_close(state);
+				}
+				catch (...)
+				{
+					// Destructors cannot report allocation or SDL callback failures.
+				}
 			}
 
 			SDL_DestroyAsyncIOQueue(std::exchange(m_queue, nullptr));
+			SDL_AsyncIOQueue* cleanup_queue = nullptr;
 			for (auto& [_, state] : m_requests)
 			{
 				std::lock_guard state_lock(state->mutex);
-				state->file = nullptr;
+				if (state->file)
+				{
+					if (!cleanup_queue)
+					{
+						cleanup_queue = SDL_CreateAsyncIOQueue();
+					}
+					if (cleanup_queue &&
+					    SDL_CloseAsyncIO(state->file, state->flush_on_close, cleanup_queue, nullptr))
+					{
+						state->file = nullptr;
+						state->close_queued = true;
+					}
+					else
+					{
+						SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+						            "SDL could not queue async file close during queue shutdown; file may remain open: %s",
+						            SDL_GetError());
+						try
+						{
+							if (!state->error.empty())
+							{
+								state->error += "; ";
+							}
+							state->error += detail::sdl_error_message(
+							    "failed to queue async file close during queue shutdown: ");
+						}
+						catch (...)
+						{
+						}
+					}
+				}
 				if (state->status == request_status::pending)
 				{
 					state->status = request_status::failed;
-					state->error = "async I/O queue was destroyed before the request was collected";
+					if (state->error.empty())
+					{
+						state->error = "async I/O queue was destroyed before the request was collected";
+					}
 				}
+			}
+			if (cleanup_queue)
+			{
+				SDL_DestroyAsyncIOQueue(cleanup_queue);
 			}
 			m_requests.clear();
 		}
@@ -729,3 +822,4 @@ namespace mngl::async_io
 	using Request = request;
 	using Queue = queue;
 } // namespace mngl::async_io
+

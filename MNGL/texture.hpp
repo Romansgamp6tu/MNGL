@@ -91,6 +91,7 @@ namespace mngl
 
 		// Uploaded textures can be sampled and used as color render targets by default.
 		static constexpr std::uint32_t default_upload_usage = usage::sampler | usage::color_target;
+		static constexpr pixel_format default_pixel_format = pixel_format::r8g8b8a8_unorm;
 
 		texture() = default;
 		texture(const texture&) = delete;
@@ -101,13 +102,13 @@ namespace mngl
 
 		// 1. Создание пустой текстуры (для Render Target или вычислительных шейдеров)
 		texture(const gpu::device& dev, std::uint32_t width, std::uint32_t height,
-		        pixel_format fmt = pixel_format::r8g8b8a8_unorm,
+		        pixel_format fmt = default_pixel_format,
 		        std::uint32_t usg = usage::sampler | usage::color_target)
 		    : m_gpu_tex(dev, glm::uvec2{width, height}, fmt, usg)
 		{
 		}
 
-		texture(std::uint32_t width, std::uint32_t height, pixel_format fmt = pixel_format::r8g8b8a8_unorm,
+		texture(std::uint32_t width, std::uint32_t height, pixel_format fmt = default_pixel_format,
 		        std::uint32_t usg = usage::sampler | usage::color_target)
 		    : texture(gpu::device::global(), width, height, fmt, usg)
 		{
@@ -120,11 +121,25 @@ namespace mngl
 			load_from_surface(dev, cmd, surface, usg);
 		}
 
+		texture(const gpu::device& dev, gpu::command_buffer& cmd, SDL_Surface* surface, pixel_format fmt,
+		        std::uint32_t usg = default_upload_usage)
+		{
+			load_from_surface(dev, cmd, surface, fmt, usg);
+		}
+
 		explicit texture(SDL_Surface* surface, std::uint32_t usg = default_upload_usage)
 		{
 			auto& device = gpu::device::global();
 			gpu::command_buffer cmd(device);
 			load_from_surface(device, cmd, surface, usg);
+			cmd.submit();
+		}
+
+		explicit texture(SDL_Surface* surface, pixel_format fmt, std::uint32_t usg = default_upload_usage)
+		{
+			auto& device = gpu::device::global();
+			gpu::command_buffer cmd(device);
+			load_from_surface(device, cmd, surface, fmt, usg);
 			cmd.submit();
 		}
 
@@ -135,8 +150,20 @@ namespace mngl
 			load_from_surface(dev, cmd, source.raw(), usg);
 		}
 
+		texture(const gpu::device& dev, gpu::command_buffer& cmd, const mngl::surface& source,
+		        pixel_format fmt, std::uint32_t usg = default_upload_usage)
+		{
+			load_from_surface(dev, cmd, source.raw(), fmt, usg);
+		}
+
 		explicit texture(const mngl::surface& source, std::uint32_t usg = default_upload_usage)
 		    : texture(source.raw(), usg)
+		{
+		}
+
+		explicit texture(const mngl::surface& source, pixel_format fmt,
+		                 std::uint32_t usg = default_upload_usage)
+		    : texture(source.raw(), fmt, usg)
 		{
 		}
 
@@ -151,6 +178,20 @@ namespace mngl
 			auto& device = gpu::device::global();
 			gpu::command_buffer cmd(device);
 			load_from_surface(device, cmd, image.get(), usg);
+			cmd.submit();
+		}
+
+		explicit texture(const std::string& path, pixel_format fmt, std::uint32_t usg = default_upload_usage)
+		{
+			detail::surface_ptr image(IMG_Load(path.c_str()));
+			if (!image) [[unlikely]]
+			{
+				throw sdl_error("Failed to load image from " + path + ": ");
+			}
+
+			auto& device = gpu::device::global();
+			gpu::command_buffer cmd(device);
+			load_from_surface(device, cmd, image.get(), fmt, usg);
 			cmd.submit();
 		}
 
@@ -179,23 +220,30 @@ namespace mngl
 		void load_from_surface(const gpu::device& dev, gpu::command_buffer& cmd, SDL_Surface* surface,
 		                       std::uint32_t usg = default_upload_usage)
 		{
+			load_from_surface(dev, cmd, surface, default_pixel_format, usg);
+		}
+
+		// Загрузка surface поддерживает RGBA8/BGRA8 UNORM и sRGB форматы GPU.
+		void load_from_surface(const gpu::device& dev, gpu::command_buffer& cmd, SDL_Surface* surface,
+		                       pixel_format fmt, std::uint32_t usg = default_upload_usage)
+		{
 			if (rendering()) [[unlikely]]
 			{
 				throw std::logic_error("Cannot replace a texture while it is being rendered to");
 			}
-			auto converted = convert_surface(surface);
+			auto converted = convert_surface(surface, fmt);
 
 			const std::uint32_t w = static_cast<std::uint32_t>(converted->w);
 			const std::uint32_t h = static_cast<std::uint32_t>(converted->h);
 
-			gpu::texture tex(dev, glm::uvec2{w, h}, pixel_format::r8g8b8a8_unorm, usg);
+			gpu::texture tex(dev, glm::uvec2{w, h}, fmt, usg);
 			upload_rows(tex, cmd, converted->pixels, static_cast<std::size_t>(w) * 4,
 			            static_cast<std::size_t>(converted->pitch), h);
 			m_gpu_tex = std::move(tex);
 			m_hit_test_frame.reset();
 		}
 
-		// Updates an RGBA8 texture from a same-sized SDL surface.
+		// Updates a supported RGBA8/BGRA8 texture from a same-sized SDL surface.
 		void update_from_surface(gpu::command_buffer& cmd, SDL_Surface* surface)
 		{
 			if (rendering()) [[unlikely]]
@@ -207,11 +255,7 @@ namespace mngl
 				throw std::logic_error("Cannot update an invalid texture from SDL_Surface");
 			}
 
-			auto converted = convert_surface(surface);
-			if (m_gpu_tex.format() != pixel_format::r8g8b8a8_unorm) [[unlikely]]
-			{
-				throw std::invalid_argument("Updating from SDL_Surface requires an RGBA8 texture");
-			}
+			auto converted = convert_surface(surface, m_gpu_tex.format());
 
 			const std::uint32_t width = static_cast<std::uint32_t>(converted->w);
 			const std::uint32_t height = static_cast<std::uint32_t>(converted->h);
@@ -512,15 +556,32 @@ namespace mngl
 
 		explicit texture(gpu::texture&& texture) noexcept : m_gpu_tex(std::move(texture)) {}
 
-		static detail::surface_ptr convert_surface(SDL_Surface* surface)
+		static SDL_PixelFormat surface_pixel_format(pixel_format fmt)
+		{
+			switch (fmt)
+			{
+				case pixel_format::r8g8b8a8_unorm:
+				case pixel_format::r8g8b8a8_unorm_srgb:
+					return SDL_PIXELFORMAT_RGBA32;
+				case pixel_format::b8g8r8a8_unorm:
+				case pixel_format::b8g8r8a8_unorm_srgb:
+					return SDL_PIXELFORMAT_BGRA32;
+				default:
+					throw std::invalid_argument(
+					    "SDL_Surface uploads support only RGBA8/BGRA8 UNORM and sRGB texture formats");
+			}
+		}
+
+		static detail::surface_ptr convert_surface(SDL_Surface* surface,
+		                                           pixel_format fmt = default_pixel_format)
 		{
 			if (!surface) [[unlikely]]
 			{
 				throw std::invalid_argument("Cannot create texture from null SDL_Surface!");
 			}
 
-			// RGBA32 keeps byte order R,G,B,A regardless of endianness.
-			detail::surface_ptr converted(SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32));
+			// The aliases keep the requested byte order on little- and big-endian systems.
+			detail::surface_ptr converted(SDL_ConvertSurface(surface, surface_pixel_format(fmt)));
 			if (!converted) [[unlikely]]
 			{
 				throw sdl_error("Failed to convert surface format: ");
@@ -669,6 +730,8 @@ namespace mngl
 	public:
 		explicit animated_texture(const std::string& path,
 		                          std::uint32_t usage = texture::default_upload_usage);
+		explicit animated_texture(const std::string& path, texture::pixel_format fmt,
+		                          std::uint32_t usage = texture::default_upload_usage);
 
 		animated_texture(const animated_texture&) = delete;
 		animated_texture& operator=(const animated_texture&) = delete;
@@ -695,8 +758,8 @@ namespace mngl
 			state* m_owner;
 		};
 
-		state(const std::string& path, std::uint32_t texture_usage)
-		    : m_source(path), m_texture(m_source, texture_usage), m_usage(texture_usage),
+		state(const std::string& path, texture::pixel_format format, std::uint32_t texture_usage)
+		    : m_source(path), m_texture(m_source, format, texture_usage), m_format(format), m_usage(texture_usage),
 		      m_uploaded_frame(m_source.raw()), m_update_hook(*this)
 		{
 		}
@@ -734,7 +797,7 @@ namespace mngl
 			}
 			else
 			{
-				m_texture.load_from_surface(device, cmd, current_frame, m_usage);
+				m_texture.load_from_surface(device, cmd, current_frame, m_format, m_usage);
 			}
 			cmd.submit();
 			m_uploaded_frame = current_frame;
@@ -742,6 +805,7 @@ namespace mngl
 
 		surface m_source;
 		texture m_texture;
+		texture::pixel_format m_format;
 		std::uint32_t m_usage;
 		SDL_Surface* m_uploaded_frame;
 		// Register after the source so a changed frame uploads in the same update tick.
@@ -754,7 +818,13 @@ namespace mngl
 	}
 
 	inline animated_texture::animated_texture(const std::string& path, std::uint32_t usage)
-	    : m_state(std::make_unique<state>(path, usage))
+	    : animated_texture(path, texture::default_pixel_format, usage)
+	{
+	}
+
+	inline animated_texture::animated_texture(const std::string& path, texture::pixel_format fmt,
+	                                          std::uint32_t usage)
+	    : m_state(std::make_unique<state>(path, fmt, usage))
 	{
 	}
 
@@ -773,3 +843,4 @@ namespace mngl
 		return m_state->m_texture;
 	}
 } // namespace mngl
+

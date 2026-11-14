@@ -176,6 +176,17 @@ namespace mngl
 		[[nodiscard]] mngl::display_orientation orientation() const
 		{
 			mngl::display_orientation orient =
+			    static_cast<mngl::display_orientation>(SDL_GetCurrentDisplayOrientation(disp));
+#ifdef MNGL_DISPLAYORIENTATION_UNKNOWS_IS_ERROR
+			if (orient == mngl::display_orientation::unknown) [[unlikely]]
+				throw std::runtime_error("display orientation is unavailable!");
+	#endif
+			return orient;
+		}
+
+		[[nodiscard]] mngl::display_orientation natural_orientation() const
+		{
+			mngl::display_orientation orient =
 			    static_cast<mngl::display_orientation>(SDL_GetNaturalDisplayOrientation(disp));
 #ifdef MNGL_DISPLAYORIENTATION_UNKNOWS_IS_ERROR
 			if (orient == mngl::display_orientation::unknown) [[unlikely]]
@@ -266,6 +277,8 @@ namespace mngl
 	{
 		int cnt = 0;
 		auto raw = SDL_GetFullscreenDisplayModes(disp, &cnt);
+		if (!raw) [[unlikely]]
+			throw sdl_error("error getting fullscreen modes: ");
 		auto deleter = [](SDL_DisplayMode** p)
 		{
 			if (p)
@@ -274,8 +287,6 @@ namespace mngl
 		std::unique_ptr<SDL_DisplayMode*, decltype(deleter)> modes(raw, deleter);
 		std::vector<mngl::display_mode> view;
 		view.reserve(cnt);
-		if (!modes && cnt > 0) [[unlikely]]
-			throw sdl_error("error getting fullscreen modes: ");
 		for (auto i = modes.get(); i < modes.get() + cnt; i++)
 		{
 			if (*i)
@@ -787,3 +798,4 @@ namespace mngl
 		return d;
 	}
 } // namespace mngl
+

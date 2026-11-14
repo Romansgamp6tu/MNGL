@@ -3,6 +3,8 @@
 #include "input_events.hpp"
 #include "move_only_function.hpp"
 #include "system_events.hpp"
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <concepts>
 #include <deque>
@@ -11,14 +13,17 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace mngl
 {
 	class input;
+	class imgui_context;
 	inline void poll_events();
 
 	template <typename T>
@@ -26,6 +31,134 @@ namespace mngl
 
 	namespace detail
 	{
+		struct mouse_pointer_event
+		{
+			SDL_MouseID mouse_id{};
+			SDL_WindowID window_id{};
+			float x{};
+			float y{};
+		};
+
+		class mouse_pointer_tracker
+		{
+		public:
+			void observe(const SDL_Event& event)
+			{
+				SDL_WindowID window_id = 0;
+				SDL_MouseID mouse_id = 0;
+				float x = 0.0f;
+				float y = 0.0f;
+
+				switch (event.type)
+				{
+				case SDL_EVENT_MOUSE_MOTION:
+					window_id = event.motion.windowID;
+					mouse_id = event.motion.which;
+					x = event.motion.x;
+					y = event.motion.y;
+					break;
+				case SDL_EVENT_MOUSE_BUTTON_DOWN:
+				case SDL_EVENT_MOUSE_BUTTON_UP:
+					window_id = event.button.windowID;
+					mouse_id = event.button.which;
+					x = event.button.x;
+					y = event.button.y;
+					break;
+				case SDL_EVENT_MOUSE_WHEEL:
+					window_id = event.wheel.windowID;
+					mouse_id = event.wheel.which;
+					x = event.wheel.mouse_x;
+					y = event.wheel.mouse_y;
+					break;
+				case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+				{
+					std::lock_guard lock(m_mutex);
+					if (const auto window = m_windows.find(event.window.windowID); window != m_windows.end())
+					{
+						window->second.latest_mouse_id.reset();
+					}
+					return;
+				}
+				case SDL_EVENT_MOUSE_REMOVED:
+				{
+					std::lock_guard lock(m_mutex);
+					for (auto window = m_windows.begin(); window != m_windows.end();)
+					{
+						window->second.positions.erase(event.mdevice.which);
+						if (window->second.latest_mouse_id == event.mdevice.which)
+						{
+							window->second.latest_mouse_id.reset();
+						}
+						if (window->second.positions.empty() && !window->second.latest_mouse_id)
+						{
+							window = m_windows.erase(window);
+						}
+						else
+						{
+							++window;
+						}
+					}
+					return;
+				}
+				case SDL_EVENT_WINDOW_DESTROYED:
+				{
+					std::lock_guard lock(m_mutex);
+					m_windows.erase(event.window.windowID);
+					return;
+				}
+				default:
+					return;
+				}
+
+				if (window_id == 0)
+				{
+					return;
+				}
+
+				std::lock_guard lock(m_mutex);
+				auto& window = m_windows[window_id];
+				window.latest_mouse_id = mouse_id;
+				window.positions.insert_or_assign(mouse_id, mouse_pointer_event{mouse_id, window_id, x, y});
+			}
+
+			[[nodiscard]] std::optional<mouse_pointer_event> latest_for_window(SDL_WindowID window_id) const
+			{
+				std::lock_guard lock(m_mutex);
+				const auto window = m_windows.find(window_id);
+				if (window == m_windows.end() || !window->second.latest_mouse_id)
+				{
+					return std::nullopt;
+				}
+				const auto position = window->second.positions.find(*window->second.latest_mouse_id);
+				return position == window->second.positions.end() ? std::nullopt
+				                                                  : std::optional(position->second);
+			}
+
+			[[nodiscard]] std::optional<mouse_pointer_event> for_mouse(SDL_WindowID window_id,
+			                                                           SDL_MouseID mouse_id) const
+			{
+				std::lock_guard lock(m_mutex);
+				const auto window = m_windows.find(window_id);
+				if (window == m_windows.end())
+				{
+					return std::nullopt;
+				}
+				const auto position = window->second.positions.find(mouse_id);
+				return position == window->second.positions.end() ? std::nullopt
+				                                                  : std::optional(position->second);
+			}
+
+		private:
+			struct window_state
+			{
+				std::optional<SDL_MouseID> latest_mouse_id;
+				std::unordered_map<SDL_MouseID, mouse_pointer_event> positions;
+			};
+
+			mutable std::mutex m_mutex;
+			std::unordered_map<SDL_WindowID, window_state> m_windows;
+		};
+
 		struct event_subscription_state
 		{
 			std::atomic_bool connected = true;
@@ -115,7 +248,12 @@ namespace mngl
 			{
 				if constexpr (std::copy_constructible<T>)
 				{
-					event_collector->emplace_back([event] { dispatch_typed_event(event); });
+					auto listeners = snapshot_listeners<T>();
+					if (!listeners.empty())
+					{
+						event_collector->emplace_back([event, listeners = std::move(listeners)]
+						                              { dispatch_typed_event(event, listeners); });
+					}
 				}
 				else
 				{
@@ -151,6 +289,7 @@ namespace mngl
 	private:
 		friend class event_connection;
 		friend class input;
+		friend class imgui_context;
 		friend void poll_events();
 
 		using deferred_callback = detail::move_only_function<void()>;
@@ -168,7 +307,20 @@ namespace mngl
 		static inline thread_local std::vector<deferred_callback>* event_collector = nullptr;
 		static inline std::mutex imgui_input_events_mutex;
 		static inline std::vector<detail::queued_imgui_input_event> imgui_input_events;
+		static inline detail::mouse_pointer_tracker mouse_pointer_events;
 		static inline std::atomic_bool imgui_input_enabled = false;
+
+		[[nodiscard]] static std::optional<detail::mouse_pointer_event> latest_mouse_pointer_for_window(
+		    SDL_WindowID window_id)
+		{
+			return mouse_pointer_events.latest_for_window(window_id);
+		}
+
+		[[nodiscard]] static std::optional<detail::mouse_pointer_event> mouse_pointer_for_window(
+		    SDL_WindowID window_id, SDL_MouseID mouse_id)
+		{
+			return mouse_pointer_events.for_mouse(window_id, mouse_id);
+		}
 
 		static std::vector<detail::queued_imgui_input_event> take_owned_imgui_input_events()
 		{
@@ -178,23 +330,48 @@ namespace mngl
 			return events;
 		}
 
+		template <event_payload T> struct listener;
+
 		template <event_payload T> static void dispatch_typed_event(const T& event)
 		{
+			auto listeners = snapshot_listeners<T>();
+			dispatch_typed_event(event, listeners);
+		}
+
+		template <event_payload T>
+		static void dispatch_typed_event(const T& event,
+		                                 const std::vector<std::shared_ptr<listener<T>>>& listeners)
+		{
 			std::lock_guard lock(dispatch_mutex);
-			const auto listeners = listeners_for<T>().callbacks.load(std::memory_order_acquire);
-			for (const auto& weak_listener : *listeners)
+			for (const auto& listener : listeners)
 			{
-				if (auto listener = weak_listener.lock();
-				    listener && listener->connected.load(std::memory_order_acquire) && listener->handler)
+				if (listener->connected.load(std::memory_order_acquire) && listener->handler)
 				{
 					listener->handler(event);
 				}
 			}
 		}
 
+		template <event_payload T> static std::vector<std::shared_ptr<listener<T>>> snapshot_listeners()
+		{
+			const auto current = listeners_for<T>().callbacks.load(std::memory_order_acquire);
+			std::vector<std::shared_ptr<listener<T>>> snapshot;
+			snapshot.reserve(current->size());
+			for (const auto& weak_listener : *current)
+			{
+				if (auto listener = weak_listener.lock();
+				    listener && listener->connected.load(std::memory_order_acquire))
+				{
+					snapshot.push_back(std::move(listener));
+				}
+			}
+			return snapshot;
+		}
+
 		void queue_sdl_event(const SDL_Event& event)
 		{
-			// Copy pointer-backed SDL fields into typed payloads before the event leaves the watcher.
+			// Copy pointer-backed SDL fields into typed payloads before the event
+			// leaves the watcher.
 			std::vector<deferred_callback> callbacks;
 			auto* previous_collector = std::exchange(event_collector, &callbacks);
 			try
@@ -313,6 +490,7 @@ namespace mngl
 			auto* manager = static_cast<event_manager*>(user_data);
 			try
 			{
+				mouse_pointer_events.observe(*event);
 				queue_imgui_input_event(*event);
 				manager->queue_sdl_event(*event);
 			}
@@ -440,6 +618,10 @@ namespace mngl
 					emit(display_content_scale_changed{{{type, ts}, e.display.displayID},
 					                                   (float)e.display.data1});
 				break;
+			case event_type::display_usable_bounds_changed:
+				if (!listeners_for<display_usable_bounds_changed>().empty())
+					emit(display_usable_bounds_changed{{{type, ts}, e.display.displayID}});
+				break;
 
 				// --- Window event_type ---
 			case event_type::window_shown:
@@ -507,6 +689,10 @@ namespace mngl
 				if (!listeners_for<window_hit_test>().empty())
 					emit(window_hit_test{{{type, ts}, e.window.windowID}});
 				break;
+			case event_type::window_iccprof_changed:
+				if (!listeners_for<window_icc_prof_changed>().empty())
+					emit(window_icc_prof_changed{{{type, ts}, e.window.windowID}});
+				break;
 			case event_type::window_display_changed:
 				if (!listeners_for<window_display_changed>().empty())
 					emit(window_display_changed{{{type, ts}, e.window.windowID},
@@ -535,6 +721,10 @@ namespace mngl
 			case event_type::window_destroyed:
 				if (!listeners_for<window_destroyed>().empty())
 					emit(window_destroyed{{{type, ts}, e.window.windowID}});
+				break;
+			case event_type::window_hdr_state_changed:
+				if (!listeners_for<window_hdr_state_changed>().empty())
+					emit(window_hdr_state_changed{{{type, ts}, e.window.windowID}});
 				break;
 
 				// --- Keyboard event_type ---
@@ -578,6 +768,42 @@ namespace mngl
 			case event_type::keymap_changed:
 				if (!listeners_for<keymap_changed>().empty())
 					emit(keymap_changed{{type, ts}});
+				break;
+			case event_type::keyboard_added:
+				if (!listeners_for<keyboard_added>().empty())
+					emit(keyboard_added{{type, ts}, e.kdevice.which});
+				break;
+			case event_type::keyboard_removed:
+				if (!listeners_for<keyboard_removed>().empty())
+					emit(keyboard_removed{{type, ts}, e.kdevice.which});
+				break;
+			case event_type::text_editing_candidates:
+				if (!listeners_for<text_editing_candidates>().empty())
+				{
+					text_editing_candidates candidates{{{type, ts}, e.edit_candidates.windowID},
+					                                   {},
+					                                   e.edit_candidates.selected_candidate,
+					                                   e.edit_candidates.horizontal};
+					const auto candidate_count = std::max(e.edit_candidates.num_candidates, 0);
+					if (e.edit_candidates.candidates)
+					{
+						candidates.candidates.reserve(static_cast<std::size_t>(candidate_count));
+						for (std::int32_t index = 0; index < candidate_count; ++index)
+						{
+							const char* candidate = e.edit_candidates.candidates[index];
+							candidates.candidates.emplace_back(candidate ? candidate : "");
+						}
+					}
+					emit(candidates);
+				}
+				break;
+			case event_type::screen_keyboard_shown:
+				if (!listeners_for<screen_keyboard_shown>().empty())
+					emit(screen_keyboard_shown{{type, ts}});
+				break;
+			case event_type::screen_keyboard_hidden:
+				if (!listeners_for<screen_keyboard_hidden>().empty())
+					emit(screen_keyboard_hidden{{type, ts}});
 				break;
 
 				// --- Mouse event_type ---
@@ -624,6 +850,14 @@ namespace mngl
 					                 static_cast<wheel_direction>(e.wheel.direction)});
 				}
 				break;
+			case event_type::mouse_added:
+				if (!listeners_for<mouse_added>().empty())
+					emit(mouse_added{{type, ts}, e.mdevice.which});
+				break;
+			case event_type::mouse_removed:
+				if (!listeners_for<mouse_removed>().empty())
+					emit(mouse_removed{{type, ts}, e.mdevice.which});
+				break;
 
 				// --- Joystick event_type ---
 			case event_type::joystick_axis_motion:
@@ -657,6 +891,10 @@ namespace mngl
 			case event_type::joystick_removed:
 				if (!listeners_for<joystick_removed>().empty())
 					emit(joystick_removed{{type, ts}, e.jdevice.which});
+				break;
+			case event_type::joystick_update_complete:
+				if (!listeners_for<joystick_update_complete>().empty())
+					emit(joystick_update_complete{{type, ts}, e.jdevice.which});
 				break;
 			case event_type::joystick_battery_updated:
 				if (!listeners_for<joystick_battery>().empty())
@@ -697,6 +935,14 @@ namespace mngl
 			case event_type::gamepad_remapped:
 				if (!listeners_for<gamepad_remapped>().empty())
 					emit(gamepad_remapped{{type, ts}, e.gdevice.which});
+				break;
+			case event_type::gamepad_update_complete:
+				if (!listeners_for<gamepad_update_complete>().empty())
+					emit(gamepad_update_complete{{type, ts}, e.gdevice.which});
+				break;
+			case event_type::gamepad_steam_handle_updated:
+				if (!listeners_for<gamepad_steam_handle_updated>().empty())
+					emit(gamepad_steam_handle_updated{{type, ts}, e.gdevice.which});
 				break;
 			case event_type::gamepad_touchpad_down:
 				if (!listeners_for<gamepad_touchpad_down>().empty())
@@ -774,6 +1020,22 @@ namespace mngl
 					                     {e.tfinger.x, e.tfinger.y},
 					                     {e.tfinger.dx, e.tfinger.dy},
 					                     e.tfinger.pressure});
+				break;
+			case event_type::pinch_begin:
+				if (!listeners_for<pinch_begin>().empty())
+					emit(pinch_begin{{type, ts}, e.pinch.windowID, e.pinch.scale});
+				break;
+			case event_type::pinch_update:
+				if (!listeners_for<pinch_update>().empty())
+					emit(pinch_update{{type, ts}, e.pinch.windowID, e.pinch.scale});
+				break;
+			case event_type::pinch_end:
+				if (!listeners_for<pinch_end>().empty())
+					emit(pinch_end{{type, ts}, e.pinch.windowID, e.pinch.scale});
+				break;
+			case event_type::poll_sentinel:
+				if (!listeners_for<poll_sentinel>().empty())
+					emit(poll_sentinel{{type, ts}});
 				break;
 
 				// --- Clipboard event_type ---
@@ -943,14 +1205,27 @@ namespace mngl
 				// --- Render event_type ---
 			case event_type::render_targets_reset:
 				if (!listeners_for<render_targets_reset>().empty())
-					emit(render_targets_reset{{{type, ts}, e.window.windowID}});
+					emit(render_targets_reset{{{type, ts}, e.render.windowID}});
 				break;
 			case event_type::render_device_reset:
 				if (!listeners_for<render_device_reset>().empty())
-					emit(render_device_reset{{{type, ts}, e.window.windowID}});
+					emit(render_device_reset{{{type, ts}, e.render.windowID}});
+				break;
+			case event_type::render_device_lost:
+				if (!listeners_for<render_device_lost>().empty())
+					emit(render_device_lost{{{type, ts}, e.render.windowID}});
 				break;
 
 			default:
+				if (e.type >= SDL_EVENT_USER && e.type < SDL_EVENT_LAST &&
+				    !listeners_for<user_event>().empty())
+				{
+					emit(user_event{{static_cast<event_type>(e.type), ts},
+					                e.user.windowID,
+					                e.user.code,
+					                e.user.data1,
+					                e.user.data2});
+				}
 				break;
 			}
 		}
@@ -989,6 +1264,37 @@ namespace mngl
 	inline void poll_events()
 	{
 		SDL_PumpEvents();
+
+		// Consume a fixed snapshot of the SDL queue. This keeps the standalone event
+		// loop from filling SDL's bounded queue while leaving events posted during
+		// this drain for the next call.
+		constexpr std::size_t event_batch_size = 64;
+		std::array<SDL_Event, event_batch_size> events{};
+		int remaining_events = SDL_PeepEvents(nullptr, 0, SDL_PEEKEVENT, SDL_EVENT_FIRST, SDL_EVENT_LAST);
+		if (remaining_events < 0)
+		{
+			SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Unable to inspect the SDL event queue: %s",
+			             SDL_GetError());
+			remaining_events = 0;
+		}
+		while (remaining_events > 0)
+		{
+			const int requested = std::min(remaining_events, static_cast<int>(events.size()));
+			const int removed =
+			    SDL_PeepEvents(events.data(), requested, SDL_GETEVENT, SDL_EVENT_FIRST, SDL_EVENT_LAST);
+			if (removed < 0)
+			{
+				SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Unable to drain the SDL event queue: %s",
+				             SDL_GetError());
+				break;
+			}
+			if (removed == 0)
+			{
+				break;
+			}
+			remaining_events -= removed;
+		}
+
 		event_manager::dispatch_pending_events();
 	}
 } // namespace mngl

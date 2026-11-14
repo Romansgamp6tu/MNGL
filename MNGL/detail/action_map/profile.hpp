@@ -1,6 +1,7 @@
 #pragma once
 
 #include "map.hpp"
+#include "../atomic_file.hpp"
 
 #include <algorithm>
 #include <array>
@@ -572,31 +573,11 @@ namespace mngl
 			throw std::length_error("Action map profile exceeds the supported size");
 		}
 
-		std::filesystem::path temporary_path = path;
-		temporary_path += ".tmp";
-		std::ofstream file(temporary_path, std::ios::binary | std::ios::trunc);
-		if (!file) [[unlikely]]
-		{
-			throw std::runtime_error("Failed to open temporary action map profile file");
-		}
+		detail::atomic_temporary_file temporary_file(path);
+		auto& file = temporary_file.stream();
 		file.write(contents.data(), static_cast<std::streamsize>(contents.size()));
-		file.flush();
-		file.close();
-		if (file.fail()) [[unlikely]]
-		{
-			std::error_code remove_error;
-			std::filesystem::remove(temporary_path, remove_error);
-			throw std::runtime_error("Failed to write action map profile file");
-		}
-
-		std::error_code rename_error;
-		std::filesystem::rename(temporary_path, path, rename_error);
-		if (rename_error) [[unlikely]]
-		{
-			std::error_code remove_error;
-			std::filesystem::remove(temporary_path, remove_error);
-			throw std::runtime_error("Failed to replace action map profile file: " + rename_error.message());
-		}
+		temporary_file.close();
+		temporary_file.replace(path);
 	}
 
 	inline void action_map::load_profile(const std::filesystem::path& path)
@@ -640,3 +621,4 @@ namespace mngl
 		++m_storage->revision;
 	}
 } // namespace mngl
+

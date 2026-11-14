@@ -23,13 +23,17 @@
 		static void update_dt()
 		{
 			static std::uint64_t last_time = 0;
-			if (!last_time) [[unlikely]]
+			static bool initialized = false;
+			const std::uint64_t current_time = performance_counter();
+			if (!initialized) [[unlikely]]
 			{
-				last_time = performance_counter();
+				last_time = current_time;
+				initialized = true;
+				dt.store(0.0, std::memory_order_relaxed);
 				return;
 			}
-			auto current_time = performance_counter();
-			dt.store(std::min((current_time - last_time) / static_cast<double>(performance_frequency()), 0.1),
+			dt.store((current_time - last_time) / static_cast<double>(performance_frequency()),
 			         std::memory_order_relaxed);
 			last_time = current_time;
 		}
+

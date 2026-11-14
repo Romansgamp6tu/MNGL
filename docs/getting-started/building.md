@@ -42,7 +42,8 @@ CMake также собирает отдельную консольную цел
   SDL3/SDL_GPU и файл шрифта `Roboto-Medium.ttf`. Отдельно скачивать ImGui
   для текущей сборки не нужно.
 - `libs/` — Windows x64 библиотеки SDL3, SDL3_image, SDL3_test и FreeType
-  (`.lib`), а также runtime DLL для SDL3, SDL3_image и FreeType.
+  (`.lib`), runtime DLL этих библиотек и динамические codec DLL SDL3_image
+  (например, TIFF, PNG, WebP и AVIF).
 
 `MNGL.exe`, `mngl_demo.exe` и `.pdb` — выходные файлы сборки, не зависимости.
 PDB-файлы содержат отладочную информацию и для запуска не нужны.
@@ -97,11 +98,14 @@ SDL3_image и FreeType, шейдеры и шрифт ImGui. Runtime DLL микш
 
 #### Development-пакеты
 
-Workflow `Package MNGL Linux development kit` собирает Linux x64 tar.gz на
-self-hosted runner-е при push и ручном запуске. При push тега `vX.Y.Z` этот
-Linux-пакет прикладывается к GitHub Release. Артефакты обычных CI-запусков
-хранятся один день. Автоматическая сборка Windows/macOS-пакетов приостановлена;
-инструкции ниже остаются для локальной сборки. Для ручной сборки Windows-пакета:
+Workflow `Package MNGL development kit` собирает Linux x64 tar.gz на
+self-hosted runner-е при push в любую ветку и ручном запуске. Для CI-ветки
+версия обоих пакетов — `0.0.0+ci.<12 символов commit SHA>`, поэтому artifacts
+development и runtime от одного коммита имеют совпадающую версию. При push
+тега `vX.Y.Z` теги версии сохраняются, и development-пакет прикладывается к
+GitHub Release. Артефакты обычных CI-запусков хранятся один день. Автоматическая
+сборка Windows/macOS-пакетов приостановлена; инструкции ниже остаются для
+локальной сборки. Для ручной сборки Windows-пакета:
 
 ```powershell
 cmake -S . -B build-package -A x64 `
@@ -160,9 +164,12 @@ ImGui не гарантирует совместимость ABI между ве
 #### Runtime-пакеты
 
 Workflow `Package MNGL runtime` собирает только Linux x86_64 на self-hosted
-runner-е в контейнере Debian Bookworm. Workflow запускается на push в `main`,
-теге и вручную; обычные CI-артефакты хранятся один день, а к GitHub Release
-прикладывается Linux tar.gz. Автоматические сборки Windows/macOS приостановлены.
+runner-е в контейнере Debian Bookworm. Workflow запускается на push в `main` и
+release branches `V-*`, на теге и вручную; обычные CI-артефакты хранятся один
+день, а к GitHub Release прикладывается Linux tar.gz. На release branch
+скачайте development- и runtime-artifacts с одинаковым `0.0.0+ci.<commit SHA>`
+в имени: это пара пакетов одного коммита. Автоматические сборки Windows/macOS
+приостановлены.
 Для локального повторения Linux-сборки установите CMake, Ninja, Git,
 `pkg-config`, Bison, `patchelf`, `readelf`, SDL3/SDL3_image и FreeType
 development-пакеты, а также XRandR development-пакет:
@@ -178,8 +185,9 @@ SDL3_image 3.4.8, задайте `SDL_PREFIX` на их install prefix и доб
 `$SDL_PREFIX/lib/pkgconfig` в `PKG_CONFIG_PATH`. CI устанавливает эти версии из
 исходников через `setup-sdl`.
 
-На push в `main` или ручной запуск workflow Linux runtime tar.gz доступен как
-Actions artifact в течение одного дня. При push тега `vX.Y.Z` к GitHub Release прикладывается Linux runtime-пакет:
+На push в `main`, `V-*` release branch или ручной запуск workflow Linux runtime
+tar.gz доступен как Actions artifact в течение одного дня. При push тега
+`vX.Y.Z` к GitHub Release прикладывается Linux runtime-пакет:
 
 - `mngl-runtime-linux-x64-X.Y.Z.tar.gz`
 
@@ -215,10 +223,14 @@ Linux-пакет CI собирается в Debian Bookworm x86_64 контей�
 Все `.lib` и DLL должны совпадать с архитектурой программы. Сейчас бинарники в
 `libs/` — только x64. Для x86 положите отдельные 32-битные сборки SDL3,
 SDL3_image, SDL3_test и FreeType в `libs/x86/` под теми же именами `.lib`,
-а соответствующие `SDL3.dll`, `SDL3_image.dll` и `freetype.dll` — туда же.
+а соответствующие runtime DLL вместе с SDL3_image codec DLL — туда же.
 Win32-конфигурация Visual Studio и x86 CMake-сборка ищут библиотеки именно в
-`libs/x86/` и копируют оттуда runtime DLL. Пока эти файлы не добавлены, x86
-линковка/сборка не пройдёт. AVX2 не включается для Win32-конфигураций.
+`libs/x86/` и копируют DLL из этого каталога в output. Для x64 оба способа
+сборки копируют SDL3_image codec DLL и находящиеся рядом зависимости рядом с
+исполняемым файлом и тестами. SDL3_image загружает TIFF, PNG, WebP и AVIF
+декодеры динамически, поэтому одной `SDL3_image.dll` недостаточно, если
+используются эти форматы. Пока x86 libraries не добавлены, x86 линковка/сборка
+не пройдёт. AVX2 не включается для Win32-конфигураций.
 
 ### Параметры CMake
 
@@ -310,6 +322,8 @@ Runtime workflow запускает аудиосмоук-тест с SDL dummy a
 если на runner-е недоступны video/GPU backend или адаптер; это не заменяет
 тесты рендеринга на физических GPU и драйверах.
 
+<a id="shader-compiler-runtime"></a>
+
 ## Shader tools и дополнительные бинарники
 
 Компилятор шейдеров не нужен для компиляции MNGL-заголовков. Он нужен во время
@@ -373,3 +387,4 @@ DXIL-файлы в `MNGL/shaders/` рассчитаны на Windows; на macOS
 и notices upstream-зависимостей. Для ручной сборки устанавливайте нужные
 библиотеки и shader tools самостоятельно либо используйте соответствующий
 runtime-пакет. SDL3_mixer входит в development- и runtime-пакеты MNGL.
+
