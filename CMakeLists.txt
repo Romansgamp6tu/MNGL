@@ -275,6 +275,16 @@ else()
 	target_link_libraries(mngl INTERFACE
 		mngl_imgui SDL3_image::SDL3_image Freetype::Freetype)
 endif()
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
+		CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "13")
+	# libstdc++ keeps std::stacktrace's implementation in a separate archive.
+	# GCC 13.0–13.2 use the old archive name; GCC 13.3+ use libstdc++exp.
+	if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "13.3")
+		target_link_libraries(mngl INTERFACE stdc++_libbacktrace)
+	else()
+		target_link_libraries(mngl INTERFACE stdc++exp)
+	endif()
+endif()
 if(APPLE)
 	# The macOS runtime archive stores dynamic dependencies in ../lib from bin/.
 	target_link_options(mngl INTERFACE "-Wl,-rpath,@executable_path/../lib")
