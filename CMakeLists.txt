@@ -17,7 +17,7 @@ option(MNGL_BUILD_MACOS_DEVEL_PACKAGE "Create a macOS MNGL development tarball" 
 option(MNGL_BUILD_2D_BENCHMARK "Build the interactive 2D profiling scene" OFF)
 
 execute_process(
-	COMMAND git branch --show-current
+	COMMAND git -c "safe.directory=${CMAKE_CURRENT_SOURCE_DIR}" branch --show-current
 	WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 	OUTPUT_VARIABLE MNGL_CURRENT_GIT_BRANCH
 	OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -662,7 +662,7 @@ find_dependency(Freetype REQUIRED)]=])
 	set(MNGL_BRANCH_ONLY_HEADERS)
 	if(NOT MNGL_PACKAGE_BRANCH STREQUAL "main")
 		execute_process(
-			COMMAND git diff --name-only --diff-filter=A
+			COMMAND git -c "safe.directory=${CMAKE_CURRENT_SOURCE_DIR}" diff --name-only --diff-filter=A
 				"${MNGL_PACKAGE_BASE_REF}...HEAD" --
 			WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 			RESULT_VARIABLE MNGL_BRANCH_DIFF_RESULT
