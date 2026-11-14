@@ -4,7 +4,6 @@ on:
   push:
     branches: ["**"]
     paths-ignore:
-      - ".github/workflows/**"
       - "README.md"
       - "docs/**"
   pull_request:
