@@ -63,7 +63,7 @@ jobs:
             -DBUILD_TESTING=ON -DMNGL_BUILD_MOD_EXAMPLE=ON
 
       - name: Build all targets
-        run: cmake --build build --parallel 4
+        run: cmake --build build --parallel 2
 
       - name: Run CTest suite
         env:
