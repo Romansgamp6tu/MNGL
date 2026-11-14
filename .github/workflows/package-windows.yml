@@ -45,7 +45,7 @@ jobs:
     needs: version
     runs-on: [self-hosted, linux, x64]
     container:
-      image: node:24-bookworm
+      image: node:24-trixie
       options: --user 0:0
     defaults:
       run:
