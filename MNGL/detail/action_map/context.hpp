@@ -5,18 +5,6 @@
 
 namespace mngl
 {
-	namespace detail
-	{
-		struct action_name_hash
-		{
-			using is_transparent = void;
-
-			[[nodiscard]] std::size_t operator()(std::string_view name) const noexcept
-			{
-				return std::hash<std::string_view>{}(name);
-			}
-		};
-	} // namespace detail
 
 	// A per-window, enableable view over an action_map. Contexts do not consume input.
 	class input_context
