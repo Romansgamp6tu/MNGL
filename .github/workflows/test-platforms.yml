@@ -43,7 +43,7 @@ jobs:
       - name: Install Linux build tools
         run: |
           apt-get update
-          apt-get install --yes sudo build-essential cmake ninja-build git pkg-config python3 libfreetype-dev
+          apt-get install --yes sudo build-essential cmake ninja-build git pkg-config python3 libfreetype-dev gh
 
       - name: Set up pinned SDL3 and SDL3_image
         id: sdl
@@ -75,4 +75,7 @@ jobs:
 
       - name: Restore runner workspace ownership
         if: always()
-        run: chown -R 1000:1000 "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+        run: |
+          runner_uid="$(stat -c '%u' "$RUNNER_TEMP/_github_workflow/event.json")"
+          runner_gid="$(stat -c '%g' "$RUNNER_TEMP/_github_workflow/event.json")"
+          chown -R "$runner_uid:$runner_gid" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
