@@ -17,8 +17,13 @@ int main()
 	}
 	catch (const std::exception& error)
 	{
-		if (std::string_view(error.what()).find("Failed to start shader compiler 'shadercross'") !=
-		    std::string_view::npos)
+		const std::string_view message(error.what());
+		if (message.find("No available video device") != std::string_view::npos)
+		{
+			std::cerr << "Skipping Vulkan shader smoke test because no SDL video device is available\n";
+			return 77;
+		}
+		if (message.find("Failed to start shader compiler 'shadercross'") != std::string_view::npos)
 		{
 			std::cerr << "Skipping Vulkan shader smoke test because shadercross is unavailable\n";
 			return 77;
