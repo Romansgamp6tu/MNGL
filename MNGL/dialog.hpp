@@ -8,9 +8,11 @@
 #include <cstddef>
 #include <exception>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -73,7 +75,12 @@ namespace mngl::dialog
 		inline std::string path_to_utf8(const std::filesystem::path& path)
 		{
 			const auto encoded = path.u8string();
-			return std::string(reinterpret_cast<const char*>(encoded.data()), encoded.size());
+			std::string result(reinterpret_cast<const char*>(encoded.data()), encoded.size());
+			if (result.find('\0') != std::string::npos) [[unlikely]]
+			{
+				throw std::invalid_argument("dialog default location cannot contain a null character");
+			}
+			return result;
 		}
 
 		inline void complete(const std::shared_ptr<request_state>& state, result value) noexcept
@@ -166,6 +173,20 @@ namespace mngl::dialog
 		inline std::shared_ptr<request_state> launch_file_dialog(file_dialog_options options, bool allow_many,
 		                                                         bool save)
 		{
+			if (options.filters.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+			    [[unlikely]]
+			{
+				throw std::length_error("too many dialog file filters for SDL");
+			}
+			for (const auto& filter : options.filters)
+			{
+				if (filter.name.find('\0') != std::string::npos ||
+				    filter.pattern.find('\0') != std::string::npos) [[unlikely]]
+				{
+					throw std::invalid_argument("dialog file filters cannot contain null characters");
+				}
+			}
+
 			if (options.parent && !options.parent->raw())
 			{
 				return failed_state("The parent window is not initialized");
@@ -263,7 +284,15 @@ namespace mngl::dialog
 			return m_state->value;
 		}
 
-		[[nodiscard]] bool ready() const { return result().status != request_status::pending; }
+		[[nodiscard]] bool ready() const
+		{
+			if (!m_state)
+			{
+				return true;
+			}
+			std::lock_guard lock(m_state->mutex);
+			return m_state->value.status != request_status::pending;
+		}
 		[[nodiscard]] mngl::dialog::result poll() const { return result(); }
 
 	private:

@@ -12,6 +12,7 @@
 #include <array>
 #include <span>
 #include <stdexcept>
+#include <type_traits>
 
 namespace mngl::gpu
 {
@@ -62,6 +63,10 @@ namespace mngl::gpu
 		render_pass(command_buffer& cmd, std::span<const color_attachment> color_targets,
 		            const depth_attachment* depth = nullptr)
 		{
+			if (!cmd.valid()) [[unlikely]]
+			{
+				throw std::invalid_argument("Render pass requires a valid command buffer");
+			}
 			if (color_targets.empty() && !depth) [[unlikely]]
 			{
 				throw std::invalid_argument("Render pass requires at least one color or depth target");
@@ -78,12 +83,17 @@ namespace mngl::gpu
 
 			std::array<SDL_GPUColorTargetInfo, 4> sdl_color_targets{};
 			std::uint32_t color_target_count = 0;
+			auto* command_device = cmd.device_raw();
 
 			for (const auto& attachment : color_targets)
 			{
 				if (!attachment.target.has_usage(texture::usage_flags::color_target)) [[unlikely]]
 				{
 					throw std::invalid_argument("Target texture must have color_target usage flag!");
+				}
+				if (command_device && attachment.target.device_raw() != command_device) [[unlikely]]
+				{
+					throw std::invalid_argument("Render target belongs to a different GPU device");
 				}
 
 				SDL_GPUColorTargetInfo info{};
@@ -107,6 +117,10 @@ namespace mngl::gpu
 					throw std::invalid_argument(
 					    "Depth target texture must have depth_stencil_target usage flag!");
 				}
+				if (command_device && depth->target.device_raw() != command_device) [[unlikely]]
+				{
+					throw std::invalid_argument("Depth target belongs to a different GPU device");
+				}
 
 				sdl_depth_info.texture = depth->target.raw();
 				sdl_depth_info.clear_depth = depth->depth;
@@ -120,16 +134,16 @@ namespace mngl::gpu
 			}
 
 			const auto* color_target_data = color_target_count ? sdl_color_targets.data() : nullptr;
-			cmd.begin_pass();
-			m_command_owner = &cmd;
-			handle = SDL_BeginGPURenderPass(cmd.raw(), color_target_data, color_target_count, depth_ptr);
+			auto pass_lease = cmd.begin_pass();
+			m_commands = cmd.raw();
+			m_device = command_device;
+			handle = SDL_BeginGPURenderPass(m_commands, color_target_data, color_target_count, depth_ptr);
 
 			if (!handle) [[unlikely]]
 			{
-				cmd.end_pass();
-				m_command_owner = nullptr;
 				throw sdl_error("Failed to begin GPU render pass: ");
 			}
+			m_pass_lease = std::move(pass_lease);
 		}
 
 		~render_pass() { end_pass(); }
@@ -160,11 +174,9 @@ namespace mngl::gpu
 				SDL_EndGPURenderPass(handle);
 				handle = nullptr;
 			}
-			if (m_command_owner)
-			{
-				m_command_owner->end_pass();
-				m_command_owner = nullptr;
-			}
+			m_commands = nullptr;
+			m_device = nullptr;
+			m_pass_lease.reset();
 		}
 
 		// =========================================================================
@@ -173,10 +185,7 @@ namespace mngl::gpu
 
 		void bind_pipeline(const graphics_pipeline& pipeline) const
 		{
-			if (!handle) [[unlikely]]
-			{
-				throw std::logic_error("Render pass is not active");
-			}
+			ensure_active();
 			if (!pipeline.valid()) [[unlikely]]
 			{
 				throw std::invalid_argument("Cannot bind an invalid graphics pipeline");
@@ -189,50 +198,61 @@ namespace mngl::gpu
 		}
 
 		void draw_primitives(std::uint32_t num_vertices, std::uint32_t num_instances = 1,
-		                     std::uint32_t first_vertex = 0, std::uint32_t first_instance = 0) const noexcept
+		                     std::uint32_t first_vertex = 0, std::uint32_t first_instance = 0) const
 		{
+			ensure_active();
 			SDL_DrawGPUPrimitives(handle, num_vertices, num_instances, first_vertex, first_instance);
 		}
 
 		void draw_indexed_primitives(std::uint32_t num_indices, std::uint32_t num_instances = 1,
 		                             std::uint32_t first_index = 0, std::int32_t vertex_offset = 0,
-		                             std::uint32_t first_instance = 0) const noexcept
+		                             std::uint32_t first_instance = 0) const
 		{
+			ensure_active();
 			SDL_DrawGPUIndexedPrimitives(handle, num_indices, num_instances, first_index, vertex_offset,
 			                             first_instance);
 		}
 
-		template <typename T> void push_vertex_uniform(std::uint32_t slot, const T& data) const noexcept
+		template <typename T> void push_vertex_uniform(std::uint32_t slot, const T& data) const
 		{
 			static_assert(std::is_trivially_copyable_v<T>, "Uniform data must be trivially copyable!");
-			SDL_PushGPUVertexUniformData(handle, slot, &data, static_cast<std::uint32_t>(sizeof(T)));
+			ensure_active();
+			SDL_PushGPUVertexUniformData(m_commands, slot, &data, static_cast<std::uint32_t>(sizeof(T)));
 		}
 
-		template <typename T> void push_fragment_uniform(std::uint32_t slot, const T& data) const noexcept
+		template <typename T> void push_fragment_uniform(std::uint32_t slot, const T& data) const
 		{
 			static_assert(std::is_trivially_copyable_v<T>, "Uniform data must be trivially copyable!");
-			SDL_PushGPUFragmentUniformData(handle, slot, &data, static_cast<std::uint32_t>(sizeof(T)));
+			ensure_active();
+			SDL_PushGPUFragmentUniformData(m_commands, slot, &data, static_cast<std::uint32_t>(sizeof(T)));
 		}
 
 		void bind_vertex_buffers(std::uint32_t first_slot,
-		                         std::span<const SDL_GPUBufferBinding> bindings) const noexcept
+		                         std::span<const SDL_GPUBufferBinding> bindings) const
 		{
+			ensure_active();
 			SDL_BindGPUVertexBuffers(handle, first_slot, bindings.data(),
 			                         static_cast<std::uint32_t>(bindings.size()));
 		}
 
 		void bind_vertex_buffer(std::uint32_t slot, SDL_GPUBuffer* buffer,
-		                        std::uint32_t offset = 0) const noexcept
+		                        std::uint32_t offset = 0) const
 		{
+			ensure_active();
 			const SDL_GPUBufferBinding binding{.buffer = buffer, .offset = offset};
 			SDL_BindGPUVertexBuffers(handle, slot, &binding, 1);
 		}
 
 		void bind_vertex_buffer(std::uint32_t slot, const buffer& buffer, std::uint32_t offset = 0) const
 		{
+			ensure_active();
 			if (!buffer.valid() || !has_usage(buffer.usage(), buffer_usage::vertex)) [[unlikely]]
 			{
 				throw std::invalid_argument("Vertex binding requires a valid vertex-usage GPU buffer");
+			}
+			if (m_device && buffer.device_raw() != m_device) [[unlikely]]
+			{
+				throw std::invalid_argument("Vertex buffer belongs to a different GPU device");
 			}
 			bind_vertex_buffer(slot, buffer.raw(), offset);
 		}
@@ -247,37 +267,50 @@ namespace mngl::gpu
 		// Связывание индексного буфера (16-bit или 32-bit)
 		void bind_index_buffer(SDL_GPUBuffer* buffer,
 		                       SDL_GPUIndexElementSize index_element_size = SDL_GPU_INDEXELEMENTSIZE_16BIT,
-		                       std::uint32_t offset = 0) const noexcept
+		                       std::uint32_t offset = 0) const
 		{
+			ensure_active();
 			const SDL_GPUBufferBinding binding{.buffer = buffer, .offset = offset};
 			SDL_BindGPUIndexBuffer(handle, &binding, index_element_size);
 		}
 
 		void bind_fragment_samplers(std::uint32_t first_slot,
-		                            std::span<const SDL_GPUTextureSamplerBinding> bindings) const noexcept
+		                            std::span<const SDL_GPUTextureSamplerBinding> bindings) const
 		{
+			ensure_active();
 			SDL_BindGPUFragmentSamplers(handle, first_slot, bindings.data(),
 			                            static_cast<std::uint32_t>(bindings.size()));
 		}
 
 		void bind_fragment_sampler(std::uint32_t slot, SDL_GPUTexture* texture,
-		                           SDL_GPUSampler* sampler) const noexcept
+		                           SDL_GPUSampler* sampler) const
 		{
+			ensure_active();
 			const SDL_GPUTextureSamplerBinding binding{.texture = texture, .sampler = sampler};
 			SDL_BindGPUFragmentSamplers(handle, slot, &binding, 1);
 		}
 
 	private:
+		void ensure_active() const
+		{
+			if (!handle || !m_commands) [[unlikely]]
+			{
+				throw std::logic_error("Cannot use GPU render-pass commands without an active render pass");
+			}
+		}
+
 		SDL_GPURenderPass* handle = nullptr;
+		SDL_GPUCommandBuffer* m_commands = nullptr;
 		SDL_GPUDevice* m_device = nullptr;
-		command_buffer* m_command_owner = nullptr;
+		command_buffer::pass_lease m_pass_lease;
 
 		friend inline void swap(render_pass& l, render_pass& r) noexcept
 		{
 			using std::swap;
 			swap(l.handle, r.handle);
+			swap(l.m_commands, r.m_commands);
 			swap(l.m_device, r.m_device);
-			swap(l.m_command_owner, r.m_command_owner);
+			swap(l.m_pass_lease, r.m_pass_lease);
 		}
 	};
 } // namespace mngl::gpu

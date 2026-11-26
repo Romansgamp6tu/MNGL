@@ -115,6 +115,44 @@ namespace mngl
 		return frame_scope(*this);
 	}
 
+	inline bool imgui_context::refresh_renderer_backend(gpu::texture_format format)
+	{
+		if (format == gpu::texture_format::invalid) [[unlikely]]
+		{
+			throw std::runtime_error("Cannot initialize Dear ImGui for an invalid swapchain format");
+		}
+		if (format == color_target_format)
+		{
+			return false;
+		}
+
+		const auto previous_format = color_target_format;
+		ImGui_ImplSDLGPU3_Shutdown();
+
+		auto initialize_backend = [this](gpu::texture_format target_format)
+		{
+			ImGui_ImplSDLGPU3_InitInfo init_info{};
+			init_info.Device = attached_window->gpu_device().raw();
+			init_info.ColorTargetFormat = static_cast<SDL_GPUTextureFormat>(target_format);
+			init_info.MSAASamples = SDL_GPU_SAMPLECOUNT_1;
+			return ImGui_ImplSDLGPU3_Init(&init_info);
+		};
+
+		if (!initialize_backend(format))
+		{
+			if (previous_format != gpu::texture_format::invalid && initialize_backend(previous_format))
+			{
+				throw sdl_error("Failed to reinitialize the Dear ImGui SDL_GPU backend: ");
+			}
+			color_target_format = gpu::texture_format::invalid;
+			throw sdl_error("Failed to reinitialize the Dear ImGui SDL_GPU backend and "
+			                "restore its previous format: ");
+		}
+
+		color_target_format = format;
+		return true;
+	}
+
 	inline void imgui_context::begin_frame(::mngl::texture* target)
 	{
 		if (!context || !attached_window) [[unlikely]]
@@ -129,12 +167,15 @@ namespace mngl
 		{
 			throw std::logic_error("Dear ImGui frames must run on the SDL main thread");
 		}
+
+		make_current();
+		(void)refresh_renderer_backend(attached_window->swapchain_texture_format());
 		if (target)
 		{
 			if (!attached_window->hit_testing_enabled()) [[unlikely]]
 			{
-				throw std::logic_error(
-				    "Enable render_window hit testing before drawing an ImGui surface sprite");
+				throw std::logic_error("Enable render_window hit testing before drawing "
+				                       "an ImGui surface sprite");
 			}
 
 			const auto& gpu_texture = target->raw_gpu_texture();
@@ -142,22 +183,21 @@ namespace mngl
 			    !gpu_texture.has_usage(gpu::texture::usage_flags::sampler) || target->rendering() ||
 			    gpu_texture.is_swapchain_texture()) [[unlikely]]
 			{
-				throw std::invalid_argument(
-				    "Dear ImGui offscreen output must be an idle, sampleable color-target texture");
+				throw std::invalid_argument("Dear ImGui offscreen output must be an "
+				                            "idle, sampleable color-target texture");
 			}
 			if (gpu_texture.device_raw() != attached_window->gpu_device().raw()) [[unlikely]]
 			{
-				throw std::invalid_argument(
-				    "Dear ImGui offscreen output and render_window must use the same GPU device");
+				throw std::invalid_argument("Dear ImGui offscreen output and "
+				                            "render_window must use the same GPU device");
 			}
 			if (target->format() != color_target_format) [[unlikely]]
 			{
-				throw std::invalid_argument(
-				    "Dear ImGui offscreen output must use the render_window swapchain format");
+				throw std::invalid_argument("Dear ImGui offscreen output must use the "
+				                            "render_window swapchain format");
 			}
 		}
 
-		make_current();
 		if (target)
 		{
 			if (captured_texture_identity != target->m_hit_test_identity)
@@ -166,6 +206,8 @@ namespace mngl
 				captured_hit_test_path.clear();
 				offscreen_mouse_captured = false;
 				has_last_offscreen_mouse_position = false;
+				captured_offscreen_mouse_id.reset();
+				last_offscreen_mouse_id.reset();
 			}
 		}
 		else
@@ -174,6 +216,8 @@ namespace mngl
 			captured_hit_test_path.clear();
 			offscreen_mouse_captured = false;
 			has_last_offscreen_mouse_position = false;
+			captured_offscreen_mouse_id.reset();
+			last_offscreen_mouse_id.reset();
 		}
 
 		ImGui_ImplSDL3_NewFrame();
@@ -202,49 +246,60 @@ namespace mngl
 				const auto logical_size = attached_window->size();
 				if (logical_size.x != 0 && logical_size.y != 0)
 				{
-					const auto mice = input::mice();
-					const glm::vec2 mouse_position = mice.empty() ? glm::vec2{} : mice.front().position();
-					const glm::vec2 window_pixel_position{
-					    mouse_position.x * static_cast<float>(hit_frame.target_size.x) /
-					        static_cast<float>(logical_size.x),
-					    (static_cast<float>(logical_size.y) - mouse_position.y) *
-					        static_cast<float>(hit_frame.target_size.y) / static_cast<float>(logical_size.y)};
-					auto add_routed_position = [&](const hit_test_path_entry& entry)
+					const SDL_WindowID window_id = SDL_GetWindowID(attached_window->raw());
+					const auto pointer =
+					    offscreen_mouse_captured && captured_offscreen_mouse_id
+					        ? event_manager::mouse_pointer_for_window(window_id, *captured_offscreen_mouse_id)
+					        : event_manager::latest_mouse_pointer_for_window(window_id);
+					if (pointer)
 					{
-						if (entry.source_size.x == 0 || entry.source_size.y == 0)
+						const glm::vec2 mouse_position{pointer->x, pointer->y};
+						last_offscreen_mouse_id = pointer->mouse_id;
+						const glm::vec2 window_pixel_position{
+						    mouse_position.x * static_cast<float>(hit_frame.target_size.x) /
+						        static_cast<float>(logical_size.x),
+						    (static_cast<float>(logical_size.y) - mouse_position.y) *
+						        static_cast<float>(hit_frame.target_size.y) /
+						        static_cast<float>(logical_size.y)};
+						auto add_routed_position = [&](const hit_test_path_entry& entry)
 						{
-							return false;
-						}
+							if (entry.source_size.x == 0 || entry.source_size.y == 0)
+							{
+								return false;
+							}
 
-						const glm::vec2 routed_position =
-						    entry.source_pixel_coords * glm::vec2(target_size) / glm::vec2(entry.source_size);
-						last_offscreen_mouse_position = {
-						    routed_position.x, static_cast<float>(target_size.y) - routed_position.y};
-						has_last_offscreen_mouse_position = true;
-						io.AddMousePosEvent(last_offscreen_mouse_position.x, last_offscreen_mouse_position.y);
-						return true;
-					};
+							const glm::vec2 routed_position = entry.source_pixel_coords *
+							                                  glm::vec2(target_size) /
+							                                  glm::vec2(entry.source_size);
+							last_offscreen_mouse_position = {
+							    routed_position.x, static_cast<float>(target_size.y) - routed_position.y};
+							has_last_offscreen_mouse_position = true;
+							io.AddMousePosEvent(last_offscreen_mouse_position.x,
+							                    last_offscreen_mouse_position.y);
+							return true;
+						};
 
-					if (offscreen_mouse_captured &&
-					    captured_texture_identity == target->m_hit_test_identity &&
-					    !captured_hit_test_path.empty())
-					{
-						if (const auto surface_path = detail::map_hit_test_path_to_source_unbounded(
-						        hit_frame, captured_hit_test_path, window_pixel_position,
-						        target->m_hit_test_identity))
+						if (offscreen_mouse_captured &&
+						    captured_texture_identity == target->m_hit_test_identity &&
+						    !captured_hit_test_path.empty())
 						{
-							cursor_routed = add_routed_position(*surface_path);
+							if (const auto surface_path = detail::map_hit_test_path_to_source_unbounded(
+							        hit_frame, captured_hit_test_path, window_pixel_position,
+							        target->m_hit_test_identity))
+							{
+								cursor_routed = add_routed_position(*surface_path);
+							}
 						}
-					}
-					else if (const auto hit = attached_window->hit_test(mouse_position))
-					{
-						const auto surface_path = std::find_if(
-						    hit->path.begin(), hit->path.end(), [target](const hit_test_path_entry& entry)
-						    { return entry.source_identity == target->m_hit_test_identity; });
-						if (surface_path != hit->path.end() && add_routed_position(*surface_path))
+						else if (const auto hit = attached_window->hit_test(mouse_position))
 						{
-							captured_hit_test_path = hit->path;
-							cursor_routed = true;
+							const auto surface_path = std::find_if(
+							    hit->path.begin(), hit->path.end(), [target](const hit_test_path_entry& entry)
+							    { return entry.source_identity == target->m_hit_test_identity; });
+							if (surface_path != hit->path.end() && add_routed_position(*surface_path))
+							{
+								captured_hit_test_path = hit->path;
+								cursor_routed = true;
+							}
 						}
 					}
 				}
@@ -259,6 +314,7 @@ namespace mngl
 			{
 				captured_hit_test_path.clear();
 				has_last_offscreen_mouse_position = false;
+				last_offscreen_mouse_id.reset();
 			}
 		}
 		ImGui::NewFrame();
@@ -282,6 +338,7 @@ namespace mngl
 		const ImGuiIO& io = ImGui::GetIO();
 		input::set_gui_capture(io.WantCaptureMouse, io.WantCaptureKeyboard);
 		offscreen_mouse_captured = false;
+		captured_offscreen_mouse_id.reset();
 		if (requested_render_target && !captured_hit_test_path.empty())
 		{
 			for (int button = 0; button < ImGuiMouseButton_COUNT; ++button)
@@ -289,6 +346,7 @@ namespace mngl
 				if (io.MouseDown[button])
 				{
 					offscreen_mouse_captured = true;
+					captured_offscreen_mouse_id = last_offscreen_mouse_id;
 					break;
 				}
 			}
@@ -297,6 +355,8 @@ namespace mngl
 		{
 			captured_hit_test_path.clear();
 			has_last_offscreen_mouse_position = false;
+			captured_offscreen_mouse_id.reset();
+			last_offscreen_mouse_id.reset();
 		}
 	}
 
@@ -310,7 +370,8 @@ namespace mngl
 		{
 			if (requested_render_target != &target) [[unlikely]]
 			{
-				throw std::logic_error("Dear ImGui frame must be displayed to the texture passed to frame()");
+				throw std::logic_error("Dear ImGui frame must be displayed to the "
+				                       "texture passed to frame()");
 			}
 		}
 		else if (!target.raw_gpu_texture().is_swapchain_texture())
@@ -330,9 +391,20 @@ namespace mngl
 		{
 			return;
 		}
+		const bool swapchain_target = target.raw_gpu_texture().is_swapchain_texture();
+		const auto current_format =
+		    swapchain_target ? target.format() : attached_window->swapchain_texture_format();
+		const bool renderer_reconfigured = refresh_renderer_backend(current_format);
 		if (target.format() != color_target_format) [[unlikely]]
 		{
-			throw std::logic_error("Dear ImGui render target format changed; recreate its context");
+			throw std::logic_error("Dear ImGui render target format must match the "
+			                       "render_window swapchain");
+		}
+		if (renderer_reconfigured)
+		{
+			// SDL's backend NewFrame only recreates GPU objects; the ImGui frame is
+			// already rendered.
+			ImGui_ImplSDLGPU3_NewFrame();
 		}
 
 		SDL_GPUCommandBuffer* raw_command_buffer = command_buffer.raw();
@@ -369,6 +441,8 @@ namespace mngl
 		captured_texture_identity = 0;
 		offscreen_mouse_captured = false;
 		has_last_offscreen_mouse_position = false;
+		captured_offscreen_mouse_id.reset();
+		last_offscreen_mouse_id.reset();
 		if (!context)
 		{
 			return;
@@ -511,8 +585,8 @@ namespace mngl
 		}
 		if (id.empty() || id.find('\0') != std::string_view::npos) [[unlikely]]
 		{
-			throw std::invalid_argument(
-			    "Dear ImGui dockspace IDs cannot be empty or contain embedded null characters");
+			throw std::invalid_argument("Dear ImGui dockspace IDs cannot be empty or "
+			                            "contain embedded null characters");
 		}
 
 		owner->make_current();
@@ -529,9 +603,8 @@ namespace mngl
 		return window_scope(*owner, title, options, id);
 	}
 
-	inline imgui_context::window_scope imgui_context::dockspace_scope::window(std::string_view title,
-	                                                                          bool& open,
-	                                                                          const imgui_compat::window_options& options) const
+	inline imgui_context::window_scope imgui_context::dockspace_scope::window(
+	    std::string_view title, bool& open, const imgui_compat::window_options& options) const
 	{
 		return window_scope(*owner, title, options, id, &open);
 	}
@@ -543,17 +616,38 @@ namespace mngl
 			owner->make_current();
 			switch (end)
 			{
-			case end_action::window: ImGui::End(); break;
-			case end_action::child: ImGui::EndChild(); break;
-			case end_action::combo: ImGui::EndCombo(); break;
-			case end_action::popup: ImGui::EndPopup(); break;
-			case end_action::tab_bar: ImGui::EndTabBar(); break;
-			case end_action::tab_item: ImGui::EndTabItem(); break;
-			case end_action::table: ImGui::EndTable(); break;
-			case end_action::tooltip: ImGui::EndTooltip(); break;
-			case end_action::disabled: ImGui::EndDisabled(); break;
-			case end_action::tree_node: ImGui::TreePop(); break;
-			case end_action::none: break;
+			case end_action::window:
+				ImGui::End();
+				break;
+			case end_action::child:
+				ImGui::EndChild();
+				break;
+			case end_action::combo:
+				ImGui::EndCombo();
+				break;
+			case end_action::popup:
+				ImGui::EndPopup();
+				break;
+			case end_action::tab_bar:
+				ImGui::EndTabBar();
+				break;
+			case end_action::tab_item:
+				ImGui::EndTabItem();
+				break;
+			case end_action::table:
+				ImGui::EndTable();
+				break;
+			case end_action::tooltip:
+				ImGui::EndTooltip();
+				break;
+			case end_action::disabled:
+				ImGui::EndDisabled();
+				break;
+			case end_action::tree_node:
+				ImGui::TreePop();
+				break;
+			case end_action::none:
+				break;
 			}
 		}
 	}

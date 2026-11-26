@@ -1,9 +1,11 @@
 #pragma once
 
 #include "map.hpp"
+#include <functional>
 
 namespace mngl
 {
+
 	// A per-window, enableable view over an action_map. Contexts do not consume input.
 	class input_context
 	{
@@ -12,7 +14,7 @@ namespace mngl
 			bool down{};
 			bool pressed{};
 			bool released{};
-			float value{};
+			double value{};
 			input_release_reason release_reason{input_release_reason::none};
 		};
 
@@ -26,19 +28,23 @@ namespace mngl
 		mutable bool m_was_focused{true};
 		mutable bool m_wait_for_neutral{};
 		mutable std::uint64_t m_last_focus_loss_count{};
-		mutable std::unordered_map<std::string, action_state> m_states;
+		using state_map =
+		    std::unordered_map<std::string, action_state, detail::action_name_hash, std::equal_to<>>;
+		mutable state_map m_states;
 
 		static bool window_matches(SDL_WindowID binding_window, SDL_WindowID context_window)
 		{
 			return context_window == 0 || binding_window == 0 || binding_window == context_window;
 		}
 
-		static float apply_dead_zone(float value, float dead_zone)
+		static double apply_dead_zone(double value, double dead_zone)
 		{
-			const float magnitude = std::abs(value);
+			if (!std::isfinite(value))
+				return 0.0;
+			const double magnitude = std::abs(value);
 			if (magnitude <= dead_zone)
 				return 0.0f;
-			const float scaled = (magnitude - dead_zone) / (1.0f - dead_zone);
+			const double scaled = (magnitude - dead_zone) / (1.0 - dead_zone);
 			return std::copysign(scaled, value);
 		}
 
@@ -60,7 +66,7 @@ namespace mngl
 				result.release_reason = reason;
 		}
 
-		static void merge_axis(binding_sample& result, float value, float threshold)
+		static void merge_axis(binding_sample& result, double value, float threshold)
 		{
 			if (std::abs(value) > std::abs(result.value))
 				result.value = value;
@@ -110,9 +116,15 @@ namespace mngl
 			if (mice)
 				(void)input::mice();
 			if (joysticks)
+			{
+				input::joystick_action_bindings_requested.store(true, std::memory_order_release);
 				(void)input::joysticks();
+			}
 			if (gamepads)
+			{
+				input::gamepad_action_bindings_requested.store(true, std::memory_order_release);
 				(void)input::gamepads();
+			}
 			if (touches)
 				(void)input::touch_devices();
 			if (pens)
@@ -194,7 +206,7 @@ namespace mngl
 							    raw = state.scroll_delta.y;
 							    break;
 						    }
-						    const float value = apply_dead_zone(raw, source.dead_zone) * source.scale;
+						    const double value = apply_dead_zone(raw, source.dead_zone) * source.scale;
 						    merge_axis(result, value, source.threshold);
 					    }
 				    }
@@ -267,7 +279,7 @@ namespace mngl
 							    result.release_reason = input_release_reason::device_removed;
 							    continue;
 						    }
-						    const float value =
+						    const double value =
 						        apply_dead_zone(normalize_joystick_axis(state.axes[source.axis]),
 								                source.dead_zone) *
 						        source.scale;
@@ -292,7 +304,7 @@ namespace mngl
 						    if (source.axis == gamepad_axis::lefttrigger ||
 							    source.axis == gamepad_axis::righttrigger)
 							    raw = std::max(0.0f, raw);
-						    const float value = apply_dead_zone(raw, source.dead_zone) * source.scale;
+						    const double value = apply_dead_zone(raw, source.dead_zone) * source.scale;
 						    merge_axis(result, value, source.threshold);
 					    }
 				    }
@@ -309,7 +321,7 @@ namespace mngl
 							    (void)finger_id;
 							    if (!finger.down || !window_matches(finger.window_id, m_window_id))
 								    continue;
-							    const float value =
+							    const double value =
 							        apply_dead_zone(finger.pressure, source.dead_zone) * source.scale;
 							    merge_axis(result, value, source.threshold);
 						    }
@@ -325,7 +337,7 @@ namespace mngl
 						    if ((source.device && *source.device != id) || !state.in_proximity ||
 							    !window_matches(state.window_id, m_window_id))
 							    continue;
-						    const float value =
+						    const double value =
 						        apply_dead_zone(state.axes[index], source.dead_zone) * source.scale;
 						    merge_axis(result, value, source.threshold);
 					    }
@@ -365,25 +377,15 @@ namespace mngl
 			bool baseline = m_baseline || revision != m_last_revision;
 			const bool waiting_for_neutral = m_wait_for_neutral && focused;
 			std::lock_guard lock(input::state_mutex);
-			if (revision != m_last_revision)
-			{
-				for (auto state = m_states.begin(); state != m_states.end();)
-				{
-					if (!m_map->actions.contains(state->first))
-						state = m_states.erase(state);
-					else
-						++state;
-				}
-			}
+			state_map next;
+			next.reserve(m_map->actions.size());
 			bool any_binding_active = false;
 			for (const auto& [name, bindings] : m_map->actions)
 			{
-				auto [state_entry, inserted] = m_states.try_emplace(name);
-				(void)inserted;
 				bool current_down = false;
 				bool source_pressed = false;
 				bool source_released = false;
-				float value = 0.0f;
+				double value = 0.0;
 				input_release_reason reason = input_release_reason::none;
 				if (focused)
 				{
@@ -398,7 +400,7 @@ namespace mngl
 							current_down = current_down || sample.down;
 							source_pressed = source_pressed || sample.pressed;
 							source_released = source_released || sample.released;
-							value = std::clamp(value + sample.value, -1.0f, 1.0f);
+							value += sample.value;
 							if (reason == input_release_reason::none &&
 							    sample.release_reason != input_release_reason::none)
 								reason = sample.release_reason;
@@ -415,10 +417,11 @@ namespace mngl
 					value = 0.0f;
 				}
 
-				const bool previous_down = state_entry->second.down;
+				const auto previous = m_states.find(name);
+				const bool previous_down = previous != m_states.end() && previous->second.down;
 				action_state state;
 				state.down = current_down;
-				state.value = m_enabled ? value : 0.0f;
+				state.value = m_enabled ? static_cast<float>(std::clamp(value, -1.0, 1.0)) : 0.0f;
 				if (!baseline)
 				{
 					const bool same_frame_press_and_release =
@@ -434,7 +437,7 @@ namespace mngl
 					if (state.released)
 						state.release_reason = reason;
 				}
-				state_entry->second = state;
+				next.emplace(name, state);
 			}
 			if (waiting_for_neutral && !any_binding_active)
 			{
@@ -442,6 +445,7 @@ namespace mngl
 				baseline = true;
 			}
 
+			m_states = std::move(next);
 			m_last_frame = frame;
 			m_last_revision = revision;
 			m_baseline = false;
@@ -487,7 +491,7 @@ namespace mngl
 		[[nodiscard]] action_state state(std::string_view action) const
 		{
 			refresh();
-			const auto it = m_states.find(std::string(action));
+			const auto it = m_states.find(action);
 			return it == m_states.end() ? action_state{} : it->second;
 		}
 

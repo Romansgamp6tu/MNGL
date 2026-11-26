@@ -203,19 +203,23 @@ namespace mngl::gpu
 				    std::format("Shader bytecode is empty: '{}'", bytecode_path.string()));
 			}
 
-			glm::uvec3 threadgroup_size = options.compute_threadgroup_size;
-			if (threadgroup_size.x == 0 && threadgroup_size.y == 0 && threadgroup_size.z == 0)
+			glm::uvec3 threadgroup_size{};
+			if (!reflection_source.empty())
 			{
-				if (reflection_source.empty()) [[unlikely]]
+				threadgroup_size = resolve_compute_threadgroup_size(reflection_source, options);
+			}
+			else
+			{
+				threadgroup_size = options.compute_threadgroup_size;
+				if (threadgroup_size.x == 0 && threadgroup_size.y == 0 && threadgroup_size.z == 0) [[unlikely]]
 				{
 					throw std::invalid_argument("Loading compute bytecode requires compute_threadgroup_size "
 					                            "or the matching source file");
 				}
-				threadgroup_size = resolve_compute_threadgroup_size(reflection_source, options);
-			}
-			else if (threadgroup_size.x == 0 || threadgroup_size.y == 0 || threadgroup_size.z == 0) [[unlikely]]
-			{
-				throw std::invalid_argument("Compute threadgroup dimensions must all be non-zero");
+				if (threadgroup_size.x == 0 || threadgroup_size.y == 0 || threadgroup_size.z == 0) [[unlikely]]
+				{
+					throw std::invalid_argument("Compute threadgroup dimensions must all be non-zero");
+				}
 			}
 
 			uniform_reflection reflected_uniforms{};
@@ -275,3 +279,4 @@ namespace mngl::gpu
 #include "detail/shader_loader/process.inc"
 	};
 } // namespace mngl::gpu
+

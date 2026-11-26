@@ -12,6 +12,10 @@
 
 SVG загружается векторной геометрией через `mngl::two_d::svg_object` и рисуется как обычный drawable. Для GPU-загрузки достаточно вызвать `upload(device)`; детали командного буфера необязательны. Один GPU-спрайт можно создать через `svg_sprite::from_file()`, а для множества экземпляров — один раз загрузить общий `svg_object`. Точность кривых и дуг настраивается через `svg_load_options`; при необходимости её можно зафиксировать с учётом view и пиксельного размера цели. Геометрическое попадание по SVG-элементам включается параметром `hit_testable`. Поддерживаемый SVG-поднабор и примеры находятся в разделе [SVG](svg.md).
 
+Небольшой фрагмент внутри игрового цикла: `window` и значения `bounds`/`color`
+уже созданы. Первый полностью собираемый пример находится в
+[быстром старте](quick-start.md).
+
 ```cpp
 auto frame = window.frame();
 frame.draw(mngl::two_d::rectangle_shape{bounds, color});
@@ -21,6 +25,45 @@ frame.display();
 Если frame scope уничтожен без `display()`, он отменяет кадр и освобождает цель. Старый стиль `clear() → draw() → display()` также поддерживается.
 
 Те же операции доступны у `mngl::texture`, поэтому текстура может быть самостоятельной целью рендеринга. Frame scope не владеет окном или целевой текстурой: они должны жить до `display()` либо отмены кадра. Спрайты, стандартные фигуры, пользовательская геометрия и текст реализуют `drawable`; изображение показывается через `mngl::sprite`, который хранит его положение, размер и поворот.
+
+<a id="sprite-atlas-animation"></a>
+
+## Анимация по кадрам атласа
+
+Для анимации из регионов атласа текстур используйте `mngl::sprite_animation`. У каждого кадра есть свой `texture_region` и длительность в секундах. По умолчанию анимация зациклена; `sprite_animation::playback_mode::once` останавливает её на последнем кадре. Вызовите `update(dt)` из игрового цикла и примените текущий регион к спрайту через `apply_to(sprite)`. Контроллер не владеет страницами атласа: создавайте регионы в `window.textures()`, использованном для отрисовки.
+
+Фрагмент анимационного цикла. Полная программа, включая загрузку полосы кадров
+и управление паузой, приведена в [руководстве анимации](sprite-animation.md).
+
+```cpp
+#include "input.hpp"
+#include "render_window.hpp"
+#include "texture.hpp"
+
+mngl::render_window window("Animation", {1280, 720});
+const auto page = window.textures().add(mngl::texture("assets/player.png"));
+const auto& atlas = window.textures();
+
+mngl::sprite_animation walk({
+	{atlas.region(page, {0.00f, 0.0f, 0.25f, 1.0f}), 0.12},
+	{atlas.region(page, {0.25f, 0.0f, 0.50f, 1.0f}), 0.12},
+	{atlas.region(page, {0.50f, 0.0f, 0.75f, 1.0f}), 0.12},
+	{atlas.region(page, {0.75f, 0.0f, 1.00f, 1.0f}), 0.12},
+});
+mngl::sprite player(walk.current_region(), {0.0f, 0.0f, 1.0f, 1.0f});
+
+while (mngl::input::next_frame())
+{
+	walk.update(mngl::input::delta_time());
+	walk.apply_to(player);
+
+	auto frame = window.frame();
+	frame.draw(player);
+	frame.display();
+}
+```
+
+`pause()` приостанавливает анимацию, `play()` возобновляет её, а `restart()` начинает заново. Для однократного воспроизведения передайте `sprite_animation::playback_mode::once`; `finished()` сообщает о достижении последнего кадра.
 
 ## Пользовательские отрисовщики
 

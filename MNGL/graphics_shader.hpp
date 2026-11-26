@@ -402,18 +402,19 @@ namespace mngl::gpu
 				const std::uint32_t matrix_stride =
 				    (matrix_columns * field.scalar_size + 15) & ~std::uint32_t(15);
 				const std::uint32_t expected_element_size =
-				    field.is_matrix ? matrix_rows * matrix_stride
+				    field.is_matrix ? (matrix_rows - 1) * matrix_stride + matrix_columns * field.scalar_size
 					                : static_cast<std::uint32_t>(field.rows) * field.scalar_size;
 				const std::uint32_t expected_array_stride =
-				    field.is_array ? (field.is_matrix ? expected_element_size
-					                                  : (expected_element_size + 15) & ~std::uint32_t(15))
-					               : 0;
+				    field.is_array ? (expected_element_size + 15) & ~std::uint32_t(15) : 0;
 				const bool array_size_valid =
 				    !field.is_array ||
 				    (field.array_count > 0 &&
-					 expected_array_stride <= std::numeric_limits<std::uint32_t>::max() / field.array_count);
+					 (field.array_count - 1) <=
+					     (std::numeric_limits<std::uint32_t>::max() - expected_element_size) /
+					         expected_array_stride);
 				const std::uint32_t expected_storage_size =
-				    field.is_array ? expected_array_stride * field.array_count : expected_element_size;
+				    field.is_array ? (field.array_count - 1) * expected_array_stride + expected_element_size
+					               : expected_element_size;
 				if (field.name.empty() || field.rows == 0 || field.rows > 4 || field.columns == 0 ||
 				    field.columns > 4 || !valid_scalar_size || field.byte_offset % field.scalar_size != 0 ||
 				    field.byte_offset > block_size || field.element_size != expected_element_size ||
@@ -803,16 +804,18 @@ namespace mngl::gpu
 			if (!m_handle) [[unlikely]]
 			{
 				const char* driver = SDL_GetGPUDeviceDriver(m_device);
-				throw sdl_error(std::format(
-				    "Failed to create GPU shader '{}' on driver '{}': stage={}, format={}, bytecode={} bytes, "
-				    "entrypoint='{}', "
-				    "resources[samplers={}, storage_textures={}, storage_buffers={}, uniform_buffers={}]",
-				    m_debug_name.empty() ? "<unnamed>" : m_debug_name,
-				    driver ? driver : "<unknown>",
-				    static_cast<unsigned int>(asset.stage), static_cast<unsigned int>(asset.code.format),
-				    asset.code.bytes.size(), asset.entrypoint, asset.resources.samplers,
-				    asset.resources.storage_textures, asset.resources.storage_buffers,
-				    asset.resources.uniform_buffers), location);
+				throw sdl_error(
+				    std::format(
+				        "Failed to create GPU shader '{}' on driver '{}': stage={}, format={}, bytecode={} "
+						"bytes, "
+				        "entrypoint='{}', "
+				        "resources[samplers={}, storage_textures={}, storage_buffers={}, uniform_buffers={}]",
+				        m_debug_name.empty() ? "<unnamed>" : m_debug_name, driver ? driver : "<unknown>",
+				        static_cast<unsigned int>(asset.stage), static_cast<unsigned int>(asset.code.format),
+				        asset.code.bytes.size(), asset.entrypoint, asset.resources.samplers,
+				        asset.resources.storage_textures, asset.resources.storage_buffers,
+				        asset.resources.uniform_buffers),
+				    location);
 			}
 		}
 

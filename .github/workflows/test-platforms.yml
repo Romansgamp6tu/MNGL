@@ -4,7 +4,6 @@ on:
   push:
     branches: ["**"]
     paths-ignore:
-      - ".github/workflows/**"
       - "README.md"
       - "docs/**"
   pull_request:
@@ -23,25 +22,11 @@ concurrency:
 
 jobs:
   test-matrix:
-    # Keep old matrix check names, but run only the Linux entry on the server.
-    if: matrix.platform == 'linux' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: windows
-            runner: windows-latest
-          - platform: linux
-            runner: ubuntu-24.04
-          - platform: macos-arm64
-            runner: macos-15
-            cmake_arch: arm64
-          - platform: macos-x64
-            runner: macos-15-intel
-            cmake_arch: x86_64
+    # Only the Linux self-hosted runner is currently available.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, linux, x64]
     container:
-      image: node:24-bookworm
+      image: node:24-trixie
       options: --user 0:0
     defaults:
       run:
@@ -57,7 +42,7 @@ jobs:
       - name: Install Linux build tools
         run: |
           apt-get update
-          apt-get install --yes sudo build-essential cmake ninja-build git pkg-config python3 libfreetype-dev
+          apt-get install --yes sudo build-essential cmake ninja-build git pkg-config python3 libfreetype-dev gh
 
       - name: Set up pinned SDL3 and SDL3_image
         id: sdl
@@ -78,7 +63,7 @@ jobs:
             -DBUILD_TESTING=ON -DMNGL_BUILD_MOD_EXAMPLE=ON
 
       - name: Build all targets
-        run: cmake --build build --parallel 4
+        run: cmake --build build --parallel 2
 
       - name: Run CTest suite
         env:
@@ -89,4 +74,7 @@ jobs:
 
       - name: Restore runner workspace ownership
         if: always()
-        run: chown -R 1000:1000 "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+        run: |
+          runner_uid="$(stat -c '%u' "$RUNNER_TEMP/_github_workflow/event.json")"
+          runner_gid="$(stat -c '%g' "$RUNNER_TEMP/_github_workflow/event.json")"
+          chown -R "$runner_uid:$runner_gid" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"

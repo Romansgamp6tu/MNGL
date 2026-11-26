@@ -2,39 +2,45 @@
 
 Здесь перечислены основные заголовки MNGL и руководство по соответствующему модулю. Встроенные заголовки `include/SDL3`, `include/SDL3_image` и `include/glm` — сторонние библиотеки; их документация здесь не дублируется.
 
+Если вы только подключаете библиотеку, начните с
+[учебного маршрута](../index.md), [полных примеров](../examples.md) и
+[руководства по CMake](../getting-started/using-mngl.md). Эта карта полезна,
+когда уже известно, какую задачу нужно решить и какой заголовок подключить.
+
 Подключение к стороннему проекту описано в разделе [Использование MNGL](../getting-started/using-mngl.md),
 сборка самого проекта — в разделе [Сборка и пакеты](../getting-started/building.md).
-В development-пакете `main` заголовки ниже доступны с префиксом `MNGL/`,
+В актуальном development-пакете заголовки ниже доступны с префиксом `MNGL/`,
 например `<MNGL/audio.hpp>`; CMake target также поддерживает короткие include paths.
 
 | Заголовки | Назначение | Руководство |
 |---|---|---|
 | `mngl.hpp` | Необязательный umbrella-заголовок для обычного приложения: окна, ввод, 2D и его настройки, аудио, файлы и платформенные сервисы | [Подключение MNGL](../getting-started/using-mngl.md) |
-| `window.hpp`, `input.hpp` | Окна, дисплеи, отдельные устройства и состояния ввода | [Окна и ввод](../core/windows-and-input.md) |
-| `action_map.hpp` | Привязки действий, контексты и пресеты ввода | [Действия и контексты](../core/windows-and-input.md#actions-and-contexts) |
+| `window.hpp`, `input.hpp` | Окна, дисплеи (текущая и естественная ориентация), отдельные устройства и состояния ввода | [Окна и ввод](../core/windows-and-input.md) |
+| `action_map.hpp` | Привязки действий, контексты, пресеты и сохранение профилей | [Действия и контексты](../core/windows-and-input.md#actions-and-contexts) |
 | `audio.hpp` | `sound`, потоковая `music`, capture, живой PCM и пространственные голоса | [Аудио](../core/audio.md) |
 | `dialog.hpp` | Системные диалоги выбора файлов и папок | [Системные диалоги](../core/dialogs.md) |
-| `clipboard.hpp` | Текстовый и MIME-буфер обмена, отложенная выдача данных | [Буфер обмена](../core/clipboard.md) |
+| `clipboard.hpp` | Текстовый и MIME-буфер обмена, выдача снимка данных с одним буфером на формат | [Буфер обмена](../core/clipboard.md) |
 | `storage.hpp` | RAII-хранилища приложения, пользователя и локального каталога | [Хранилище и файлы](../core/storage.md) |
 | `async_io.hpp` | Фоновый ввод-вывод с типизированным результатом и ожиданием запроса | [Асинхронный ввод-вывод](../core/async-io.md) |
-| `process.hpp` | Запуск процессов, управление потоками и получение кода завершения | [Процессы](../core/processes.md) |
+| `process.hpp` | Запуск процессов, pipe-ввод с `close_stdin()` для EOF и получение кода завершения | [Процессы](../core/processes.md) |
 | `paths.hpp` | Каталоги приложения и стандартные папки пользователя | [Runtime и утилиты](../core/runtime-and-utilities.md) |
-| `imgui_compat.hpp` | MNGL scopes и классы-виджеты с собственным состоянием поверх Dear ImGui; меню, canvas, ввод, GPU overlay и шрифты | [Окна и ввод](../core/windows-and-input.md) |
-| `event.hpp` | Типизированные события SDL и приложения, глобальный менеджер и локальные `event_bus` для подсистем | [События](../core/events.md) |
+| `imgui_compat.hpp` | MNGL scopes и классы-виджеты с собственным состоянием поверх Dear ImGui; `button::is_small()`, меню, canvas, ввод, GPU overlay и шрифты | [Окна и ввод](../core/windows-and-input.md) |
+| `event.hpp` | Типизированные события SDL и приложения, глобальный менеджер и локальные `event_bus` для подсистем; снимок подписчиков и управляемая доставка SDL-очереди | [События](../core/events.md) |
 | `surface.hpp`, `pixel_format.hpp` | SDL surfaces, изображения и форматы пикселей | [Поверхности и цвета](../core/media-and-colors.md) |
-| `color.hpp` | Цвета, преобразования RGB/HSV/HSL | [Поверхности и цвета](../core/media-and-colors.md) |
-| `line.hpp`, `rectangle.hpp` | Геометрические примитивы и пересечения | [Геометрия](../core/geometry.md) |
+| `color.hpp` | Цвета, строгий HEX-парсер, RGB/RGBA-коды, constexpr HSV/HSL и sRGB-преобразования, straight-alpha compositing | [Поверхности и цвета](../core/media-and-colors.md) |
+| `line.hpp`, `rectangle.hpp` | Геометрия, пересечения с включёнными границами и bounds точек внутри clip | [Геометрия](../core/geometry.md) |
 | `utilities.hpp`, `paths.hpp`, `logger.hpp` (`logger.h` для старых глобальных имён), `iupdate.h`, `proxy.hpp` | Runtime, идентичность приложения, пути, ошибки, logging, обновления и SDL interop | [Runtime и утилиты](../core/runtime-and-utilities.md) |
 | `console.hpp` | Реестр типизированных CLI-команд, режимы вывода и результатов обработчиков | [Консольные команды](../core/console.md) |
-| `gpu_optimizations.hpp` | Общие функции включения и выключения GPU culling, CPU culling, сортировки, scene culling и обновления dirty regions | [Переключатели оптимизаций 2D](../2d/advanced-rendering.md#переключатели-оптимизаций-2d) |
-| `device.hpp`, `command_buffer.hpp` | Разделяемое время жизни GPU device и явная отправка команд | [Устройство и команды](../gpu/device-and-commands.md) |
+| `gpu_optimizations.hpp` | Общие функции включения и выключения GPU culling, CPU culling, сортировки, scene culling и обновления dirty regions | [Переключатели оптимизаций 2D](../2d/advanced-rendering.md#2d-optimizations) |
+| `sprite_animation` в `renderer2d.hpp` | Проигрывание последовательности `texture_region` с отдельной длительностью кадра | [Анимация по атласу](../2d/sprite-animation.md) |
+| `device.hpp`, `command_buffer.hpp` | GPU device, HDR/SDR composition и vsync swapchain, явная отправка команд | [Устройство и команды](../gpu/device-and-commands.md) |
 | `gpu_buffer.hpp`, `gpu_texture.hpp`, `sampler.hpp` | Низкоуровневые GPU-ресурсы с RAII-владением | [GPU-ресурсы](../gpu/resources.md) |
 | `graphics_shader.hpp`, `shader_loader.hpp` | Загрузка/компиляция шейдеров, uniforms и bindings | [Шейдеры](../gpu/shaders.md) |
-| `vertex_layout.hpp`, `graphics_pipeline.hpp`, `render_pass.hpp` | Vertex input и графические проходы | [Pipeline и render pass](../gpu/pipelines-and-passes.md) |
-| `render_window.hpp`, `renderer2d.hpp`, `texture.hpp`, `view.hpp`, `transform.hpp`, `hit_test.hpp` | Высокоуровневый 2D API, включая геометрию, GPU mesh, кэшированные слои и переключатели рендеринга | [Раздел 2D](../2d/index.md), [переключатели оптимизаций 2D](../2d/advanced-rendering.md#переключатели-оптимизаций-2d) |
-| `svg_object.hpp`, `svg_sprite.hpp` | Векторная геометрия SVG, стили, градиенты, маркеры, изображения, маски и фильтры. Загрузка на CPU, общие GPU ресурсы и hit testing | [SVG](../2d/svg.md) |
-| `batcher2d.hpp` | Низкоуровневая пакетная 2D-отрисовка, GPU culling и CPU-профилирование кадров | [Расширенный 2D-рендеринг](../2d/advanced-rendering.md) |
-| `text.hpp` | Шрифты, текст, текстовые документы и атлас глифов | [Рендер текста](../2d/text-rendering.md) |
+| `vertex_layout.hpp`, `graphics_pipeline.hpp`, `render_pass.hpp` | Vertex input, графические проходы с проверкой активного состояния и uniform-данные в активном command buffer | [Pipeline и render pass](../gpu/pipelines-and-passes.md) |
+| `render_window.hpp`, `renderer2d.hpp`, `texture.hpp`, `view.hpp`, `transform.hpp`, `hit_test.hpp` | Высокоуровневый 2D API: форматы текстур и swapchain, анимации атласа, геометрия, GPU mesh, кэшированные слои и hit testing | [Раздел 2D](../2d/index.md), [форматы и загрузка изображений](../gpu/resources.md), [переключатели оптимизаций 2D](../2d/advanced-rendering.md#2d-optimizations) |
+| `svg_object.hpp`, `svg_sprite.hpp` | Векторная геометрия SVG, градиенты, маркеры, изображения, маски, фильтры и hit testing | [SVG](../2d/svg.md) |
+| `batcher2d.hpp` | Низкоуровневая пакетная 2D-отрисовка, выбор формата встроенных шейдеров по GPU device, GPU culling и CPU-профилирование кадров | [Расширенный 2D-рендеринг](../2d/advanced-rendering.md) |
+| `text.hpp` | Шрифты, текст, автоматический перенос строк, текстовые документы и атлас глифов | [Рендер текста](../2d/text-rendering.md) |
 | `mods.hpp`, `mod_loader.hpp` | Точки расширения и загрузка нативных модов | [Контракт модов](../mods/api-contract.md) |
 
 `detail/audio/sdl3_mixer_backend.hpp` — внутренняя реализация аудио; приложению

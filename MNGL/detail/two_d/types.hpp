@@ -3,9 +3,13 @@
 #include "common.hpp"
 #include "../../gpu_optimizations.hpp"
 
+#include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <initializer_list>
 #include <span>
+#include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace mngl::detail
@@ -281,6 +285,170 @@ namespace mngl
 		void draw(two_d::frame_2d& frame) const override;
 		void prepare(two_d::frame_2d& frame) const override;
 		const gpu::graphics_shader_asset* m_fragment_shader = nullptr;
+	};
+
+	class sprite_animation
+	{
+	public:
+		struct frame
+		{
+			two_d::texture_region source{};
+			double duration_seconds{};
+		};
+
+		enum class playback_mode : std::uint8_t
+		{
+			loop,
+			once
+		};
+
+		explicit sprite_animation(std::vector<frame> frames, playback_mode mode = playback_mode::loop)
+		    : m_frames(std::move(frames)), m_mode(mode)
+		{
+			if (m_frames.empty()) [[unlikely]]
+			{
+				throw std::invalid_argument("Sprite animation must contain at least one frame");
+			}
+			if (m_mode != playback_mode::loop && m_mode != playback_mode::once) [[unlikely]]
+			{
+				throw std::invalid_argument("Invalid sprite animation playback mode");
+			}
+
+			for (const auto& value : m_frames)
+			{
+				if (!valid_region(value.source)) [[unlikely]]
+				{
+					throw std::invalid_argument(
+					    "Sprite animation frame must use a valid normalized texture region");
+				}
+				if (!std::isfinite(value.duration_seconds) || value.duration_seconds <= 0.0) [[unlikely]]
+				{
+					throw std::invalid_argument("Sprite animation frame duration must be finite and positive");
+				}
+				m_total_duration += value.duration_seconds;
+				if (!std::isfinite(m_total_duration)) [[unlikely]]
+				{
+					throw std::length_error("Sprite animation duration is too large");
+				}
+			}
+		}
+
+		explicit sprite_animation(std::initializer_list<frame> frames,
+		                         playback_mode mode = playback_mode::loop)
+		    : sprite_animation(std::vector<frame>(frames), mode)
+		{
+		}
+
+		void update(double delta_seconds)
+		{
+			if (!std::isfinite(delta_seconds) || delta_seconds < 0.0) [[unlikely]]
+			{
+				throw std::invalid_argument("Sprite animation delta time must be finite and non-negative");
+			}
+			if (!m_playing || delta_seconds == 0.0)
+			{
+				return;
+			}
+
+			if (m_mode == playback_mode::once)
+			{
+				advance_once(delta_seconds);
+				return;
+			}
+			advance_loop(delta_seconds);
+		}
+
+		void play() noexcept { m_playing = !m_finished; }
+		void pause() noexcept { m_playing = false; }
+
+		void restart() noexcept
+		{
+			m_frame_index = 0;
+			m_frame_elapsed = 0.0;
+			m_finished = false;
+			m_playing = true;
+		}
+
+		[[nodiscard]] bool playing() const noexcept { return m_playing; }
+		[[nodiscard]] bool finished() const noexcept { return m_finished; }
+		[[nodiscard]] std::size_t frame_count() const noexcept { return m_frames.size(); }
+		[[nodiscard]] std::size_t frame_index() const noexcept { return m_frame_index; }
+		[[nodiscard]] playback_mode mode() const noexcept { return m_mode; }
+
+		[[nodiscard]] const two_d::texture_region& current_region() const noexcept
+		{
+			return m_frames[m_frame_index].source;
+		}
+
+		void apply_to(sprite& target) const noexcept
+		{
+			target.source = current_region();
+			target.source_texture = nullptr;
+		}
+
+	private:
+		[[nodiscard]] static bool valid_region(const two_d::texture_region& value) noexcept
+		{
+			const auto& uv = value.uv_bounds;
+			return value.page.valid() && std::isfinite(uv.x) && std::isfinite(uv.y) && std::isfinite(uv.z) &&
+			       std::isfinite(uv.w) && uv.x >= 0.0f && uv.x <= 1.0f && uv.y >= 0.0f && uv.y <= 1.0f &&
+			       uv.z >= 0.0f && uv.z <= 1.0f && uv.w >= 0.0f && uv.w <= 1.0f;
+		}
+
+		void advance_once(double remaining) noexcept
+		{
+			while (remaining > 0.0)
+			{
+				const double until_next = m_frames[m_frame_index].duration_seconds - m_frame_elapsed;
+				if (remaining < until_next)
+				{
+					m_frame_elapsed += remaining;
+					return;
+				}
+
+				remaining -= until_next;
+				if (m_frame_index + 1 == m_frames.size())
+				{
+					m_frame_elapsed = m_frames[m_frame_index].duration_seconds;
+					m_finished = true;
+					m_playing = false;
+					return;
+				}
+
+				++m_frame_index;
+				m_frame_elapsed = 0.0;
+			}
+		}
+
+		void advance_loop(double delta_seconds) noexcept
+		{
+			double remaining = std::fmod(delta_seconds, m_total_duration);
+			const double until_next = m_frames[m_frame_index].duration_seconds - m_frame_elapsed;
+			if (remaining < until_next)
+			{
+				m_frame_elapsed += remaining;
+				return;
+			}
+
+			remaining -= until_next;
+			m_frame_index = (m_frame_index + 1) % m_frames.size();
+			m_frame_elapsed = 0.0;
+			remaining = std::fmod(remaining, m_total_duration);
+			while (remaining >= m_frames[m_frame_index].duration_seconds)
+			{
+				remaining -= m_frames[m_frame_index].duration_seconds;
+				m_frame_index = (m_frame_index + 1) % m_frames.size();
+			}
+			m_frame_elapsed = remaining;
+		}
+
+		std::vector<frame> m_frames;
+		playback_mode m_mode;
+		std::size_t m_frame_index{};
+		double m_frame_elapsed{};
+		double m_total_duration{};
+		bool m_playing{true};
+		bool m_finished{};
 	};
 } // namespace mngl
 

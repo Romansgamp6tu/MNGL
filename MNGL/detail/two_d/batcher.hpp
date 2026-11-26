@@ -293,7 +293,8 @@ namespace mngl::gpu
 
 		explicit batcher2d(const device& dev, texture_format target_format,
 		                   std::size_t initial_sprite_capacity = 1024)
-		    : batcher2d(dev, target_format, batcher2d_shader_assets::load_default(dev), initial_sprite_capacity)
+		    : batcher2d(dev, target_format, batcher2d_shader_assets::load_default(dev),
+			            initial_sprite_capacity)
 		{
 		}
 
@@ -2432,12 +2433,12 @@ namespace mngl::gpu
 		{
 			shader_compile_options geometry_options{};
 			geometry_options.stage = shader_stage::compute;
-			geometry_options.format = static_cast<shader_format>(default_shader_format);
+			geometry_options.format = detail::select_2d_shader_format(m_device.shader_format());
 			geometry_options.resources.storage_buffers = 1;
 			geometry_options.resources.read_write_storage_buffers = 1;
 			geometry_options.resources.uniform_buffers = 1;
 			const auto geometry_shader = shader_loader::compile_compute(
-			    paths::shader_directory("batcher2d.cull.hlsl") / "batcher2d.cull.hlsl", geometry_options);
+			    paths::application_directory() / "shaders" / "batcher2d.cull.hlsl", geometry_options);
 			auto geometry_pipeline = compute_pipeline_builder{}
 			                             .set_debug_name("MNGL 2D geometry block culling")
 			                             .set_compute_shader(geometry_shader)

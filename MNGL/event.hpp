@@ -27,6 +27,7 @@ namespace mngl
 	using displayDesktopModeChanged = display_desktop_mode_changed;
 	using displayCurrentModeChanged = display_current_mode_changed;
 	using displayContentScaleChanged = display_content_scale_changed;
+	using displayUsableBoundsChanged = display_usable_bounds_changed;
 	using windowShown = window_shown;
 	using windowHidden = window_hidden;
 	using windowExposed = window_exposed;
@@ -51,6 +52,7 @@ namespace mngl
 	using windowEnterFullscreen = window_enter_fullscreen;
 	using windowLeaveFullscreen = window_leave_fullscreen;
 	using windowDestroyed = window_destroyed;
+	using windowHdrStateChanged = window_hdr_state_changed;
 	using keyboardDevice = keyboard_device;
 	using keymapChanged = keymap_changed;
 	using keyboardAdded = keyboard_added;
@@ -135,3 +137,4 @@ namespace mngl
 		poll_events();
 	}
 } // namespace mngl
+

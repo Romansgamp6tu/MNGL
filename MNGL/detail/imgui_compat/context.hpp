@@ -188,7 +188,7 @@ namespace mngl
 			[[nodiscard]] bool input_text(std::string_view label, std::string& value,
 			                              std::string_view hint = {}) const;
 			[[nodiscard]] bool input_text_multiline(std::string_view label, std::string& value,
-			                                       glm::vec2 size) const;
+			                                        glm::vec2 size) const;
 			template <imgui_compat::detail::scalar_input_value T>
 			[[nodiscard]] bool input(std::string_view label, T& value) const;
 			[[nodiscard]] bool input(std::string_view label, bool& value) const;
@@ -228,32 +228,30 @@ namespace mngl
 			void close_popup() const;
 
 			[[nodiscard]] child_scope child(std::string_view id,
-			                               const imgui_compat::child_options& options = {}) const;
+			                                const imgui_compat::child_options& options = {}) const;
 			[[nodiscard]] combo_scope begin_combo(std::string_view label, std::string_view preview) const;
 			[[nodiscard]] popup_scope popup(std::string_view id,
-			                               const imgui_compat::window_options& options = {}) const;
+			                                const imgui_compat::window_options& options = {}) const;
 			[[nodiscard]] popup_scope modal(std::string_view id, bool& open,
-			                               const imgui_compat::window_options& options = {}) const;
-			[[nodiscard]] popup_scope context_popup(
-			    std::string_view id = {}, mouse_button button = mouse_button::right) const;
-			[[nodiscard]] tab_bar_scope tab_bar(
-			    std::string_view id, const imgui_compat::tab_bar_options& options = {}) const;
-			[[nodiscard]] tab_item_scope tab(
-			    std::string_view label, bool* open = nullptr,
-			    const imgui_compat::tab_item_options& options = {}) const;
-			[[nodiscard]] table_scope table(
-			    std::string_view id, int columns,
-			    const imgui_compat::table_options& options = {}) const;
+			                                const imgui_compat::window_options& options = {}) const;
+			[[nodiscard]] popup_scope context_popup(std::string_view id = {},
+			                                        mouse_button button = mouse_button::right) const;
+			[[nodiscard]] tab_bar_scope tab_bar(std::string_view id,
+			                                    const imgui_compat::tab_bar_options& options = {}) const;
+			[[nodiscard]] tab_item_scope tab(std::string_view label, bool* open = nullptr,
+			                                 const imgui_compat::tab_item_options& options = {}) const;
+			[[nodiscard]] table_scope table(std::string_view id, int columns,
+			                                const imgui_compat::table_options& options = {}) const;
 			[[nodiscard]] tooltip_scope tooltip() const;
 			[[nodiscard]] disabled_scope disabled(bool value = true) const;
 			[[nodiscard]] tree_node_scope tree_node(
 			    std::string_view label, const imgui_compat::tree_node_options& options = {}) const;
 			[[nodiscard]] canvas_scope canvas(std::string_view id, glm::vec2 size,
-			                                const imgui_compat::canvas_options& options = {}) const;
+			                                  const imgui_compat::canvas_options& options = {}) const;
 			[[nodiscard]] id_scope push_id(std::string_view id) const;
 			[[nodiscard]] id_scope push_id(int id) const;
-			[[nodiscard]] style_color_scope push_style_color(
-			    imgui_compat::color_role role, const ::mngl::color& value) const;
+			[[nodiscard]] style_color_scope push_style_color(imgui_compat::color_role role,
+			                                                 const ::mngl::color& value) const;
 
 			void next_row(float minimum_height = 0.0f) const;
 			[[nodiscard]] bool next_column() const;
@@ -301,8 +299,8 @@ namespace mngl
 			dockspace_scope& operator=(dockspace_scope&&) = delete;
 			~dockspace_scope() noexcept = default;
 
-			[[nodiscard]] window_scope window(
-			    std::string_view title, const imgui_compat::window_options& options = {}) const;
+			[[nodiscard]] window_scope window(std::string_view title,
+			                                  const imgui_compat::window_options& options = {}) const;
 			[[nodiscard]] window_scope window(std::string_view title, bool& open,
 			                                  const imgui_compat::window_options& options = {}) const;
 
@@ -391,8 +389,8 @@ namespace mngl
 			~frame_scope() noexcept;
 
 			[[nodiscard]] main_menu_bar_scope main_menu_bar() const;
-			[[nodiscard]] window_scope window(
-			    std::string_view title, const imgui_compat::window_options& options = {}) const;
+			[[nodiscard]] window_scope window(std::string_view title,
+			                                  const imgui_compat::window_options& options = {}) const;
 			[[nodiscard]] window_scope window(std::string_view title, bool& open,
 			                                  const imgui_compat::window_options& options = {}) const;
 			[[nodiscard]] imgui_compat::input_state input() const;
@@ -405,10 +403,10 @@ namespace mngl
 			[[nodiscard]] imgui_compat::viewport_state main_viewport() const;
 			void dockspace_over_viewport() const;
 			void set_next_window_position(glm::vec2 position,
-			                             imgui_compat::condition condition = imgui_compat::condition::always,
-			                             glm::vec2 pivot = {}) const;
-			void set_next_window_size(glm::vec2 size,
-			                         imgui_compat::condition condition = imgui_compat::condition::always) const;
+			                              imgui_compat::condition condition = imgui_compat::condition::always,
+			                              glm::vec2 pivot = {}) const;
+			void set_next_window_size(
+			    glm::vec2 size, imgui_compat::condition condition = imgui_compat::condition::always) const;
 			void focus_next_window() const;
 			void open_popup(std::string_view id) const;
 			[[nodiscard]] bool popup_open(std::string_view id) const;
@@ -470,7 +468,7 @@ namespace mngl
 			[[nodiscard]] bool hovered() const noexcept { return item.hovered; }
 			[[nodiscard]] bool active() const noexcept { return item.active; }
 			[[nodiscard]] bool clicked(mouse_button button) const noexcept;
-			[[nodiscard]] bool double_clicked(mouse_button button) const noexcept;
+			[[nodiscard]] bool double_clicked(mouse_button button) const;
 			[[nodiscard]] bool dragging(mouse_button button, float threshold = -1.0f) const;
 			[[nodiscard]] std::optional<glm::vec2> mouse_position() const noexcept;
 			[[nodiscard]] glm::vec2 measure_text(std::string_view text) const;
@@ -487,9 +485,9 @@ namespace mngl
 
 		private:
 			friend class window_scope;
-			canvas_scope(imgui_context& owner, glm::vec2 origin, glm::vec2 extent,
-			             void* draw_list, imgui_compat::item_state item,
-			             glm::vec2 mouse_position, bool has_mouse_position) noexcept;
+			canvas_scope(imgui_context& owner, glm::vec2 origin, glm::vec2 extent, void* draw_list,
+			             imgui_compat::item_state item, glm::vec2 mouse_position,
+			             bool has_mouse_position) noexcept;
 			imgui_context* owner = nullptr;
 			glm::vec2 origin{};
 			glm::vec2 extent{};
@@ -533,6 +531,7 @@ namespace mngl
 		[[nodiscard]] const loaded_font& get_font(imgui_compat::font_role role) const;
 		void begin_frame(::mngl::texture* target);
 		void finish_frame() noexcept;
+		[[nodiscard]] bool refresh_renderer_backend(gpu::texture_format format);
 		void render(gpu::command_buffer& command_buffer, ::mngl::texture& target) override;
 		void detach_from_window() noexcept override;
 		void shutdown() noexcept;
@@ -545,6 +544,8 @@ namespace mngl
 		::mngl::texture* requested_render_target = nullptr;
 		std::vector<hit_test_path_entry> captured_hit_test_path;
 		glm::vec2 last_offscreen_mouse_position{};
+		std::optional<SDL_MouseID> captured_offscreen_mouse_id;
+		std::optional<SDL_MouseID> last_offscreen_mouse_id;
 		std::uint64_t captured_texture_identity = 0;
 		bool frame_active = false;
 		bool draw_data_ready = false;

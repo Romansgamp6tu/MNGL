@@ -255,11 +255,6 @@ namespace mngl::gpu
 			}
 			m_command_buffer = nullptr;
 			m_device = nullptr;
-			if (m_command_owner)
-			{
-				m_command_owner->end_pass();
-				m_command_owner = nullptr;
-			}
 			m_resources = {};
 			m_threadgroup_size = {0, 0, 0};
 			m_bound_samplers.clear();
@@ -268,6 +263,7 @@ namespace mngl::gpu
 			m_bound_write_storage_textures.clear();
 			m_bound_write_storage_buffers.clear();
 			m_bound_uniform_buffers.clear();
+			m_pass_lease.reset();
 		}
 
 	private:
@@ -340,8 +336,7 @@ namespace mngl::gpu
 			std::vector<bool> bound_write_storage_buffers(resources.read_write_storage_buffers, true);
 			std::vector<bool> bound_uniform_buffers(resources.uniform_buffers, false);
 
-			commands.begin_pass();
-			m_command_owner = &commands;
+			auto pass_lease = commands.begin_pass();
 			auto* command_handle = commands.raw();
 			auto* handle = SDL_BeginGPUComputePass(
 			    command_handle, sdl_write_textures.empty() ? nullptr : sdl_write_textures.data(),
@@ -350,13 +345,12 @@ namespace mngl::gpu
 			    static_cast<std::uint32_t>(sdl_write_buffers.size()));
 			if (!handle) [[unlikely]]
 			{
-				commands.end_pass();
-				m_command_owner = nullptr;
 				throw sdl_error("Failed to begin GPU compute pass: ");
 			}
 
 			m_handle = handle;
 			m_command_buffer = command_handle;
+			m_pass_lease = std::move(pass_lease);
 			m_device = pipeline.device_raw();
 			m_resources = resources;
 			m_threadgroup_size = pipeline.threadgroup_size();
@@ -572,7 +566,7 @@ namespace mngl::gpu
 			swap(left.m_handle, right.m_handle);
 			swap(left.m_command_buffer, right.m_command_buffer);
 			swap(left.m_device, right.m_device);
-			swap(left.m_command_owner, right.m_command_owner);
+			swap(left.m_pass_lease, right.m_pass_lease);
 			swap(left.m_resources, right.m_resources);
 			swap(left.m_threadgroup_size, right.m_threadgroup_size);
 			swap(left.m_bound_samplers, right.m_bound_samplers);
@@ -586,7 +580,7 @@ namespace mngl::gpu
 		SDL_GPUComputePass* m_handle = nullptr;
 		SDL_GPUCommandBuffer* m_command_buffer = nullptr;
 		SDL_GPUDevice* m_device = nullptr;
-		command_buffer* m_command_owner = nullptr;
+		command_buffer::pass_lease m_pass_lease;
 		shader_resource_layout m_resources{};
 		glm::uvec3 m_threadgroup_size{0, 0, 0};
 		std::vector<bool> m_bound_samplers;

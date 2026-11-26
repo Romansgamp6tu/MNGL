@@ -273,14 +273,14 @@ namespace mngl::gpu
 			mailbox = SDL_GPU_PRESENTMODE_MAILBOX
 		};
 
-		void set_swapchain_parameters(window& win, hdr_mode hdr, vsync_mode vsync)
+		void set_swapchain_parameters(window& win, hdr_mode hdr, vsync_mode vsync) const
 		{
 			::mngl::check_sdl(SDL_SetGPUSwapchainParameters(raw(), win.raw(),
 			                                                static_cast<SDL_GPUSwapchainComposition>(hdr),
 			                                                static_cast<SDL_GPUPresentMode>(vsync)));
 		}
 
-		void swapchain_parametrs(window& win, hdr_mode hdr, vsync_mode vsync)
+		void swapchain_parametrs(window& win, hdr_mode hdr, vsync_mode vsync) const
 		{
 			set_swapchain_parameters(win, hdr, vsync);
 		}
@@ -294,3 +294,4 @@ namespace mngl::gpu
 		std::shared_ptr<detail::device_state> state;
 	};
 } // namespace mngl::gpu
+

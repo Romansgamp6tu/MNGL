@@ -49,8 +49,9 @@ namespace mngl
 
 		bool intersects(const rectangle& other) const
 		{
-			return !(pos.x + size.x <= other.pos.x || pos.y + size.y <= other.pos.y ||
-			         other.pos.x + other.size.x <= pos.x || other.pos.y + other.size.y <= pos.y);
+			return !empty() && !other.empty() &&
+			       !(pos.x + size.x < other.pos.x || pos.y + size.y < other.pos.y ||
+			         other.pos.x + other.size.x < pos.x || other.pos.y + other.size.y < pos.y);
 		}
 		friend bool intersects(const rectangle& a, const rectangle& b) { return a.intersects(b); }
 
@@ -77,6 +78,8 @@ namespace mngl
 
 		bool intersects_line(const line& l) const
 		{
+			if (empty())
+				return false;
 			line top{pos, {pos.x + size.x, pos.y}};
 			line bottom{{pos.x, pos.y + size.y}, {pos.x + size.x, pos.y + size.y}};
 			line left{pos, {pos.x, pos.y + size.y}};
@@ -107,6 +110,10 @@ namespace mngl
 
 		rectangle union_with(const rectangle& other) const
 		{
+			if (empty())
+				return other;
+			if (other.empty())
+				return *this;
 
 			glm::vec2 newPos{std::min(pos.x, other.pos.x), std::min(pos.y, other.pos.y)};
 			glm::vec2 newSize{std::max(pos.x + size.x, other.pos.x + other.size.x) - newPos.x,
@@ -132,21 +139,31 @@ namespace mngl
 
 		friend rectangle enclosing_points(std::span<const glm::vec2> points, const rectangle& clip)
 		{
-			if (points.empty())
+			if (points.empty() || clip.empty())
 				return {{0, 0}, {-1, -1}};
 
-			float minX = points[0].x, maxX = points[0].x;
-			float minY = points[0].y, maxY = points[0].y;
+			float minX = 0.0f, maxX = 0.0f;
+			float minY = 0.0f, maxY = 0.0f;
+			bool found = false;
 
-			for (std::size_t i = 1; i < points.size(); ++i)
+			for (const auto point : points)
 			{
-				minX = std::min(minX, points[i].x);
-				maxX = std::max(maxX, points[i].x);
-				minY = std::min(minY, points[i].y);
-				maxY = std::max(maxY, points[i].y);
+				if (!clip.contains(point))
+					continue;
+				if (!found)
+				{
+					minX = maxX = point.x;
+					minY = maxY = point.y;
+					found = true;
+					continue;
+				}
+				minX = std::min(minX, point.x);
+				maxX = std::max(maxX, point.x);
+				minY = std::min(minY, point.y);
+				maxY = std::max(maxY, point.y);
 			}
 
-			return rectangle{{minX, minY}, {maxX - minX, maxY - minY}} * clip;
+			return found ? rectangle{{minX, minY}, {maxX - minX, maxY - minY}} : rectangle{{0, 0}, {-1, -1}};
 		}
 
 		bool contains(glm::vec2 point) const

@@ -52,8 +52,8 @@ namespace mngl::clipboard
 			std::vector<std::string> mime_types;
 			data_provider provide;
 			std::mutex provider_mutex;
-			std::mutex buffers_mutex;
-			std::vector<std::unique_ptr<std::vector<std::byte>>> buffers;
+			std::vector<std::optional<std::vector<std::byte>>> cached_data;
+			std::vector<bool> requested;
 		};
 
 		inline const void* SDLCALL provide_data(void* userdata, const char* mime_type,
@@ -69,32 +69,31 @@ namespace mngl::clipboard
 			}
 
 			auto& state = *static_cast<offer_state*>(userdata);
-			if (std::find(state.mime_types.begin(), state.mime_types.end(), mime_type) ==
-			    state.mime_types.end())
+			const auto mime_type_iter =
+			    std::find(state.mime_types.begin(), state.mime_types.end(), mime_type);
+			if (mime_type_iter == state.mime_types.end())
 			{
 				return nullptr;
 			}
+			const auto index = static_cast<std::size_t>(mime_type_iter - state.mime_types.begin());
 
 			try
 			{
-				std::optional<std::vector<std::byte>> data;
+				std::lock_guard lock(state.provider_mutex);
+				if (!state.requested[index])
 				{
-					std::lock_guard lock(state.provider_mutex);
-					data = state.provide(mime_type);
+					// Cache even an empty result: each MIME type is a snapshot for this offer.
+					state.requested[index] = true;
+					state.cached_data[index] = state.provide(mime_type);
 				}
+				const auto& data = state.cached_data[index];
 				if (!data || data->empty())
 				{
 					return nullptr;
 				}
 
-				auto retained = std::make_unique<std::vector<std::byte>>(std::move(*data));
-				const auto* result = retained->data();
-				*size = retained->size();
-				{
-					std::lock_guard lock(state.buffers_mutex);
-					state.buffers.push_back(std::move(retained));
-				}
-				return result;
+				*size = data->size();
+				return data->data();
 			}
 			catch (...)
 			{
@@ -206,8 +205,9 @@ namespace mngl::clipboard
 		return {first, first + size};
 	}
 
-	// Offers formats to other applications. Data is generated only when a format
-	// is requested and remains alive until SDL invokes its cleanup callback.
+	// Offers formats to other applications. Data is generated on the first request
+	// per MIME type and remains alive until SDL invokes its cleanup callback. Each
+	// format is a snapshot for this offer; call set_data() again to replace it.
 	inline void set_data(std::vector<std::string> mime_types, data_provider provide)
 	{
 		if (mime_types.empty()) [[unlikely]]
@@ -231,6 +231,8 @@ namespace mngl::clipboard
 		auto state = std::make_unique<detail::offer_state>();
 		state->mime_types = std::move(mime_types);
 		state->provide = std::move(provide);
+		state->cached_data.resize(state->mime_types.size());
+		state->requested.resize(state->mime_types.size(), false);
 
 		std::vector<const char*> mime_type_names;
 		mime_type_names.reserve(state->mime_types.size());
@@ -255,3 +257,4 @@ namespace mngl::clipboard
 		}
 	}
 } // namespace mngl::clipboard
+

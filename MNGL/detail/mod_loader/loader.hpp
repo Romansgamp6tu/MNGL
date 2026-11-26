@@ -205,29 +205,104 @@ namespace mngl::mods
 					for (const auto& [id, _] : graph_indices)
 						if (indegree[id] != 0)
 							unresolved.insert(id);
-					const auto cycle = find_dependency_cycle(dependency_graph, unresolved);
-					std::string cycle_text;
-					std::set<std::string> cycle_members;
-					for (std::size_t i = 0; i < cycle.size(); ++i)
+					const auto components = find_dependency_components(dependency_graph, unresolved);
+					std::map<std::string, std::size_t> component_by_id;
+					std::vector<bool> component_is_cycle(components.size(), false);
+					std::vector<std::string> component_cycle_text(components.size());
+					std::map<std::string, std::string> member_cycle_text;
+					for (std::size_t component_index = 0; component_index < components.size(); ++component_index)
 					{
-						if (!cycle_text.empty())
-							cycle_text += " -> ";
-						cycle_text += cycle[i];
-						if (i + 1 < cycle.size())
-							cycle_members.insert(cycle[i]);
+						const auto& component = components[component_index];
+						for (const auto& id : component)
+							component_by_id.emplace(id, component_index);
+
+						const bool self_cycle =
+						    component.size() == 1 &&
+						    std::ranges::find(dependency_graph.at(component.front()), component.front()) !=
+						        dependency_graph.at(component.front()).end();
+						if (component.size() == 1 && !self_cycle)
+							continue;
+
+						component_is_cycle[component_index] = true;
+						std::set<std::string> component_ids(component.begin(), component.end());
+						const auto representative = find_dependency_cycle_from(
+						    dependency_graph, component_ids, component.front());
+						component_cycle_text[component_index] = format_dependency_cycle(representative);
+						for (const auto& id : component)
+						{
+							const auto member_cycle = find_dependency_cycle_from(dependency_graph, component_ids, id);
+							member_cycle_text.emplace(id, format_dependency_cycle(member_cycle));
+						}
 					}
+
+					// The SCC graph is a DAG. Propagate each reachable cycle from dependency
+					// components to their dependents, starting with components with no
+					// unresolved dependencies.
+					std::vector<std::set<std::size_t>> component_dependencies(components.size());
+					std::vector<std::set<std::size_t>> component_dependents(components.size());
 					for (const auto& id : unresolved)
 					{
-						const auto message =
-						    cycle_text.empty()
-						        ? "dependency graph contains unresolved packages; this mod was not loaded"
-						        : (cycle_members.contains(id)
-						               ? "dependency cycle detected: " + cycle_text +
-						                     "; this mod is part of the cycle and was not loaded"
-						               : "cannot load this mod because its dependency graph contains a "
-						                 "cycle: " +
-						                     cycle_text +
-						                     "; this mod depends on the cycle and was not loaded");
+						const auto component_index = component_by_id.at(id);
+						for (const auto& dependency : dependency_graph.at(id))
+						{
+							if (const auto found = component_by_id.find(dependency);
+							    found != component_by_id.end() && found->second != component_index)
+							{
+								component_dependencies[component_index].insert(found->second);
+								component_dependents[found->second].insert(component_index);
+							}
+						}
+					}
+					std::vector<std::size_t> remaining_dependencies(components.size());
+					std::vector<std::set<std::size_t>> reachable_cycles(components.size());
+					std::set<std::size_t> ready_components;
+					for (std::size_t i = 0; i < components.size(); ++i)
+					{
+						remaining_dependencies[i] = component_dependencies[i].size();
+						if (component_is_cycle[i])
+							reachable_cycles[i].insert(i);
+						if (remaining_dependencies[i] == 0)
+							ready_components.insert(i);
+					}
+					while (!ready_components.empty())
+					{
+						const auto dependency_index = *ready_components.begin();
+						ready_components.erase(ready_components.begin());
+						for (const auto dependent_index : component_dependents[dependency_index])
+						{
+							reachable_cycles[dependent_index].insert(reachable_cycles[dependency_index].begin(),
+							                                      reachable_cycles[dependency_index].end());
+							if (--remaining_dependencies[dependent_index] == 0)
+								ready_components.insert(dependent_index);
+						}
+					}
+
+					for (const auto& id : unresolved)
+					{
+						const auto component_index = component_by_id.at(id);
+						std::string message;
+						if (component_is_cycle[component_index])
+							message = "dependency cycle detected: " + member_cycle_text.at(id) +
+							          "; this mod is part of the cycle and was not loaded";
+						else if (reachable_cycles[component_index].empty())
+							message =
+							    "dependency graph contains unresolved packages; this mod was not loaded";
+						else
+						{
+							message = "cannot load this mod because its dependency graph contains ";
+							message += reachable_cycles[component_index].size() == 1 ? "cycle: " : "cycles: ";
+							bool first_cycle = true;
+							for (const auto cycle_index : reachable_cycles[component_index])
+							{
+								if (!first_cycle)
+									message += "; ";
+								message += component_cycle_text[cycle_index];
+								first_cycle = false;
+							}
+							message += reachable_cycles[component_index].size() == 1
+							               ? "; this mod depends on the cycle and was not loaded"
+							               : "; this mod depends on these cycles and was not loaded";
+						}
 						results.push_back({mod_load_state::rejected, id, message});
 					}
 				}
@@ -582,55 +657,125 @@ namespace mngl::mods
 			return {};
 		}
 
-		[[nodiscard]] static std::vector<std::string> find_dependency_cycle(
+		[[nodiscard]] static std::vector<std::vector<std::string>> find_dependency_components(
 		    const std::map<std::string, std::vector<std::string>>& graph,
-		    const std::set<std::string>& unresolved)
+		    const std::set<std::string>& nodes)
 		{
 			struct frame
 			{
 				std::string id;
-				std::size_t next_dependency{};
+				std::size_t next_edge{};
 			};
-			std::unordered_map<std::string, unsigned char> state;
-			std::vector<std::string> path;
-			for (const auto& start : unresolved)
+
+			std::unordered_set<std::string> visited;
+			std::vector<std::string> finish_order;
+			for (const auto& start : nodes)
 			{
-				if (state[start] != 0)
+				if (!visited.insert(start).second)
 					continue;
-				state[start] = 1;
-				path.push_back(start);
 				std::vector<frame> stack{frame{start, 0}};
 				while (!stack.empty())
 				{
 					auto& current = stack.back();
 					const auto edges = graph.find(current.id);
-					if (edges == graph.end() || current.next_dependency >= edges->second.size())
+					if (edges == graph.end() || current.next_edge >= edges->second.size())
 					{
-						state[current.id] = 2;
+						finish_order.push_back(current.id);
 						stack.pop_back();
-						path.pop_back();
 						continue;
 					}
 
-					const auto dependency = edges->second[current.next_dependency++];
-					if (!unresolved.contains(dependency))
-						continue;
-					if (state[dependency] == 0)
+					const auto dependency = edges->second[current.next_edge++];
+					if (nodes.contains(dependency) && visited.insert(dependency).second)
 					{
-						state[dependency] = 1;
-						path.push_back(dependency);
 						stack.push_back(frame{dependency, 0});
-					}
-					else if (state[dependency] == 1)
-					{
-						const auto first = std::find(path.begin(), path.end(), dependency);
-						std::vector<std::string> cycle(first, path.end());
-						cycle.push_back(dependency);
-						return cycle;
 					}
 				}
 			}
+
+			std::map<std::string, std::vector<std::string>> reverse_graph;
+			for (const auto& id : nodes)
+				if (const auto edges = graph.find(id); edges != graph.end())
+					for (const auto& dependency : edges->second)
+						if (nodes.contains(dependency))
+							reverse_graph[dependency].push_back(id);
+
+			visited.clear();
+			std::vector<std::vector<std::string>> components;
+			for (auto it = finish_order.rbegin(); it != finish_order.rend(); ++it)
+			{
+				if (!visited.insert(*it).second)
+					continue;
+				std::vector<std::string> component;
+				std::vector<std::string> stack{*it};
+				while (!stack.empty())
+				{
+					auto id = std::move(stack.back());
+					stack.pop_back();
+					component.push_back(id);
+					if (const auto parents = reverse_graph.find(id); parents != reverse_graph.end())
+						for (const auto& parent : parents->second)
+							if (visited.insert(parent).second)
+								stack.push_back(parent);
+				}
+				std::sort(component.begin(), component.end());
+				components.push_back(std::move(component));
+			}
+			return components;
+		}
+
+		[[nodiscard]] static std::vector<std::string> find_dependency_cycle_from(
+		    const std::map<std::string, std::vector<std::string>>& graph,
+		    const std::set<std::string>& component,
+		    std::string_view start)
+		{
+			struct frame
+			{
+				std::string id;
+				std::size_t next_edge{};
+			};
+			const std::string start_id(start);
+			std::unordered_set<std::string> visited{start_id};
+			std::vector<std::string> path{start_id};
+			std::vector<frame> stack{frame{start_id, 0}};
+			while (!stack.empty())
+			{
+				auto& current = stack.back();
+				const auto edges = graph.find(current.id);
+				if (edges == graph.end() || current.next_edge >= edges->second.size())
+				{
+					stack.pop_back();
+					path.pop_back();
+					continue;
+				}
+
+				const auto dependency = edges->second[current.next_edge++];
+				if (!component.contains(dependency))
+					continue;
+				if (dependency == start_id)
+				{
+					path.push_back(start_id);
+					return path;
+				}
+				if (visited.insert(dependency).second)
+				{
+					path.push_back(dependency);
+					stack.push_back(frame{dependency, 0});
+				}
+			}
 			return {};
+		}
+
+		[[nodiscard]] static std::string format_dependency_cycle(const std::vector<std::string>& cycle)
+		{
+			std::string text;
+			for (const auto& id : cycle)
+			{
+				if (!text.empty())
+					text += " -> ";
+				text += id;
+			}
+			return text;
 		}
 
 		mod_load_result load_reserved(mod_manifest manifest)
@@ -691,3 +836,4 @@ namespace mngl::mods
 	};
 
 } // namespace mngl::mods
+

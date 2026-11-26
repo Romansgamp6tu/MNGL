@@ -7,10 +7,16 @@
 
 ## Открыть один файл
 
+Код ниже — фрагмент тела `main()`: предполагается, что приложение уже
+инициализирует SDL и обрабатывает ошибки создания окна. В полноценном
+приложении проверку `request` обычно включают в существующий цикл кадров.
+
 ```cpp
 #include <MNGL/dialog.hpp>
 #include <MNGL/input.hpp>
+#include <MNGL/logger.hpp>
 #include <MNGL/window.hpp>
+#include <filesystem>
 #include <utility>
 
 mngl::window window("Open a file", {800, 600});
@@ -21,6 +27,7 @@ options.filters = {{"Images", "png;jpg;jpeg"}, {"All files", "*"}};
 
 auto request = mngl::dialog::open_file(std::move(options));
 bool finished = false;
+std::filesystem::path chosen_path;
 while (!finished && mngl::input::next_frame())
 {
 	const auto result = request.result();
@@ -29,14 +36,17 @@ while (!finished && mngl::input::next_frame())
 	case mngl::dialog::request_status::pending:
 		break;
 	case mngl::dialog::request_status::selected:
-		// result.paths содержит выбранный std::filesystem::path.
+		if (!result.paths.empty())
+		{
+			chosen_path = result.paths.front();
+		}
 		finished = true;
 		break;
 	case mngl::dialog::request_status::cancelled:
 		finished = true;
 		break;
 	case mngl::dialog::request_status::failed:
-		logger.error("File dialog failed: ", result.error);
+		mngl::log.error("File dialog failed: ", result.error);
 		finished = true;
 		break;
 	}
@@ -82,6 +92,11 @@ MNGL копирует результат в защищённое состоян�
 можно вызывать из игрового цикла. Фильтры и начальный путь копируются в
 контекст запроса и остаются живыми до callback.
 
+`request::ready()` проверяет только статус без копирования выбранных путей.
+Нулевой символ внутри начального пути, имени или шаблона фильтра приводит к
+`std::invalid_argument` до запуска диалога. Количество фильтров должно помещаться
+в SDL `int`, иначе выбрасывается `std::length_error`.
+
 Создавайте системный диалог из главного потока. Если задано `options.parent`,
 родительское `mngl::window` должно оставаться живым до завершения запроса.
 Удаление `request` не закрывает уже показанный системный диалог; оно лишь
@@ -96,3 +111,4 @@ MNGL копирует результат в защищённое состоян�
 SDL на Android может вернуть `content://` URI. На настольных системах
 результаты являются обычными путями файловой системы; для Android URI нужно
 открывать через SDL IO API, а не `std::ifstream`.
+

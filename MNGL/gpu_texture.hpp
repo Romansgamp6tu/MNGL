@@ -98,7 +98,10 @@ namespace mngl::gpu
 		[[nodiscard]] texture_format format() const noexcept { return fmt; }
 
 		// Проверка флагов использования (для ассертов)
-		[[nodiscard]] bool has_usage(std::uint32_t flag) const noexcept { return (usage_flag & flag) != 0; }
+		[[nodiscard]] bool has_usage(std::uint32_t flags) const noexcept
+		{
+			return (usage_flag & flags) == flags;
+		}
 		[[nodiscard]] bool is_swapchain_texture() const noexcept { return is_swapchain; }
 
 		void destroy() noexcept

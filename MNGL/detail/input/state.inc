@@ -115,7 +115,11 @@
 		static inline std::uint64_t next_device_generation = 1;
 		static inline std::atomic<std::uint64_t> input_frame_index = 0;
 
-		static inline std::atomic<double> dt = 0.1;
+		static inline std::atomic<double> dt = 0.0;
+		// Keep the request latched so later hot-plug events can open devices used by contexts.
+		static inline std::atomic_bool joystick_action_bindings_requested = false;
+		static inline std::atomic_bool gamepad_action_bindings_requested = false;
 		static inline std::atomic<std::uint32_t> max_fps_limit = 60;
 		static inline std::uint64_t next_frame_ns = 0;
 		static inline std::atomic_bool frame_clock_initialized = false;
+

@@ -1728,6 +1728,10 @@ namespace mngl::two_d
 				throw std::invalid_argument(
 				    "Text position must be finite and text height must be finite and positive");
 			}
+			if (!std::isfinite(options.wrap_width) || options.wrap_width < 0.0f) [[unlikely]]
+			{
+				throw std::invalid_argument("Text wrap width must be finite and non-negative");
+			}
 
 			const glm::vec4 tint = options.tint.rgba_glsl();
 			if (!std::isfinite(tint.x) || !std::isfinite(tint.y) || !std::isfinite(tint.z) ||
@@ -1752,6 +1756,118 @@ namespace mngl::two_d
 			{
 				throw std::invalid_argument("Text scissor dimensions must be non-negative");
 			}
+		}
+
+		[[nodiscard]] std::vector<std::string_view> wrap_text_line(
+		    recording_context* context, font& typeface, std::string_view text, float scale,
+		    float wrap_width)
+		{
+			std::vector<std::string_view> lines;
+			if (text.empty())
+			{
+				lines.emplace_back(text);
+				return lines;
+			}
+
+			const auto space = context ? typeface.glyph_prepared(' ') : typeface.glyph(' ', false);
+			const float tab_width = space.advance * scale * 4.0f;
+			std::size_t line_begin = 0;
+			std::size_t offset = 0;
+			std::size_t break_line_end = std::string_view::npos;
+			std::size_t break_next_start = std::string_view::npos;
+			bool in_wrap_whitespace = false;
+			float pen_x = 0.0f;
+			std::uint32_t previous_codepoint = 0;
+
+			while (offset < text.size())
+			{
+				const std::size_t codepoint_begin = offset;
+				std::uint32_t codepoint = 0;
+				(void)::mngl::two_d::detail::next_utf8_codepoint(text, offset, codepoint);
+
+				if (codepoint == ' ' || codepoint == '\t')
+				{
+					if (!in_wrap_whitespace)
+					{
+						break_line_end = codepoint_begin;
+					}
+					break_next_start = offset;
+					in_wrap_whitespace = true;
+				}
+				else
+				{
+					in_wrap_whitespace = false;
+				}
+
+				float next_pen_x = pen_x;
+				std::uint32_t next_previous_codepoint = previous_codepoint;
+				if (codepoint == '\t')
+				{
+					if (tab_width > 0.0f)
+					{
+						next_pen_x = (std::floor(next_pen_x / tab_width) + 1.0f) * tab_width;
+					}
+					next_previous_codepoint = 0;
+				}
+				else
+				{
+					const auto metrics =
+					    context ? typeface.glyph_prepared(codepoint) : typeface.glyph(codepoint, false);
+					if (previous_codepoint != 0)
+					{
+						const float kerning =
+						    context ? typeface.kerning_prepared(previous_codepoint, metrics.codepoint)
+							        : typeface.kerning(previous_codepoint, metrics.codepoint);
+						next_pen_x += kerning * scale;
+					}
+					next_pen_x += metrics.advance * scale;
+					next_previous_codepoint = metrics.codepoint;
+				}
+				if (!std::isfinite(next_pen_x)) [[unlikely]]
+				{
+					throw std::length_error("Text line exceeds the renderer's coordinate range");
+				}
+
+				if (next_pen_x > wrap_width && codepoint_begin > line_begin)
+				{
+					if (break_line_end != std::string_view::npos && break_line_end > line_begin &&
+					    break_next_start > break_line_end)
+					{
+						const auto line = text.substr(line_begin, break_line_end - line_begin);
+						if (line.find_first_not_of(" \t") != std::string_view::npos)
+						{
+							lines.emplace_back(line);
+						}
+						line_begin = break_next_start;
+					}
+					else
+					{
+						const auto line = text.substr(line_begin, codepoint_begin - line_begin);
+						if (line.find_first_not_of(" \t") != std::string_view::npos)
+						{
+							lines.emplace_back(line);
+						}
+						line_begin = codepoint_begin;
+					}
+
+					offset = line_begin;
+					pen_x = 0.0f;
+					previous_codepoint = 0;
+					break_line_end = std::string_view::npos;
+					break_next_start = std::string_view::npos;
+					in_wrap_whitespace = false;
+					continue;
+				}
+
+				pen_x = next_pen_x;
+				previous_codepoint = next_previous_codepoint;
+			}
+
+			if (line_begin < text.size() || lines.empty())
+			{
+				lines.emplace_back(text.substr(line_begin));
+			}
+			return lines;
 		}
 
 		[[nodiscard]] float submit_text_line(recording_context* context, font& typeface,
@@ -1901,8 +2017,28 @@ namespace mngl::two_d
 			}
 
 			std::size_t line_index = 0;
-			std::size_t line_begin = 0;
 			float max_width = 0.0f;
+			const auto submit_visual_line = [&](std::string_view line_text)
+			{
+				const float top = top_left.y - static_cast<float>(line_index) * line_height;
+				if (!std::isfinite(top)) [[unlikely]]
+				{
+					throw std::length_error("Text block exceeds the renderer's coordinate range");
+				}
+				const bool line_visible =
+				    !options.clip_bounds ||
+				    (top > options.clip_bounds->pos.y &&
+				     top - line_height < options.clip_bounds->pos.y + options.clip_bounds->size.y);
+				if (line_visible)
+				{
+					const float width = submit_text_line(context, typeface, line_text,
+					                                     {top_left.x, top - ascent}, scale, options);
+					max_width = std::max(max_width, width);
+				}
+				++line_index;
+			};
+
+			std::size_t line_begin = 0;
 			while (line_begin <= text.size())
 			{
 				const std::size_t line_end = text.find('\n', line_begin);
@@ -1913,22 +2049,20 @@ namespace mngl::two_d
 					line_text.remove_suffix(1);
 				}
 
-				const float top = top_left.y - static_cast<float>(line_index) * line_height;
-				if (!std::isfinite(top)) [[unlikely]]
+				if (options.wrap_width > 0.0f)
 				{
-					throw std::length_error("Text block exceeds the renderer's coordinate range");
+					const auto wrapped_lines =
+					    wrap_text_line(context, typeface, line_text, scale, options.wrap_width);
+					for (const auto wrapped_line : wrapped_lines)
+					{
+						submit_visual_line(wrapped_line);
+					}
 				}
-				const bool line_visible =
-				    !options.clip_bounds ||
-				    (top > options.clip_bounds->pos.y &&
-					 top - line_height < options.clip_bounds->pos.y + options.clip_bounds->size.y);
-				if (line_visible)
+				else
 				{
-					const float width = submit_text_line(context, typeface, line_text,
-					                                     {top_left.x, top - ascent}, scale, options);
-					max_width = std::max(max_width, width);
+					submit_visual_line(line_text);
 				}
-				++line_index;
+
 				if (line_end == std::string_view::npos)
 				{
 					break;
@@ -1955,6 +2089,10 @@ namespace mngl::two_d
 		                          glm::vec2 top_left, const text_draw_options& options)
 		{
 			validate_text_options(top_left, options);
+			if (options.wrap_width > 0.0f) [[unlikely]]
+			{
+				throw std::invalid_argument("Automatic wrapping is not supported for text_document");
+			}
 			if (!options.clip_bounds) [[unlikely]]
 			{
 				throw std::invalid_argument(

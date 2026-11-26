@@ -97,7 +97,7 @@ option(MNGL_BUILD_MACOS_DEVEL_PACKAGE "Create a macOS MNGL development tarball" 
 option(MNGL_BUILD_2D_BENCHMARK "Build the interactive 2D profiling scene" OFF)
 
 execute_process(
-	COMMAND git branch --show-current
+	COMMAND git -c "safe.directory=${CMAKE_CURRENT_SOURCE_DIR}" branch --show-current
 	WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 	OUTPUT_VARIABLE MNGL_CURRENT_GIT_BRANCH
 	OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -134,6 +134,12 @@ if(MSVC)
 	else()
 		set(MNGL_LIBRARY_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/libs/x86")
 	endif()
+	file(GLOB MNGL_WINDOWS_CODEC_DLLS CONFIGURE_DEPENDS
+		"${MNGL_LIBRARY_DIRECTORY}/*.dll")
+	list(REMOVE_ITEM MNGL_WINDOWS_CODEC_DLLS
+		"${MNGL_LIBRARY_DIRECTORY}/SDL3.dll"
+		"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.dll"
+		"${MNGL_LIBRARY_DIRECTORY}/freetype.dll")
 	add_library(mngl_imgui SHARED ${MNGL_IMGUI_SOURCES})
 	target_compile_definitions(mngl_imgui
 		PRIVATE "IMGUI_API=__declspec(dllexport)"
@@ -194,6 +200,39 @@ else()
 		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
 	)
 endif()
+
+function(mngl_copy_windows_codec_dlls target)
+	if(MSVC AND MNGL_WINDOWS_CODEC_DLLS)
+		add_custom_command(TARGET "${target}" POST_BUILD
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+				${MNGL_WINDOWS_CODEC_DLLS}
+				"$<TARGET_FILE_DIR:${target}>"
+			COMMAND_EXPAND_LISTS
+			VERBATIM)
+	endif()
+endfunction()
+
+function(mngl_copy_windows_runtime_dlls target)
+	if(MSVC)
+		add_custom_command(TARGET "${target}" POST_BUILD
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+				"$<TARGET_FILE:mngl_imgui>"
+				"${MNGL_LIBRARY_DIRECTORY}/SDL3.dll"
+				"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.dll"
+				"${MNGL_LIBRARY_DIRECTORY}/freetype.dll"
+				"$<TARGET_FILE_DIR:${target}>"
+			VERBATIM)
+		mngl_copy_windows_codec_dlls("${target}")
+	endif()
+endfunction()
+
+function(mngl_copy_default_2d_shaders target)
+	add_custom_command(TARGET "${target}" POST_BUILD
+		COMMAND "${CMAKE_COMMAND}" -E copy_directory
+			"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/shaders"
+			"$<TARGET_FILE_DIR:${target}>/shaders"
+		VERBATIM)
+endfunction()
 
 set(MNGL_HAS_SDL3_MIXER FALSE)
 if(NOT MNGL_CUSTOM_AUDIO_BACKEND AND NOT MNGL_CUSTOM_AUDIO_INTERFACE)
@@ -316,6 +355,16 @@ else()
 	target_link_libraries(mngl INTERFACE
 		mngl_imgui SDL3_image::SDL3_image Freetype::Freetype)
 endif()
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
+		CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "13")
+	# libstdc++ keeps std::stacktrace's implementation in a separate archive.
+	# GCC 13.0–13.2 use the old archive name; GCC 13.3+ use libstdc++exp.
+	if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "13.3")
+		target_link_libraries(mngl INTERFACE stdc++_libbacktrace)
+	else()
+		target_link_libraries(mngl INTERFACE stdc++exp)
+	endif()
+endif()
 if(APPLE)
 	# The macOS runtime archive stores dynamic dependencies in ../lib from bin/.
 	target_link_options(mngl INTERFACE "-Wl,-rpath,@executable_path/../lib")
@@ -345,6 +394,7 @@ if(MNGL_BUILD_2D_BENCHMARK)
 	endif()
 	mngl_stage_runtime_shaders(mngl_2d_benchmark)
 	if(WIN32)
+		mngl_copy_windows_codec_dlls(mngl_2d_benchmark)
 		add_custom_command(TARGET mngl_2d_benchmark POST_BUILD
 			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
 				"$<TARGET_FILE:mngl_imgui>"
@@ -499,6 +549,7 @@ if(BUILD_TESTING)
 				"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.dll" "${MNGL_LIBRARY_DIRECTORY}/freetype.dll"
 				"$<TARGET_FILE_DIR:mngl_async_io_close_retry_test>"
 			VERBATIM)
+		mngl_copy_windows_codec_dlls(mngl_core_api_test)
 		if(MNGL_HAS_SDL3_MIXER)
 			add_custom_command(TARGET mngl_core_api_test POST_BUILD
 				COMMAND "${CMAKE_COMMAND}" -E copy_if_different
@@ -510,6 +561,7 @@ if(BUILD_TESTING)
 					"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.dll" "${MNGL_LIBRARY_DIRECTORY}/freetype.dll"
 					"$<TARGET_FILE:SDL3_mixer-shared>" "$<TARGET_FILE_DIR:mngl_audio_runtime_smoke>"
 				VERBATIM)
+			mngl_copy_windows_codec_dlls(mngl_audio_runtime_smoke)
 			add_custom_command(TARGET mngl_gpu_runtime_smoke POST_BUILD
 				COMMAND "${CMAKE_COMMAND}" -E copy_if_different
 					"$<TARGET_FILE:SDL3_mixer-shared>" "$<TARGET_FILE_DIR:mngl_gpu_runtime_smoke>"
@@ -521,6 +573,7 @@ if(BUILD_TESTING)
 				"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.dll" "${MNGL_LIBRARY_DIRECTORY}/freetype.dll"
 				"$<TARGET_FILE_DIR:mngl_gpu_runtime_smoke>"
 			VERBATIM)
+		mngl_copy_windows_codec_dlls(mngl_gpu_runtime_smoke)
 	endif()
 	add_executable(mngl_input_compat_test tests/input_compat_test.cpp)
 	target_compile_features(mngl_input_compat_test PRIVATE cxx_std_23)
@@ -529,6 +582,7 @@ if(BUILD_TESTING)
 	set_tests_properties(mngl_input_compat_test PROPERTIES
 		ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
 	if(WIN32 AND MSVC)
+		mngl_copy_windows_codec_dlls(mngl_input_compat_test)
 		add_custom_command(TARGET mngl_input_compat_test POST_BUILD
 			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
 				"$<TARGET_FILE:mngl_imgui>"
@@ -544,6 +598,86 @@ if(BUILD_TESTING)
 				"$<TARGET_FILE_DIR:mngl_input_compat_test>"
 			VERBATIM
 		)
+	endif()
+	add_executable(mngl_event_regression_test tests/event_regression_test.cpp)
+	target_link_libraries(mngl_event_regression_test PRIVATE mngl)
+	add_test(NAME mngl_event_regression_test COMMAND mngl_event_regression_test)
+	set_tests_properties(mngl_event_regression_test PROPERTIES
+		TIMEOUT 30
+		ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+	add_executable(mngl_line_intersection_test tests/line_intersection_test.cpp)
+	target_link_libraries(mngl_line_intersection_test PRIVATE mngl)
+	add_test(NAME mngl_line_intersection_test COMMAND mngl_line_intersection_test)
+	add_executable(mngl_color_api_test tests/color_api_test.cpp)
+	target_link_libraries(mngl_color_api_test PRIVATE mngl)
+	add_test(NAME mngl_color_api_test COMMAND mngl_color_api_test)
+	add_executable(mngl_clipboard_provider_cache_test tests/clipboard_provider_cache_test.cpp)
+	target_link_libraries(mngl_clipboard_provider_cache_test PRIVATE mngl)
+	add_test(NAME mngl_clipboard_provider_cache_test COMMAND mngl_clipboard_provider_cache_test)
+	add_executable(mngl_gpu_swapchain_lifetime_test tests/gpu_swapchain_lifetime_test.cpp)
+	target_link_libraries(mngl_gpu_swapchain_lifetime_test PRIVATE mngl)
+	add_test(NAME mngl_gpu_swapchain_lifetime_test COMMAND mngl_gpu_swapchain_lifetime_test)
+	set_tests_properties(mngl_gpu_swapchain_lifetime_test PROPERTIES
+		TIMEOUT 30
+		SKIP_RETURN_CODE 77)
+	add_executable(mngl_frame_clock_regression_test tests/frame_clock_regression_test.cpp)
+	target_link_libraries(mngl_frame_clock_regression_test PRIVATE mngl)
+	add_test(NAME mngl_frame_clock_regression_test COMMAND mngl_frame_clock_regression_test)
+	set_tests_properties(mngl_frame_clock_regression_test PROPERTIES
+		TIMEOUT 30
+		ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+	add_executable(mngl_input_hotplug_window_regression_test tests/input_hotplug_window_regression_test.cpp)
+	target_link_libraries(mngl_input_hotplug_window_regression_test PRIVATE mngl)
+	add_test(NAME mngl_input_hotplug_window_regression_test COMMAND mngl_input_hotplug_window_regression_test)
+	set_tests_properties(mngl_input_hotplug_window_regression_test PROPERTIES
+		TIMEOUT 40
+		ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+	add_executable(mngl_shader_reflection_regression_test tests/shader_reflection_regression_test.cpp)
+	target_link_libraries(mngl_shader_reflection_regression_test PRIVATE mngl)
+	add_test(NAME mngl_shader_reflection_regression_test COMMAND mngl_shader_reflection_regression_test)
+	set_tests_properties(mngl_shader_reflection_regression_test PROPERTIES TIMEOUT 30)
+	add_executable(mngl_two_d_shader_format_selection_test tests/two_d_shader_format_selection_test.cpp)
+	target_link_libraries(mngl_two_d_shader_format_selection_test PRIVATE mngl)
+	add_test(NAME mngl_two_d_shader_format_selection_test COMMAND mngl_two_d_shader_format_selection_test)
+	add_executable(mngl_two_d_vulkan_shader_smoke_test tests/two_d_vulkan_shader_smoke_test.cpp)
+	target_link_libraries(mngl_two_d_vulkan_shader_smoke_test PRIVATE mngl)
+	mngl_copy_default_2d_shaders(mngl_two_d_vulkan_shader_smoke_test)
+	add_test(NAME mngl_two_d_vulkan_shader_smoke_test COMMAND mngl_two_d_vulkan_shader_smoke_test)
+	set_tests_properties(mngl_two_d_vulkan_shader_smoke_test PROPERTIES
+		TIMEOUT 60
+		SKIP_RETURN_CODE 77)
+	add_executable(mngl_imgui_offscreen_mouse_routing_test tests/imgui_offscreen_mouse_routing_test.cpp)
+	target_link_libraries(mngl_imgui_offscreen_mouse_routing_test PRIVATE mngl)
+	add_test(NAME mngl_imgui_offscreen_mouse_routing_test COMMAND mngl_imgui_offscreen_mouse_routing_test)
+	set_tests_properties(mngl_imgui_offscreen_mouse_routing_test PROPERTIES TIMEOUT 15)
+	add_executable(mngl_imgui_swapchain_format_regression_test tests/imgui_swapchain_format_regression_test.cpp)
+	target_link_libraries(mngl_imgui_swapchain_format_regression_test PRIVATE mngl)
+	mngl_copy_default_2d_shaders(mngl_imgui_swapchain_format_regression_test)
+	add_test(NAME mngl_imgui_swapchain_format_regression_test COMMAND mngl_imgui_swapchain_format_regression_test)
+	set_tests_properties(mngl_imgui_swapchain_format_regression_test PROPERTIES
+		TIMEOUT 60
+		SKIP_RETURN_CODE 77)
+	if(WIN32 AND MSVC)
+		foreach(MNGL_TEST_TARGET IN ITEMS
+				mngl_event_regression_test
+				mngl_line_intersection_test
+				mngl_color_api_test
+				mngl_clipboard_provider_cache_test
+				mngl_gpu_swapchain_lifetime_test
+				mngl_frame_clock_regression_test
+				mngl_input_hotplug_window_regression_test
+				mngl_shader_reflection_regression_test
+				mngl_two_d_shader_format_selection_test
+				mngl_two_d_vulkan_shader_smoke_test
+				mngl_imgui_offscreen_mouse_routing_test
+				mngl_imgui_swapchain_format_regression_test)
+			mngl_copy_windows_runtime_dlls(${MNGL_TEST_TARGET})
+		endforeach()
+		add_executable(mngl_sdl_image_codec_deployment_test tests/sdl_image_codec_deployment_test.cpp)
+		target_link_libraries(mngl_sdl_image_codec_deployment_test PRIVATE mngl)
+		add_test(NAME mngl_sdl_image_codec_deployment_test COMMAND mngl_sdl_image_codec_deployment_test)
+		set_tests_properties(mngl_sdl_image_codec_deployment_test PROPERTIES TIMEOUT 20)
+		mngl_copy_windows_runtime_dlls(mngl_sdl_image_codec_deployment_test)
 	endif()
 	if(APPLE)
 		add_executable(mngl_shader_compile_smoke tests/shader_compile_smoke.cpp)
@@ -570,6 +704,7 @@ add_custom_command(TARGET mngl_demo POST_BUILD
 mngl_stage_runtime_shaders(mngl_demo)
 
 if(WIN32)
+	mngl_copy_windows_codec_dlls(mngl_demo)
 	add_custom_command(TARGET mngl_demo POST_BUILD
 		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
 			"$<TARGET_FILE:mngl_imgui>"
@@ -710,7 +845,7 @@ find_dependency(Freetype REQUIRED)]=])
 	set(MNGL_BRANCH_ONLY_HEADERS)
 	if(NOT MNGL_PACKAGE_BRANCH STREQUAL "main")
 		execute_process(
-			COMMAND git diff --name-only --diff-filter=A
+			COMMAND git -c "safe.directory=${CMAKE_CURRENT_SOURCE_DIR}" diff --name-only --diff-filter=A
 				"${MNGL_PACKAGE_BASE_REF}...HEAD" --
 			WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 			RESULT_VARIABLE MNGL_BRANCH_DIFF_RESULT
@@ -835,4 +970,3 @@ find_dependency(Freetype REQUIRED)]=])
 	set(CPACK_PACKAGE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/packages")
 	include(CPack)
 endif()
-

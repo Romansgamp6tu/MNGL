@@ -4,8 +4,11 @@
 #include "../MNGL/input.hpp"
 #include "../MNGL/action_map.hpp"
 
+#include <algorithm>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
+#include <string_view>
 
 namespace
 {
@@ -180,6 +183,70 @@ namespace
 		        "Removing an action must erase its cached state before it is queried again");
 		require(context.down("secondary"), "Reconciling one removed action must retain the other action state");
 	}
+
+	void test_action_aggregation()
+	{
+		constexpr SDL_KeyboardID keyboard_id = 7003;
+		mngl::action_map map;
+		map.bind_key("movement", mngl::scancode::a, keyboard_id, 1.0f);
+		map.bind_key("movement", mngl::scancode::a, keyboard_id, 1.0f);
+		map.bind_key("movement", mngl::scancode::a, keyboard_id, -1.0f);
+		map.bind_key("reordered", mngl::scancode::a, keyboard_id, 1.0f);
+		map.bind_key("reordered", mngl::scancode::a, keyboard_id, -1.0f);
+		map.bind_key("reordered", mngl::scancode::a, keyboard_id, 1.0f);
+		mngl::event_manager::emit(key_down(keyboard_id));
+		mngl::input_context context(map);
+		require(context.value("movement") == 1.0f,
+		        "action bindings were saturated before their aggregate was computed");
+		require(context.value("movement") == context.value("reordered"),
+		        "action value depended on binding registration order");
+		mngl::event_manager::emit(key_up(keyboard_id));
+	}
+
+	void test_flipped_wheel()
+	{
+		constexpr SDL_MouseID mouse_id = 7004;
+		mngl::action_map map;
+		map.bind_mouse_axis("scroll", mngl::mouse_axis::scroll_y, 1.0f, 0.0f, 0.5f, mouse_id);
+		const float scale = std::numeric_limits<float>::max();
+		map.bind_mouse_axis("opposing", mngl::mouse_axis::scroll_y, scale, 0.0f, 0.5f, mouse_id);
+		map.bind_mouse_axis("opposing", mngl::mouse_axis::scroll_y, -scale, 0.0f, 0.5f, mouse_id);
+		map.bind_mouse_axis("saturated", mngl::mouse_axis::scroll_y, scale, 0.0f, 0.5f, mouse_id);
+		mngl::input_context context(map);
+		SDL_Event event{};
+		event.type = SDL_EVENT_MOUSE_WHEEL;
+		event.wheel.which = mouse_id;
+		event.wheel.y = 2.0f;
+		event.wheel.direction = SDL_MOUSEWHEEL_FLIPPED;
+		require(SDL_PushEvent(&event), "failed to queue a flipped wheel event");
+		require(mngl::input::continue_work(), "input loop stopped during wheel direction test");
+		require(context.value("scroll") == -1.0f, "flipped wheel did not normalize scroll direction");
+		require(context.value("opposing") == 0.0f,
+		        "large opposing scales produced a non-finite action value");
+		require(context.value("saturated") == -1.0f,
+		        "large finite scale did not saturate to the action range");
+	}
+
+	void test_imgui_text_ownership()
+	{
+		mngl::event_manager::set_imgui_input_enabled(true);
+		char text[] = "owned text";
+		SDL_Event event{};
+		event.type = SDL_EVENT_TEXT_INPUT;
+		event.text.text = text;
+		require(SDL_PushEvent(&event), "failed to queue an ImGui text event");
+		const auto events = mngl::event_manager::take_imgui_input_events();
+		const auto found = std::find_if(events.begin(), events.end(), [](const SDL_Event& item)
+		                                { return item.type == SDL_EVENT_TEXT_INPUT; });
+		require(found != events.end(), "text event was missing from the ImGui queue");
+		require(found->text.text != text, "ImGui queue retained a borrowed text pointer");
+		text[0] = 'X';
+		SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
+		SDL_PumpEvents();
+		require(std::string_view(found->text.text) == "owned text",
+		        "queued ImGui text did not survive its SDL event payload");
+		mngl::event_manager::set_imgui_input_enabled(false);
+	}
 } // namespace
 
 int main()
@@ -192,6 +259,9 @@ int main()
 		test_keyboard_compatibility();
 		test_mouse_compatibility();
 		test_action_context_reuses_state_across_frames_and_revisions();
+		test_action_aggregation();
+		test_flipped_wheel();
+		test_imgui_text_ownership();
 		return 0;
 	}
 	catch (const std::exception& error)

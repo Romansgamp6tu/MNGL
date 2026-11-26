@@ -640,10 +640,14 @@ namespace mngl::two_d
 		if (!command_buffer.valid()) [[unlikely]]
 			throw std::invalid_argument("Cannot create a 2D mesh with an invalid command buffer");
 		if (command_buffer.device_raw() && command_buffer.device_raw() != device.raw()) [[unlikely]]
+		{
 			throw std::invalid_argument("2D mesh and command buffer must use the same GPU device");
+		}
 		if (triangle_vertices.size() >
 		    std::numeric_limits<std::uint32_t>::max() / sizeof(detail::resident_mesh_vertex)) [[unlikely]]
+		{
 			throw std::length_error("2D mesh exceeds SDL's 32-bit GPU buffer size limit");
+		}
 
 		auto storage = std::make_shared<detail::resident_mesh_storage>(device);
 		storage->vertex_count = static_cast<std::uint32_t>(triangle_vertices.size());
@@ -830,12 +834,11 @@ namespace mngl::two_d
 		    m_storage->device.raw(),
 		    std::as_bytes(std::span<const detail::resident_mesh_vertex>(packed_vertices)));
 		gpu::detail::gpu_copy_pass copy_pass(command_buffer);
-		bool cycle_vertex_buffer = true;
+		m_storage->vertex_buffer.preserve_contents_for_update(copy_pass);
 		for (const auto& upload : pending)
 		{
-			m_storage->vertex_buffer.record_upload(copy_pass, upload.size, cycle_vertex_buffer,
-			                                       upload.destination_offset, upload.source_offset);
-			cycle_vertex_buffer = false;
+			m_storage->vertex_buffer.record_upload(copy_pass, upload.size, false, upload.destination_offset,
+			                                       upload.source_offset);
 		}
 		(void)staged_size;
 

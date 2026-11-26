@@ -104,6 +104,8 @@ namespace mngl::two_d
 		color tint{1.0f, 1.0f, 1.0f, 1.0f};
 		std::optional<rectangle> clip_bounds;
 		std::optional<SDL_Rect> scissor;
+		// Zero disables automatic wrapping for string-based text.
+		float wrap_width = 0.0f;
 	};
 
 	class text_document

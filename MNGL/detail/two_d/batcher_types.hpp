@@ -75,6 +75,24 @@ namespace mngl::two_d::detail
 
 namespace mngl::gpu
 {
+	namespace detail
+	{
+		[[nodiscard]] inline shader_format select_2d_shader_format(SDL_GPUShaderFormat supported_formats)
+		{
+			// Prefer the packaged DXIL shaders, then native formats used by Metal and Vulkan.
+			if ((supported_formats & shader_formats::dxil) != 0)
+				return shader_format::dxil;
+			if ((supported_formats & shader_formats::msl) != 0)
+				return shader_format::msl;
+			if ((supported_formats & shader_formats::spirv) != 0)
+				return shader_format::spirv;
+			if ((supported_formats & shader_formats::dxbc) != 0)
+				return shader_format::dxbc;
+			throw std::invalid_argument(
+			    "GPU device does not support an MNGL 2D shader format (DXIL, MSL, SPIR-V, or DXBC)");
+		}
+	} // namespace detail
+
 	enum class sprite_blend_mode : std::uint8_t
 	{
 		alpha,
@@ -430,38 +448,30 @@ namespace mngl::gpu
 		// Set only by the built-in asset loader; caller-provided shader sets remain private to their batcher.
 		bool shareable_default = false;
 
-		static batcher2d_shader_assets load_default()
+		static batcher2d_shader_assets load_default(const device& gpu_device)
 		{
-			return load_default(static_cast<shader_format>(::mngl::gpu::default_shader_format));
-		}
-
-		static batcher2d_shader_assets load_default(const device& dev)
-		{
-			if (!dev.raw()) [[unlikely]]
+			if (!gpu_device.raw()) [[unlikely]]
 			{
 				throw std::invalid_argument("Cannot load default 2D shaders for a null GPU device");
 			}
+			return load_default_format(detail::select_2d_shader_format(gpu_device.shader_format()));
+		}
 
-			constexpr std::array format_preference{
-			    static_cast<shader_format>(default_shader_format), shader_format::dxil,
-			    shader_format::spirv, shader_format::msl, shader_format::dxbc};
-			const auto supported_formats = dev.shader_format();
-			for (const auto format : format_preference)
-			{
-				if ((supported_formats & static_cast<SDL_GPUShaderFormat>(format)) != 0)
-				{
-					return load_default(format);
-				}
-			}
-
-			throw std::runtime_error("GPU device does not support a shader format for the default 2D renderer");
+		// Retained for source compatibility; batcher2d uses the active-device overload above.
+		static batcher2d_shader_assets load_default()
+		{
+			return load_default_format(static_cast<shader_format>(::mngl::gpu::default_shader_format));
 		}
 
 		static batcher2d_shader_assets load_default(shader_format format)
 		{
-			const auto required_shader = format == shader_format::dxil ? "batcher2d.vert.dxil"
-			                                                               : "batcher2d.vert.hlsl";
-			const auto directory = paths::shader_directory(required_shader);
+			return load_default_format(format);
+		}
+
+	private:
+		static batcher2d_shader_assets load_default_format(shader_format format)
+		{
+			const auto directory = paths::application_directory() / "shaders";
 			if (format == shader_format::dxil)
 			{
 				auto shaders = load_dxil(directory);
@@ -484,6 +494,7 @@ namespace mngl::gpu
 			        load_shader(directory / "batcher2d.frag.hlsl", fragment_options), true, true};
 		}
 
+	public:
 		static batcher2d_shader_assets load_dxil(const std::filesystem::path& directory)
 		{
 			batcher2d_shader_assets shaders{};
