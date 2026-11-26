@@ -23,6 +23,8 @@ file(CONFIGURE
 file(CONFIGURE
 	OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/mngl-stage-runtime-shaders.cmake"
 	CONTENT [=[
+cmake_minimum_required(VERSION 3.24)
+
 if(NOT DEFINED MNGL_SHADER_SOURCE OR NOT DEFINED MNGL_SHADER_DESTINATION OR NOT DEFINED MNGL_SHADER_MANIFEST)
 	message(FATAL_ERROR "Runtime shader staging requires source, destination, and manifest paths")
 endif()
