@@ -157,6 +157,33 @@ namespace
 		        "mouse removal edge lasted longer than one frame");
 	}
 
+	void test_action_context_reuses_state_across_frames_and_revisions()
+	{
+		constexpr SDL_KeyboardID keyboard_id = 7003;
+		mngl::action_map actions;
+		actions.bind_key("jump", mngl::scancode::a, keyboard_id);
+		mngl::event_manager::emit(key_down(keyboard_id));
+
+		mngl::input_context context(actions);
+		require(context.down("jump"), "An action context must initialize its state for a held binding");
+		require(!context.pressed("jump"), "Creating a context over a held binding must establish a neutral baseline");
+
+		require(mngl::input::continue_work(), "input loop stopped during action context state reuse test");
+		require(context.down("jump") && !context.pressed("jump"),
+		        "Reusing action state across an input frame must preserve down without inventing a press");
+
+		actions.bind_key("secondary", mngl::scancode::a, keyboard_id);
+		require(context.down("jump") && !context.pressed("jump"),
+		        "Adding an action must reconcile existing state without a false transition");
+		require(context.down("secondary") && !context.pressed("secondary"),
+		        "A newly added action must enter the context baseline without a false press");
+
+		actions.clear_action("jump");
+		require(!context.down("jump") && !context.pressed("jump"),
+		        "Removing an action must erase its cached state before it is queried again");
+		require(context.down("secondary"), "Reconciling one removed action must retain the other action state");
+	}
+
 	void test_action_aggregation()
 	{
 		constexpr SDL_KeyboardID keyboard_id = 7003;
@@ -231,6 +258,7 @@ int main()
 		require(mngl::input::continue_work(), "input loop failed to start");
 		test_keyboard_compatibility();
 		test_mouse_compatibility();
+		test_action_context_reuses_state_across_frames_and_revisions();
 		test_action_aggregation();
 		test_flipped_wheel();
 		test_imgui_text_ownership();

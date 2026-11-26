@@ -89,6 +89,7 @@ namespace mngl::gpu
 
 		[[nodiscard]] SDL_GPUGraphicsPipeline* raw() const noexcept { return m_handle; }
 		[[nodiscard]] SDL_GPUGraphicsPipeline* handle() const noexcept { return raw(); }
+		[[nodiscard]] SDL_GPUDevice* device_raw() const noexcept { return m_device; }
 		[[nodiscard]] bool valid() const noexcept { return m_handle != nullptr; }
 		explicit operator bool() const noexcept { return valid(); }
 
@@ -124,6 +125,7 @@ namespace mngl::gpu
 		graphics_pipeline_builder& set_vertex_shader(SDL_GPUShader* shader) noexcept
 		{
 			m_vert_shader = shader;
+			m_vertex_shader_device = nullptr;
 			m_vertex_shader_name.clear();
 			return *this;
 		}
@@ -131,6 +133,7 @@ namespace mngl::gpu
 		graphics_pipeline_builder& set_vertex_shader(const graphics_shader& shader)
 		{
 			set_vertex_shader(shader.raw());
+			m_vertex_shader_device = shader.device_raw();
 			m_vertex_shader_name.assign(shader.debug_name());
 			return *this;
 		}
@@ -138,6 +141,7 @@ namespace mngl::gpu
 		graphics_pipeline_builder& set_fragment_shader(SDL_GPUShader* shader) noexcept
 		{
 			m_frag_shader = shader;
+			m_fragment_shader_device = nullptr;
 			m_fragment_shader_name.clear();
 			return *this;
 		}
@@ -145,6 +149,7 @@ namespace mngl::gpu
 		graphics_pipeline_builder& set_fragment_shader(const graphics_shader& shader)
 		{
 			set_fragment_shader(shader.raw());
+			m_fragment_shader_device = shader.device_raw();
 			m_fragment_shader_name.assign(shader.debug_name());
 			return *this;
 		}
@@ -250,6 +255,11 @@ namespace mngl::gpu
 			if (!m_vert_shader || !m_frag_shader) [[unlikely]]
 			{
 				throw std::runtime_error("Graphics pipeline requires both vertex and fragment shaders");
+			}
+			if ((m_vertex_shader_device && m_vertex_shader_device != device) ||
+			    (m_fragment_shader_device && m_fragment_shader_device != device)) [[unlikely]]
+			{
+				throw std::invalid_argument("Graphics shaders and pipeline must use the same GPU device");
 			}
 
 			// 1. Преобразуем vertex_layout в C-структуры SDL
@@ -373,6 +383,8 @@ namespace mngl::gpu
 
 		SDL_GPUShader* m_vert_shader = nullptr;
 		SDL_GPUShader* m_frag_shader = nullptr;
+		SDL_GPUDevice* m_vertex_shader_device = nullptr;
+		SDL_GPUDevice* m_fragment_shader_device = nullptr;
 		vertex_layout m_layout;
 		std::string m_debug_name;
 		std::string m_vertex_shader_name;

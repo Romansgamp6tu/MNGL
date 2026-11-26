@@ -64,10 +64,12 @@ namespace mngl::gpu
 					throw std::invalid_argument(
 					    "Cannot begin a GPU copy pass with an invalid command buffer");
 				}
+				m_pass_lease = command.begin_pass();
 				m_device = command.device_raw();
 				m_handle = SDL_BeginGPUCopyPass(command_handle);
 				if (!m_handle) [[unlikely]]
 				{
+					m_pass_lease.reset();
 					throw sdl_error("Failed to begin GPU copy pass: ");
 				}
 			}
@@ -87,11 +89,13 @@ namespace mngl::gpu
 					SDL_EndGPUCopyPass(m_handle);
 					m_handle = nullptr;
 				}
+				m_pass_lease.reset();
 			}
 
 		private:
 			SDL_GPUDevice* m_device = nullptr;
 			SDL_GPUCopyPass* m_handle = nullptr;
+			command_buffer::pass_lease m_pass_lease;
 		};
 	} // namespace detail
 
@@ -287,6 +291,7 @@ namespace mngl::gpu
 				return;
 			}
 			detail::gpu_copy_pass copy_pass(cmd);
+			// Preserve untouched bytes before writing the requested range.
 			preserve_contents_for_update(copy_pass);
 			record_upload(copy_pass, staged_size, false, destination_offset);
 		}

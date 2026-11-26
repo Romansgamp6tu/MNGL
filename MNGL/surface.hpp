@@ -6,6 +6,9 @@
 
 #include <SDL3_image/SDL_image.h>
 
+#include <cmath>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <fstream>
 #include <functional>
@@ -57,9 +60,56 @@ namespace mngl
 
 		void update(double dt)
 		{
+			if (!std::isfinite(dt) || dt < 0.0)
+			{
+				throw std::invalid_argument("surface update time must be finite and non-negative");
+			}
+			const double elapsed_ms = dt * 1'000.0;
+			if (!std::isfinite(elapsed_ms))
+			{
+				throw std::invalid_argument("surface update time is too large");
+			}
 			if (!animated())
 				return;
-			accum += dt * 1'000;
+			if (elapsed_ms > std::numeric_limits<double>::max() - accum)
+			{
+				throw std::invalid_argument("surface update time overflows the animation accumulator");
+			}
+			const double next_accum = accum + elapsed_ms;
+			if (!std::isfinite(next_accum))
+			{
+				throw std::invalid_argument("surface update time overflows the animation accumulator");
+			}
+
+			constexpr std::size_t maximum_catch_up_frames = 4096;
+			auto simulated_frame = current_frame;
+			double simulated_accum = next_accum;
+			std::size_t transitions = 0;
+			for (;;)
+			{
+				int delay = anim->delays[simulated_frame];
+				if (delay <= 0)
+					delay = 100;
+				if (simulated_accum < delay)
+					break;
+				if (transitions == maximum_catch_up_frames)
+				{
+					throw std::invalid_argument(
+					    "surface update would require too many animation frame transitions");
+				}
+
+				const double remaining = simulated_accum - delay;
+				if (remaining == simulated_accum)
+				{
+					throw std::invalid_argument(
+					    "surface update time cannot be represented by the animation accumulator");
+				}
+				simulated_accum = remaining;
+				simulated_frame = (simulated_frame + 1) % anim->count;
+				++transitions;
+			}
+
+			accum = next_accum;
 			int cur_delay = anim->delays[current_frame];
 			if (cur_delay <= 0)
 				cur_delay = 100;

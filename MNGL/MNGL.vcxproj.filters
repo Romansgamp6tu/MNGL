@@ -277,6 +277,39 @@
     <Content Include="shaders\batcher2d.frag.dxil">
       <Filter>Файлы ресурсов</Filter>
     </Content>
+    <Content Include="shaders\batcher2d.vert.spv">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="shaders\batcher2d.frag.spv">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="shaders\svg_filter.vert.hlsl">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="shaders\svg_filter.frag.hlsl">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="shaders\svg_gradient.frag.hlsl">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="shaders\svg_filter.vert.dxil">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="shaders\svg_filter.frag.dxil">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="shaders\svg_gradient.frag.dxil">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="shaders\svg_filter.vert.spv">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="shaders\svg_filter.frag.spv">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
+    <Content Include="shaders\svg_gradient.frag.spv">
+      <Filter>Файлы ресурсов</Filter>
+    </Content>
     <Content Include="shaders\custom_fill.frag.dxil">
       <Filter>Файлы ресурсов</Filter>
     </Content>

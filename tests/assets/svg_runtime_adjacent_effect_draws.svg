@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <filter id="soft-edge" x="-0.25" y="-0.25" width="1.5" height="1.5">
+      <feGaussianBlur stdDeviation="1"/>
+    </filter>
+  </defs>
+  <rect id="left-red-effect" x="4" y="4" width="16" height="16" fill="#ff0000"
+        filter="url(#soft-edge)"/>
+  <rect id="right-blue-effect" x="40" y="4" width="16" height="16" fill="#0000ff"
+        filter="url(#soft-edge)"/>
+</svg>

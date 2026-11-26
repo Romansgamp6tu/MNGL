@@ -75,6 +75,11 @@ namespace mngl::gpu
 			{
 				throw std::invalid_argument("Render pass supports at most four color targets");
 			}
+			if (!cmd.valid()) [[unlikely]]
+			{
+				throw std::invalid_argument("Cannot begin a render pass with an invalid command buffer");
+			}
+			m_device = cmd.device_raw();
 
 			std::array<SDL_GPUColorTargetInfo, 4> sdl_color_targets{};
 			std::uint32_t color_target_count = 0;
@@ -181,6 +186,14 @@ namespace mngl::gpu
 		void bind_pipeline(const graphics_pipeline& pipeline) const
 		{
 			ensure_active();
+			if (!pipeline.valid()) [[unlikely]]
+			{
+				throw std::invalid_argument("Cannot bind an invalid graphics pipeline");
+			}
+			if (m_device && pipeline.device_raw() != m_device) [[unlikely]]
+			{
+				throw std::invalid_argument("Graphics pipeline and render pass must use the same GPU device");
+			}
 			SDL_BindGPUGraphicsPipeline(handle, pipeline.raw());
 		}
 
@@ -301,4 +314,3 @@ namespace mngl::gpu
 		}
 	};
 } // namespace mngl::gpu
-

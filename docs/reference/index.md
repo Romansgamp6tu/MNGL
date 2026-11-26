@@ -24,8 +24,8 @@
 | `async_io.hpp` | Фоновый ввод-вывод с типизированным результатом и ожиданием запроса | [Асинхронный ввод-вывод](../core/async-io.md) |
 | `process.hpp` | Запуск процессов, pipe-ввод с `close_stdin()` для EOF и получение кода завершения | [Процессы](../core/processes.md) |
 | `paths.hpp` | Каталоги приложения и стандартные папки пользователя | [Runtime и утилиты](../core/runtime-and-utilities.md) |
-| `imgui_compat.hpp` | MNGL scopes и классы-виджеты поверх Dear ImGui; `button::is_small()`, меню, canvas, ввод, GPU overlay и шрифты | [Окна и ввод](../core/windows-and-input.md) |
-| `event.hpp` | Типизированная система событий SDL и приложения, снимок подписчиков на момент получения события и управляемая доставка очереди | [События](../core/events.md) |
+| `imgui_compat.hpp` | MNGL scopes и классы-виджеты с собственным состоянием поверх Dear ImGui; `button::is_small()`, меню, canvas, ввод, GPU overlay и шрифты | [Окна и ввод](../core/windows-and-input.md) |
+| `event.hpp` | Типизированные события SDL и приложения, глобальный менеджер и локальные `event_bus` для подсистем; снимок подписчиков и управляемая доставка SDL-очереди | [События](../core/events.md) |
 | `surface.hpp`, `pixel_format.hpp` | SDL surfaces, изображения и форматы пикселей | [Поверхности и цвета](../core/media-and-colors.md) |
 | `color.hpp` | Цвета, строгий HEX-парсер, RGB/RGBA-коды, constexpr HSV/HSL и sRGB-преобразования, straight-alpha compositing | [Поверхности и цвета](../core/media-and-colors.md) |
 | `line.hpp`, `rectangle.hpp` | Геометрия, пересечения с включёнными границами и bounds точек внутри clip | [Геометрия](../core/geometry.md) |
@@ -37,9 +37,10 @@
 | `gpu_buffer.hpp`, `gpu_texture.hpp`, `sampler.hpp` | Низкоуровневые GPU-ресурсы с RAII-владением | [GPU-ресурсы](../gpu/resources.md) |
 | `graphics_shader.hpp`, `shader_loader.hpp` | Загрузка/компиляция шейдеров, uniforms и bindings | [Шейдеры](../gpu/shaders.md) |
 | `vertex_layout.hpp`, `graphics_pipeline.hpp`, `render_pass.hpp` | Vertex input, графические проходы с проверкой активного состояния и uniform-данные в активном command buffer | [Pipeline и render pass](../gpu/pipelines-and-passes.md) |
-| `render_window.hpp`, `renderer2d.hpp`, `texture.hpp`, `view.hpp`, `transform.hpp`, `hit_test.hpp` | Высокоуровневый 2D API, включая явный формат загружаемых текстур, фактический swapchain format окна, анимации атласа, геометрию и GPU mesh | [Раздел 2D](../2d/index.md), [форматы и загрузка изображений](../gpu/resources.md), [переключатели оптимизаций 2D](../2d/advanced-rendering.md#2d-optimizations) |
+| `render_window.hpp`, `renderer2d.hpp`, `texture.hpp`, `view.hpp`, `transform.hpp`, `hit_test.hpp` | Высокоуровневый 2D API: форматы текстур и swapchain, анимации атласа, геометрия, GPU mesh, кэшированные слои и hit testing | [Раздел 2D](../2d/index.md), [форматы и загрузка изображений](../gpu/resources.md), [переключатели оптимизаций 2D](../2d/advanced-rendering.md#2d-optimizations) |
+| `svg_object.hpp`, `svg_sprite.hpp` | Векторная геометрия SVG, градиенты, маркеры, изображения, маски, фильтры и hit testing | [SVG](../2d/svg.md) |
 | `batcher2d.hpp` | Низкоуровневая пакетная 2D-отрисовка, выбор формата встроенных шейдеров по GPU device, GPU culling и CPU-профилирование кадров | [Расширенный 2D-рендеринг](../2d/advanced-rendering.md) |
-| `text.hpp` | Шрифты, текст, автоматический перенос строкового текста, текстовые документы и атлас глифов | [Рендер текста](../2d/text-rendering.md) |
+| `text.hpp` | Шрифты, текст, автоматический перенос строк, текстовые документы и атлас глифов | [Рендер текста](../2d/text-rendering.md) |
 | `mods.hpp`, `mod_loader.hpp` | Точки расширения и загрузка нативных модов | [Контракт модов](../mods/api-contract.md) |
 
 `detail/audio/sdl3_mixer_backend.hpp` — внутренняя реализация аудио; приложению
@@ -62,4 +63,3 @@
   старый `tree_renderer.hpp` перенаправляет include для совместимости.
 
 Соглашения для новых модулей: [Принципы и стиль API](../design/api-style.md).
-

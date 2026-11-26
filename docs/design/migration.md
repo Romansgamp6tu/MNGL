@@ -125,3 +125,20 @@ MNGL не запускал preprocessor и мог строить неверны�
 HLSL `t`-регистры shared между texture и read-only buffer, а `u`-регистры shared между
 writable texture и buffer; абсолютные регистры каждого набора должны идти подряд от нуля.
 
+## SVG
+
+Для SVG доступны короткие GPU-пути: `svg_object::upload(device)` отправляет собственную загрузку,
+а `svg_sprite::from_file(device, path)` загружает файл и возвращает готовый drawable. Перегрузка
+`upload(device, command_buffer)` сохранена для приложений, которым нужно объединить загрузку SVG с
+другими GPU-командами.
+
+Точность кривых SVG по умолчанию задаётся в координатах SVG через `svg_load_options::curve_tolerance`.
+Для допуска в экранных пикселях задайте `svg_load_options::view_tessellation` при загрузке или
+вызовите `svg_object::sync_view()` после изменения view или размера render target, затем повторите
+GPU-загрузку объекта.
+
+Для ссылок `<image>` на соседние файлы доступна опция `svg_load_options::allow_external_images`;
+встроенные PNG, JPEG и WebP можно загружать напрямую. `geometry_count()` считает область с маской
+или фильтром одной частью верхнего уровня. SVG hit testing включается через
+`svg_load_options::hit_testable` до загрузки CPU-объекта или создания GPU-спрайта; поле
+`hit_test_path_entry::svg_element` указывает элемент, в который попало событие.

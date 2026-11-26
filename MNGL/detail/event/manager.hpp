@@ -193,6 +193,7 @@ namespace mngl
 
 	private:
 		friend class event_manager;
+		friend class event_bus;
 
 		explicit event_connection(std::shared_ptr<detail::event_subscription_state> state) noexcept
 		    : m_state(std::move(state))
@@ -288,6 +289,7 @@ namespace mngl
 
 	private:
 		friend class event_connection;
+		friend class event_bus;
 		friend class input;
 		friend class imgui_context;
 		friend void poll_events();
@@ -305,6 +307,7 @@ namespace mngl
 		static inline std::mutex pending_events_mutex;
 		static inline std::deque<pending_event_batch> pending_events;
 		static inline thread_local std::vector<deferred_callback>* event_collector = nullptr;
+		static inline std::vector<std::vector<deferred_callback>> reusable_callback_buffers;
 		static inline std::mutex imgui_input_events_mutex;
 		static inline std::vector<detail::queued_imgui_input_event> imgui_input_events;
 		static inline detail::mouse_pointer_tracker mouse_pointer_events;
@@ -373,6 +376,15 @@ namespace mngl
 			// Copy pointer-backed SDL fields into typed payloads before the event
 			// leaves the watcher.
 			std::vector<deferred_callback> callbacks;
+			{
+				std::lock_guard lock(pending_events_mutex);
+				if (!reusable_callback_buffers.empty())
+				{
+					callbacks = std::move(reusable_callback_buffers.back());
+					reusable_callback_buffers.pop_back();
+					callbacks.clear();
+				}
+			}
 			auto* previous_collector = std::exchange(event_collector, &callbacks);
 			try
 			{
@@ -387,6 +399,21 @@ namespace mngl
 
 			if (callbacks.empty())
 			{
+				if (callbacks.capacity() <= 64)
+				{
+					std::lock_guard lock(pending_events_mutex);
+					if (reusable_callback_buffers.size() < 64)
+					{
+						try
+						{
+							reusable_callback_buffers.push_back(std::move(callbacks));
+						}
+						catch (...)
+						{
+							// Reuse is an optimization; an empty SDL event has no work to queue.
+						}
+					}
+				}
 				return;
 			}
 
@@ -419,6 +446,18 @@ namespace mngl
 					callback = std::move(batch.callbacks[batch.next_callback++]);
 					if (batch.next_callback == batch.callbacks.size())
 					{
+						batch.callbacks.clear();
+						if (batch.callbacks.capacity() <= 64 && reusable_callback_buffers.size() < 64)
+						{
+							try
+							{
+								reusable_callback_buffers.push_back(std::move(batch.callbacks));
+							}
+							catch (...)
+							{
+								// Reuse is an optimization; dispatch must still finish if the pool is full.
+							}
+						}
 						pending_events.pop_front();
 					}
 				}
@@ -1229,6 +1268,147 @@ namespace mngl
 				break;
 			}
 		}
+	};
+
+	// A synchronous, instance-local event bus for application-defined events.
+	// The static event_manager remains the SDL-backed process-wide bus.
+	class event_bus
+	{
+	public:
+		template <event_payload T> using callback = event_manager::callback<T>;
+
+		event_bus() = default;
+		event_bus(const event_bus&) = delete;
+		event_bus& operator=(const event_bus&) = delete;
+		event_bus(event_bus&&) = delete;
+		event_bus& operator=(event_bus&&) = delete;
+
+		~event_bus() { clear(); }
+
+		template <event_payload T> [[nodiscard]] event_connection on(callback<T> cb)
+		{
+			auto subscription = std::make_shared<listener<T>>(std::move(cb));
+			{
+				std::lock_guard lock(m_registry_mutex);
+				auto& listeners = listeners_for_locked<T>();
+				const auto current = listeners.callbacks.load(std::memory_order_acquire);
+				auto updated = std::make_shared<typename listener_collection<T>::listener_vector>();
+				updated->reserve(current->size() + 1);
+				for (const auto& existing : *current)
+				{
+					if (auto live = existing.lock(); live && live->connected.load(std::memory_order_acquire))
+					{
+						updated->push_back(live);
+					}
+				}
+				updated->push_back(subscription);
+				std::shared_ptr<const typename listener_collection<T>::listener_vector> snapshot =
+				    std::move(updated);
+				listeners.callbacks.store(std::move(snapshot), std::memory_order_release);
+				std::erase_if(m_subscriptions, [](const auto& existing) { return existing.expired(); });
+				m_subscriptions.push_back(subscription);
+			}
+			return event_connection(std::move(subscription));
+		}
+
+		template <event_payload T> void emit(const T& event) const
+		{
+			std::lock_guard lock(event_manager::dispatch_mutex);
+			auto listeners = snapshot_listeners<T>();
+			if (listeners.empty())
+			{
+				return;
+			}
+
+			for (const auto& listener : listeners)
+			{
+				if (listener->connected.load(std::memory_order_acquire) && listener->handler)
+				{
+					listener->handler(event);
+				}
+			}
+		}
+
+		// Disconnect every subscription while keeping this bus available for reuse.
+		void clear() noexcept
+		{
+			std::lock_guard dispatch_lock(event_manager::dispatch_mutex);
+			std::lock_guard registry_lock(m_registry_mutex);
+			for (const auto& subscription : m_subscriptions)
+			{
+				if (auto live = subscription.lock())
+				{
+					live->connected.store(false, std::memory_order_release);
+				}
+			}
+			m_subscriptions.clear();
+			m_listener_collections.clear();
+		}
+
+	private:
+		template <event_payload T> struct listener : detail::event_subscription_state
+		{
+			callback<T> handler;
+
+			explicit listener(callback<T> value) : handler(std::move(value)) {}
+		};
+
+		template <event_payload T> struct listener_collection
+		{
+			using listener_vector = std::vector<std::weak_ptr<listener<T>>>;
+			std::atomic<std::shared_ptr<const listener_vector>> callbacks{
+			    std::make_shared<const listener_vector>()};
+		};
+
+		template <event_payload T> [[nodiscard]] static const void* type_key() noexcept
+		{
+			static const char key{};
+			return &key;
+		}
+
+		template <event_payload T> listener_collection<T>& listeners_for_locked()
+		{
+			const auto key = type_key<T>();
+			if (const auto found = m_listener_collections.find(key); found != m_listener_collections.end())
+			{
+				return *std::static_pointer_cast<listener_collection<T>>(found->second);
+			}
+
+			auto listeners = std::make_shared<listener_collection<T>>();
+			m_listener_collections.emplace(key, listeners);
+			return *listeners;
+		}
+
+		template <event_payload T>
+		[[nodiscard]] std::vector<std::shared_ptr<listener<T>>> snapshot_listeners() const
+		{
+			std::shared_ptr<listener_collection<T>> listeners;
+			{
+				std::lock_guard lock(m_registry_mutex);
+				const auto found = m_listener_collections.find(type_key<T>());
+				if (found == m_listener_collections.end())
+				{
+					return {};
+				}
+				listeners = std::static_pointer_cast<listener_collection<T>>(found->second);
+			}
+
+			const auto current = listeners->callbacks.load(std::memory_order_acquire);
+			std::vector<std::shared_ptr<listener<T>>> snapshot;
+			snapshot.reserve(current->size());
+			for (const auto& weak_listener : *current)
+			{
+				if (auto live = weak_listener.lock(); live && live->connected.load(std::memory_order_acquire))
+				{
+					snapshot.push_back(std::move(live));
+				}
+			}
+			return snapshot;
+		}
+
+		mutable std::mutex m_registry_mutex;
+		std::unordered_map<const void*, std::shared_ptr<void>> m_listener_collections;
+		std::vector<std::weak_ptr<detail::event_subscription_state>> m_subscriptions;
 	};
 
 	inline event_connection::event_connection(event_connection&& other) noexcept

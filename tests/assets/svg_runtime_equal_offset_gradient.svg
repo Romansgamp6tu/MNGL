@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="repeat-zero" gradientUnits="userSpaceOnUse" x1="16.5" x2="48.5"
+                    spreadMethod="repeat">
+      <stop stop-color="#ff0000"/>
+      <stop offset="0" stop-color="#0000ff"/>
+      <stop offset="1" stop-color="#0000ff"/>
+    </linearGradient>
+    <linearGradient id="hard-transition" gradientUnits="userSpaceOnUse" x1="16.5" x2="48.5">
+      <stop stop-color="#ff0000"/>
+      <stop offset="0.5" stop-color="#0000ff"/>
+      <stop offset="0.5" stop-color="#00ff00"/>
+      <stop offset="1" stop-color="#ffffff"/>
+    </linearGradient>
+  </defs>
+  <rect id="repeat-zero-sample" x="8" y="8" width="40" height="24" fill="url(#repeat-zero)"/>
+  <rect id="hard-transition-sample" x="8" y="36" width="40" height="24" fill="url(#hard-transition)"/>
+  <rect x="4" y="54" width="4" height="8" fill="#ff0000"/>
+</svg>

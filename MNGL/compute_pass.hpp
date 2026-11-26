@@ -591,4 +591,3 @@ namespace mngl::gpu
 		std::vector<bool> m_bound_uniform_buffers;
 	};
 } // namespace mngl::gpu
-

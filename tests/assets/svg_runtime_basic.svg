@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <marker id="clipped-marker" markerUnits="userSpaceOnUse" markerWidth="4" markerHeight="4"
+            viewBox="0 0 4 4" refX="0" refY="2" orient="0">
+      <path d="M-8 -8 H8 V8 H-8 Z" fill="#00ff00"/>
+    </marker>
+  </defs>
+  <rect id="solid" x="4" y="4" width="12" height="12" fill="#ff0000"/>
+  <line id="marker-line" x1="32" y1="32" x2="40" y2="32" stroke="none"
+        marker-end="url(#clipped-marker)"/>
+</svg>

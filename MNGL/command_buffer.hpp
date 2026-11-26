@@ -5,6 +5,7 @@
 
 #include <glm/glm.hpp>
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -15,13 +16,25 @@
 namespace mngl::two_d
 {
 	class mesh;
+	class font;
+	class renderer;
+	class svg_object;
+} // namespace mngl::two_d
+
+namespace mngl
+{
+	class texture;
 }
 
 namespace mngl::gpu
 {
 	class batcher2d;
-	class compute_pass;
 	class render_pass;
+	class compute_pass;
+	namespace detail
+	{
+		class gpu_copy_pass;
+	}
 
 	class command_buffer
 	{
@@ -60,7 +73,8 @@ namespace mngl::gpu
 		      m_active_pass_state(std::move(o.m_active_pass_state)), handle(std::exchange(o.handle, nullptr)),
 		      dev(std::exchange(o.dev, nullptr)),
 		      m_swapchain_texture_acquired(std::exchange(o.m_swapchain_texture_acquired, false)),
-		      m_retained_resources(std::move(o.m_retained_resources))
+		      m_retained_resources(std::move(o.m_retained_resources)),
+		      m_completion_callbacks(std::move(o.m_completion_callbacks))
 		{
 			o.m_device_owner.reset();
 		}
@@ -72,6 +86,7 @@ namespace mngl::gpu
 				ensure_owner_thread();
 				o.ensure_owner_thread();
 				ensure_no_active_pass();
+				o.ensure_no_active_pass();
 				finish_noexcept();
 				m_device_owner = std::move(o.m_device_owner);
 				o.m_device_owner.reset();
@@ -80,6 +95,7 @@ namespace mngl::gpu
 				dev = std::exchange(o.dev, nullptr);
 				m_swapchain_texture_acquired = std::exchange(o.m_swapchain_texture_acquired, false);
 				m_retained_resources = std::move(o.m_retained_resources);
+				m_completion_callbacks = std::move(o.m_completion_callbacks);
 			}
 			return *this;
 		}
@@ -117,10 +133,12 @@ namespace mngl::gpu
 			{
 				auto* pending = std::exchange(handle, nullptr);
 				dev = nullptr;
+				const bool submitted = SDL_SubmitGPUCommandBuffer(pending);
 				m_swapchain_texture_acquired = false;
-				::mngl::check_sdl(SDL_SubmitGPUCommandBuffer(pending));
-				m_device_owner.reset();
+				complete(submitted);
+				::mngl::check_sdl(submitted);
 				m_retained_resources.clear();
+				m_device_owner.reset();
 			}
 		}
 
@@ -137,10 +155,12 @@ namespace mngl::gpu
 			{
 				auto* pending = std::exchange(handle, nullptr);
 				dev = nullptr;
+				const bool canceled = SDL_CancelGPUCommandBuffer(pending);
 				m_swapchain_texture_acquired = false;
-				::mngl::check_sdl(SDL_CancelGPUCommandBuffer(pending));
-				m_device_owner.reset();
+				complete(false);
+				::mngl::check_sdl(canceled);
 				m_retained_resources.clear();
+				m_device_owner.reset();
 			}
 		}
 
@@ -220,9 +240,14 @@ namespace mngl::gpu
 		};
 
 		friend class batcher2d;
-		friend class ::mngl::two_d::mesh;
-		friend class compute_pass;
 		friend class render_pass;
+		friend class compute_pass;
+		friend class detail::gpu_copy_pass;
+		friend class ::mngl::two_d::mesh;
+		friend class ::mngl::two_d::font;
+		friend class ::mngl::two_d::renderer;
+		friend class ::mngl::texture;
+		friend class ::mngl::two_d::svg_object;
 
 		[[nodiscard]] pass_lease begin_pass()
 		{
@@ -249,9 +274,35 @@ namespace mngl::gpu
 				    "Cannot submit, cancel, or replace a command buffer while a GPU pass is active");
 			}
 		}
+		void on_completion(std::function<void(bool)> callback)
+		{
+			ensure_owner_thread();
+			if (!handle) [[unlikely]]
+			{
+				throw std::logic_error("Cannot observe completion on an inactive command buffer");
+			}
+			m_completion_callbacks.emplace_back(std::move(callback));
+		}
 
-		template <typename T>
-		void retain_resource(std::shared_ptr<T> resource)
+		void complete(bool submitted) noexcept
+		{
+			auto callbacks = std::move(m_completion_callbacks);
+			m_completion_callbacks.clear();
+			for (auto& callback : callbacks)
+			{
+				try
+				{
+					callback(submitted);
+				}
+				catch (...)
+				{
+					SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+					             "A GPU command buffer completion callback threw an exception");
+				}
+			}
+		}
+
+		template <typename T> void retain_resource(std::shared_ptr<T> resource)
 		{
 			ensure_owner_thread();
 			if (!handle) [[unlikely]]
@@ -267,6 +318,7 @@ namespace mngl::gpu
 		static std::thread::id require_owner_thread(const command_buffer& cmd)
 		{
 			cmd.ensure_owner_thread();
+			cmd.ensure_no_active_pass();
 			return cmd.owner_thread;
 		}
 
@@ -287,6 +339,7 @@ namespace mngl::gpu
 		{
 			if (!on_owner_thread())
 			{
+				complete(false);
 				SDL_LogError(
 				    SDL_LOG_CATEGORY_APPLICATION,
 				    "GPU command buffer was destroyed on a thread other than the one that acquired it; "
@@ -315,6 +368,7 @@ namespace mngl::gpu
 					    submit ? "submit command buffer after acquiring a swapchain texture" : "cancel",
 					    SDL_GetError());
 				}
+				complete(submit && succeeded);
 				m_device_owner.reset();
 				m_retained_resources.clear();
 			}
@@ -326,7 +380,7 @@ namespace mngl::gpu
 		SDL_GPUCommandBuffer* handle = nullptr;
 		SDL_GPUDevice* dev = nullptr;
 		bool m_swapchain_texture_acquired = false;
-		std::vector<std::shared_ptr<void>> m_retained_resources;
+		std::vector<std::shared_ptr<const void>> m_retained_resources;
+		std::vector<std::function<void(bool)>> m_completion_callbacks;
 	};
 } // namespace mngl::gpu
-

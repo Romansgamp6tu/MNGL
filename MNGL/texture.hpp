@@ -3,12 +3,14 @@
 #include "color.hpp"
 #include "command_buffer.hpp"
 #include "gpu_texture.hpp"
+#include "gpu_buffer.hpp"
 #include "hit_test.hpp"
 #include "rectangle.hpp"
 #include "surface.hpp"
 #include "view.hpp"
 
 #include <atomic>
+#include <algorithm>
 #include <cstddef>
 #include <concepts>
 #include <cstdint>
@@ -32,6 +34,7 @@ namespace mngl
 	namespace two_d
 	{
 		class frame_2d;
+		class font;
 		class recording_context;
 		class renderer;
 		class cached_layer;
@@ -76,6 +79,28 @@ namespace mngl
 		private:
 			SDL_GPUDevice* dev;
 			SDL_GPUTransferBuffer* buf;
+		};
+
+		struct reusable_upload_buffer
+		{
+			reusable_upload_buffer(SDL_GPUDevice* owner, SDL_GPUTransferBuffer* value,
+			                      std::uint32_t size) noexcept
+			    : device(owner), handle(value), capacity(size)
+			{
+			}
+
+			~reusable_upload_buffer()
+			{
+				if (handle)
+				{
+					SDL_ReleaseGPUTransferBuffer(device, handle);
+				}
+			}
+
+			SDL_GPUDevice* device = nullptr;
+			SDL_GPUTransferBuffer* handle = nullptr;
+			std::uint32_t capacity = 0;
+			bool in_flight = false;
 		};
 	} // namespace detail
 
@@ -238,9 +263,9 @@ namespace mngl
 
 			gpu::texture tex(dev, glm::uvec2{w, h}, fmt, usg);
 			upload_rows(tex, cmd, converted->pixels, static_cast<std::size_t>(w) * 4,
-			            static_cast<std::size_t>(converted->pitch), h);
+			            static_cast<std::size_t>(converted->pitch), h, 0, 0, 0, 0, this);
 			m_gpu_tex = std::move(tex);
-			m_hit_test_frame.reset();
+			invalidate_hit_test_frame();
 		}
 
 		// Updates a supported RGBA8/BGRA8 texture from a same-sized SDL surface.
@@ -265,8 +290,8 @@ namespace mngl
 			}
 
 			upload_rows(m_gpu_tex, cmd, converted->pixels, static_cast<std::size_t>(width) * 4,
-			            static_cast<std::size_t>(converted->pitch), height);
-			m_hit_test_frame.reset();
+			            static_cast<std::size_t>(converted->pitch), height, 0, 0, 0, 0, this);
+			invalidate_hit_test_frame();
 		}
 
 		void update_from_surface(gpu::command_buffer& cmd, const mngl::surface& source)
@@ -314,8 +339,8 @@ namespace mngl
 			{
 				throw std::logic_error("Cannot update a texture while it is being rendered to");
 			}
-			upload_raw(m_gpu_tex, cmd, pixels.data(), pixels.size_bytes());
-			m_hit_test_frame.reset();
+			upload_raw(m_gpu_tex, cmd, pixels.data(), pixels.size_bytes(), this);
+			invalidate_hit_test_frame();
 		}
 
 		template <typename T> void update_pixels(const gpu::device& dev, std::span<const T> pixels)
@@ -409,9 +434,13 @@ namespace mngl
 				throw std::invalid_argument("Hit testing requires a color-target texture");
 			}
 			m_hit_testing_enabled = enabled;
-			if (!enabled)
+			if (enabled && !m_hit_test_frame_state)
 			{
-				m_hit_test_frame.reset();
+				m_hit_test_frame_state = std::make_shared<detail::hit_test_frame_state>();
+			}
+		else if (!enabled)
+		{
+			m_hit_test_frame_state.reset();
 			}
 		}
 
@@ -424,11 +453,11 @@ namespace mngl
 			{
 				throw std::logic_error("Enable hit testing before rendering to this texture");
 			}
-			if (!m_hit_test_frame) [[unlikely]]
+			if (!m_hit_test_frame_state || !m_hit_test_frame_state->completed) [[unlikely]]
 			{
 				throw std::logic_error("No completed hit-test frame is available for this texture");
 			}
-			return detail::hit_test_frame_at_pixel(*m_hit_test_frame, pixel_position);
+			return detail::hit_test_frame_at_pixel(*m_hit_test_frame_state->completed, pixel_position);
 		}
 
 		[[nodiscard]] const gpu::texture& raw_gpu_texture() const noexcept { return m_gpu_tex; }
@@ -522,9 +551,24 @@ namespace mngl
 		}
 
 	private:
+		void invalidate_hit_test_frame() noexcept
+		{
+			if (m_hit_test_frame_state)
+			{
+				m_hit_test_frame_state->completed.reset();
+				m_hit_test_frame_state->latest_recorded.reset();
+			}
+		}
+
+		[[nodiscard]] std::shared_ptr<const detail::hit_test_frame> completed_hit_test_frame() const noexcept
+		{
+			return m_hit_test_frame_state ? m_hit_test_frame_state->completed : nullptr;
+		}
+
 		friend class render_window;
 		friend class imgui_context;
 		friend class two_d::renderer;
+		friend class two_d::font;
 		friend class two_d::cached_layer;
 		// Preserves existing target pixels; cached layers redraw only their dirty regions.
 		[[nodiscard]] frame_scope frame_preserving(const color& clear_color = color(0.0f, 0.0f, 0.0f, 1.0f))
@@ -548,7 +592,8 @@ namespace mngl
 		gpu::texture m_gpu_tex;
 		std::optional<view> m_view;
 		bool m_hit_testing_enabled = false;
-		std::shared_ptr<const detail::hit_test_frame> m_hit_test_frame;
+		std::shared_ptr<detail::hit_test_frame_state> m_hit_test_frame_state;
+		std::shared_ptr<detail::reusable_upload_buffer> m_upload_staging;
 		std::unique_ptr<detail::texture_render_session> m_render_session;
 		bool m_external_render_active = false;
 		std::uint64_t m_next_frame_generation = 0;
@@ -616,14 +661,35 @@ namespace mngl
 
 		// Плотно упакованные данные всей текстуры
 		static void upload_raw(gpu::texture& tex, gpu::command_buffer& cmd, const void* data,
-		                       std::size_t bytes)
+		                       std::size_t bytes, texture* owner = nullptr)
 		{
-			upload_rows(tex, cmd, data, bytes, bytes, 1);
+			upload_rows(tex, cmd, data, bytes, bytes, 1, 0, 0, tex.width(), tex.height(), owner);
+		}
+
+		static void upload_region(gpu::texture& tex, gpu::command_buffer& cmd, const void* data,
+		                          std::size_t src_stride, std::uint32_t x, std::uint32_t y,
+		                          std::uint32_t width, std::uint32_t height, texture* owner = nullptr)
+		{
+			if (width == 0 || height == 0) [[unlikely]]
+			{
+				throw std::invalid_argument("Texture upload region must have non-zero dimensions");
+			}
+			const auto expected = SDL_CalculateGPUTextureFormatSize(
+			    static_cast<SDL_GPUTextureFormat>(tex.format()), width, height, 1);
+			if (expected == 0 || expected % height != 0) [[unlikely]]
+			{
+				throw std::invalid_argument("Texture upload region has an unsupported pixel format or size");
+			}
+			const auto row_bytes = static_cast<std::size_t>(expected / height);
+			upload_rows(tex, cmd, data, row_bytes, src_stride, height, x, y, width, height, owner);
 		}
 
 		// Копирует rows строк по row_bytes байт (шаг источника src_stride) в плотный transfer buffer
 		static void upload_rows(gpu::texture& tex, gpu::command_buffer& cmd, const void* data,
-		                        std::size_t row_bytes, std::size_t src_stride, std::size_t rows)
+		                        std::size_t row_bytes, std::size_t src_stride, std::size_t rows,
+		                        std::uint32_t destination_x = 0, std::uint32_t destination_y = 0,
+		                        std::uint32_t destination_width = 0, std::uint32_t destination_height = 0,
+		                        texture* owner = nullptr)
 		{
 			if (!tex.valid()) [[unlikely]]
 			{
@@ -646,29 +712,97 @@ namespace mngl
 			{
 				throw std::invalid_argument("Texture row stride is smaller than row size");
 			}
+			if (destination_width == 0)
+			{
+				destination_width = tex.width();
+			}
+			if (destination_height == 0)
+			{
+				destination_height = tex.height();
+			}
+			const bool packed_whole_texture = destination_x == 0 && destination_y == 0 &&
+			                                  destination_width == tex.width() &&
+			                                  destination_height == tex.height() && rows == 1;
+			if (destination_x > tex.width() || destination_width > tex.width() - destination_x ||
+			    destination_y > tex.height() || destination_height > tex.height() - destination_y ||
+			    (destination_height != rows && !packed_whole_texture)) [[unlikely]]
+			{
+				throw std::out_of_range("Texture upload region exceeds the destination texture");
+			}
 
 			const std::uint32_t expected = SDL_CalculateGPUTextureFormatSize(
-			    static_cast<SDL_GPUTextureFormat>(tex.format()), tex.width(), tex.height(), 1);
-			const std::size_t total = row_bytes * rows;
-			if (expected == 0 || total != expected) [[unlikely]]
+			    static_cast<SDL_GPUTextureFormat>(tex.format()), destination_width, destination_height, 1);
+			if (expected == 0) [[unlikely]]
+			{
+				throw std::invalid_argument("Texture upload region has an unsupported pixel format or size");
+			}
+			const std::uint64_t total_size = static_cast<std::uint64_t>(row_bytes) * rows;
+			if (total_size > std::numeric_limits<std::size_t>::max()) [[unlikely]]
+			{
+				throw std::length_error("Texture upload region exceeds the addressable size");
+			}
+			const std::size_t total = static_cast<std::size_t>(total_size);
+			if (total != expected) [[unlikely]]
 			{
 				throw std::invalid_argument(
-				    "Texture pixel data size does not match texture dimensions and format");
+				    "Texture pixel data size does not match upload region dimensions and format");
 			}
 			const std::uint32_t data_size = checked_size(total);
 
-			SDL_GPUTransferBufferCreateInfo transfer_info{};
-			transfer_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-			transfer_info.size = data_size;
-
-			SDL_GPUTransferBuffer* transfer_buf = SDL_CreateGPUTransferBuffer(device_raw, &transfer_info);
-			if (!transfer_buf) [[unlikely]]
+			std::shared_ptr<detail::reusable_upload_buffer> reusable;
+			std::unique_ptr<detail::transfer_buffer_guard> temporary_guard;
+			SDL_GPUTransferBuffer* transfer_buf = nullptr;
+			if (owner && owner->m_upload_staging && !owner->m_upload_staging->in_flight &&
+			    owner->m_upload_staging->device == device_raw &&
+			    owner->m_upload_staging->capacity >= data_size)
 			{
-				throw sdl_error("Failed to create transfer buffer for texture: ");
+				reusable = owner->m_upload_staging;
+				transfer_buf = reusable->handle;
 			}
-			detail::transfer_buffer_guard guard(device_raw, transfer_buf);
+			else
+			{
+				const std::uint32_t capacity = owner && owner->m_upload_staging &&
+				                                       owner->m_upload_staging->device == device_raw
+				                                   ? std::max(owner->m_upload_staging->capacity, data_size)
+				                                   : data_size;
+				SDL_GPUTransferBufferCreateInfo transfer_info{};
+				transfer_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+				transfer_info.size = capacity;
+				auto* created = SDL_CreateGPUTransferBuffer(device_raw, &transfer_info);
+				if (!created) [[unlikely]]
+				{
+					throw sdl_error("Failed to create transfer buffer for texture: ");
+				}
+				if (owner)
+				{
+					try
+					{
+						reusable = std::make_shared<detail::reusable_upload_buffer>(device_raw, created, capacity);
+					}
+					catch (...)
+					{
+						SDL_ReleaseGPUTransferBuffer(device_raw, created);
+						throw;
+					}
+					owner->m_upload_staging = reusable;
+					transfer_buf = reusable->handle;
+				}
+				else
+				{
+					transfer_buf = created;
+					temporary_guard =
+					    std::make_unique<detail::transfer_buffer_guard>(device_raw, transfer_buf);
+				}
+			}
 
-			void* mapped = SDL_MapGPUTransferBuffer(device_raw, transfer_buf, false);
+			if (reusable)
+			{
+				cmd.retain_resource(reusable);
+				cmd.on_completion([reusable](bool) { reusable->in_flight = false; });
+				reusable->in_flight = true;
+			}
+
+			void* mapped = SDL_MapGPUTransferBuffer(device_raw, transfer_buf, true);
 			if (!mapped) [[unlikely]]
 			{
 				throw sdl_error("Failed to map transfer buffer: ");
@@ -689,11 +823,7 @@ namespace mngl
 			}
 			SDL_UnmapGPUTransferBuffer(device_raw, transfer_buf);
 
-			SDL_GPUCopyPass* copy_pass = SDL_BeginGPUCopyPass(cmd.raw());
-			if (!copy_pass) [[unlikely]]
-			{
-				throw sdl_error("Failed to begin copy pass for texture upload: ");
-			}
+			gpu::detail::gpu_copy_pass copy_pass(cmd);
 
 			// Нули = плотная упаковка по размеру региона
 			SDL_GPUTextureTransferInfo src_info{};
@@ -701,13 +831,16 @@ namespace mngl
 
 			SDL_GPUTextureRegion dst_region{};
 			dst_region.texture = tex.raw();
-			dst_region.w = tex.width();
-			dst_region.h = tex.height();
+			dst_region.x = destination_x;
+			dst_region.y = destination_y;
+			dst_region.w = destination_width;
+			dst_region.h = destination_height;
 			dst_region.d = 1;
 
-			// Replacing every pixel can cycle safely and preserves images used by pending commands.
-			SDL_UploadToGPUTexture(copy_pass, &src_info, &dst_region, true);
-			SDL_EndGPUCopyPass(copy_pass);
+			const bool replacing_entire_texture = destination_x == 0 && destination_y == 0 &&
+			                                     destination_width == tex.width() &&
+			                                     destination_height == tex.height();
+			SDL_UploadToGPUTexture(copy_pass.raw(), &src_info, &dst_region, replacing_entire_texture);
 		}
 	};
 
@@ -843,4 +976,3 @@ namespace mngl
 		return m_state->m_texture;
 	}
 } // namespace mngl
-

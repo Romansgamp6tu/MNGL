@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="srgb" x1="0" x2="1"><stop stop-color="black"/><stop offset="1" stop-color="white"/></linearGradient>
+    <linearGradient id="linear" x1="0" x2="1" color-interpolation="linearRGB"><stop stop-color="black"/><stop offset="1" stop-color="white"/></linearGradient>
+  </defs>
+  <rect id="orientation-anchor" x="4" y="4" width="4" height="8" fill="#ff0000"/>
+  <rect x="8" y="8" width="35" height="16" fill="url(#srgb)"/>
+  <rect x="8" y="32" width="35" height="16" fill="url(#linear)"/>
+</svg>

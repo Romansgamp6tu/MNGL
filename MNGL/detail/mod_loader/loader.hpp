@@ -48,6 +48,18 @@ namespace mngl::mods
 					return {mod_load_state::rejected, manifest.id, dependency_error};
 				m_loading.insert(manifest.id);
 				m_loading_manifests.emplace(manifest.id, manifest);
+				try
+				{
+					register_dependencies_locked(manifest.id, manifest);
+				}
+				catch (...)
+				{
+					unregister_dependencies_locked(manifest.id, manifest);
+					m_loading.erase(manifest.id);
+					m_loading_manifests.erase(manifest.id);
+					return {mod_load_state::rejected, manifest.id,
+					        "failed to reserve the mod dependency graph"};
+				}
 			}
 
 			const auto reserved_id = manifest.id;
@@ -66,6 +78,8 @@ namespace mngl::mods
 			}
 			{
 				std::lock_guard lock(m_mutex);
+				if (!result && !m_pending.contains(reserved_id) && !m_loaded.contains(reserved_id))
+					unregister_dependencies_locked(reserved_id, m_loading_manifests.at(reserved_id));
 				m_loading.erase(reserved_id);
 				m_loading_manifests.erase(reserved_id);
 			}
@@ -361,55 +375,72 @@ namespace mngl::mods
 		[[nodiscard]] std::vector<mod_unload_result> unload_all()
 		{
 			std::vector<std::string> ids;
-			std::map<std::string, std::vector<std::string>> dependencies;
+			std::map<std::string, std::size_t> dependent_counts;
+			std::map<std::string, std::vector<std::string>> loaded_dependencies;
 			{
 				std::lock_guard lock(m_mutex);
 				ids.reserve(m_loaded.size());
-				for (const auto& [id, module] : m_loaded)
+				for (const auto& [id, _] : m_loaded)
 				{
 					ids.push_back(id);
-					auto& required = dependencies[id];
+					dependent_counts.emplace(id, 0);
+				}
+
+				// Pending and loading modules remain dependents too: their providers
+				// must not enter the ready queue while either state is active.
+				for (auto& [provider_id, dependent_count] : dependent_counts)
+				{
+					const auto reverse = m_dependents.find(provider_id);
+					if (reverse == m_dependents.end())
+						continue;
+					for (const auto& dependent_id : reverse->second)
+						if (m_loaded.contains(dependent_id) || m_pending.contains(dependent_id) ||
+						    m_loading.contains(dependent_id))
+							++dependent_count;
+				}
+
+				for (const auto& [dependent_id, module] : m_loaded)
+				{
+					auto& required = loaded_dependencies[dependent_id];
 					for (const auto& dependency : module.manifest.dependencies)
-						required.push_back(dependency.id);
+						if (m_loaded.contains(dependency.id))
+							required.push_back(dependency.id);
 				}
 			}
 
-			std::set<std::string> remaining(ids.begin(), ids.end());
-			ids.clear();
-			while (!remaining.empty())
+			std::set<std::string> ready;
+			for (const auto& [id, count] : dependent_counts)
+				if (count == 0)
+					ready.insert(id);
+
+			std::vector<std::string> unload_order;
+			unload_order.reserve(ids.size());
+			while (!ready.empty())
 			{
-				std::vector<std::string> leaves;
-				for (const auto& candidate : remaining)
+				auto first = ready.begin();
+				const auto id = *first;
+				ready.erase(first);
+				unload_order.push_back(id);
+				if (const auto found = loaded_dependencies.find(id); found != loaded_dependencies.end())
 				{
-					const bool has_loaded_dependent =
-					    std::any_of(remaining.begin(), remaining.end(),
-						            [&](const std::string& other)
-						            {
-						                if (other == candidate)
-							                return false;
-						                const auto found = dependencies.find(other);
-						                return found != dependencies.end() &&
-										       std::find(found->second.begin(), found->second.end(),
-										                 candidate) != found->second.end();
-					                });
-					if (!has_loaded_dependent)
-						leaves.push_back(candidate);
-				}
-				if (leaves.empty())
-				{
-					ids.insert(ids.end(), remaining.begin(), remaining.end());
-					break;
-				}
-				for (const auto& leaf : leaves)
-				{
-					ids.push_back(leaf);
-					remaining.erase(leaf);
+					for (const auto& provider_id : found->second)
+					{
+						auto& count = dependent_counts.at(provider_id);
+						if (count != 0 && --count == 0)
+							ready.insert(provider_id);
+					}
 				}
 			}
+
+			// A dependency cycle has no leaf. Keep the stable ID order so that
+			// each attempted unload still reports the existing dependency guard.
+			for (const auto& [id, count] : dependent_counts)
+				if (count != 0)
+					unload_order.push_back(id);
 
 			std::vector<mod_unload_result> results;
-			results.reserve(ids.size());
-			for (const auto& id : ids)
+			results.reserve(unload_order.size());
+			for (const auto& id : unload_order)
 				results.push_back(unload(id));
 			(void)collect_deferred();
 			return results;
@@ -418,28 +449,62 @@ namespace mngl::mods
 		// Call after destroying mod-created objects to complete any deferred native unloads.
 		[[nodiscard]] std::size_t collect_deferred()
 		{
-			std::vector<loaded_module> ready;
+			std::size_t collected = 0;
+			for (;;)
 			{
-				std::lock_guard lock(m_mutex);
-				for (auto it = m_pending.begin(); it != m_pending.end();)
+				std::vector<std::string> ready;
 				{
-					const auto [active_calls, live_objects] = it->second.lifetime->outstanding();
-					if (active_calls == 0 && live_objects == 0 && it->second.lifetime.use_count() == 1)
+					std::lock_guard lock(m_mutex);
+					ready.reserve(m_pending.size());
+					for (auto it = m_pending.begin(); it != m_pending.end();)
 					{
-						ready.push_back(std::move(it->second));
-						it = m_pending.erase(it);
-					}
-					else
+						if (it->second.collecting || !blocking_dependent_locked(it->first).empty())
+						{
+							++it;
+							continue;
+						}
+						const auto [active_calls, live_objects] = it->second.lifetime->outstanding();
+						if (active_calls == 0 && live_objects == 0 && it->second.lifetime.use_count() == 1)
+						{
+							it->second.collecting = true;
+							ready.push_back(it->first);
+						}
 						++it;
+					}
+				}
+				if (ready.empty())
+					break;
+
+				for (const auto& id : ready)
+				{
+					std::shared_ptr<detail::module_lifetime> lifetime;
+					{
+						std::lock_guard lock(m_mutex);
+						const auto found = m_pending.find(id);
+						if (found == m_pending.end() || !found->second.collecting)
+							continue;
+						lifetime = found->second.lifetime;
+					}
+
+					// Keep the ID and dependency edges visible to reentrant loader calls
+					// until user shutdown code and the native library close both finish.
+					lifetime->finish_shutdown();
+					lifetime->close_library();
+
+					{
+						std::lock_guard lock(m_mutex);
+						const auto found = m_pending.find(id);
+						if (found != m_pending.end() && found->second.collecting &&
+						    found->second.lifetime == lifetime)
+						{
+							unregister_dependencies_locked(id, found->second.manifest);
+							m_pending.erase(found);
+							++collected;
+						}
+					}
 				}
 			}
-
-			for (auto& module : ready)
-			{
-				module.lifetime->finish_shutdown();
-				module.lifetime->close_library();
-			}
-			return ready.size();
+			return collected;
 		}
 
 		[[nodiscard]] bool is_loaded(std::string_view mod_id) const
@@ -466,6 +531,7 @@ namespace mngl::mods
 			mod_manifest manifest;
 			std::shared_ptr<detail::module_lifetime> lifetime;
 			detail::mod_unload_entrypoint unload{};
+			bool collecting{};
 		};
 
 		[[nodiscard]] mod_unload_result pending_result(const std::string& mod_id) const
@@ -477,6 +543,33 @@ namespace mngl::mods
 			const auto [active_calls, live_objects] = found->second.lifetime->outstanding();
 			return {mod_unload_state::deferred, mod_id, active_calls, live_objects,
 			        "registrations removed; call collect_deferred after active calls and mod objects end"};
+		}
+
+		void register_dependencies_locked(const std::string& mod_id, const mod_manifest& manifest)
+		{
+			try
+			{
+				for (const auto& dependency : manifest.dependencies)
+					m_dependents[dependency.id].insert(mod_id);
+			}
+			catch (...)
+			{
+				unregister_dependencies_locked(mod_id, manifest);
+				throw;
+			}
+		}
+
+		void unregister_dependencies_locked(const std::string& mod_id, const mod_manifest& manifest)
+		{
+			for (const auto& dependency : manifest.dependencies)
+			{
+				const auto found = m_dependents.find(dependency.id);
+				if (found == m_dependents.end())
+					continue;
+				found->second.erase(mod_id);
+				if (found->second.empty())
+					m_dependents.erase(found);
+			}
 		}
 
 		struct rollback_guard
@@ -555,21 +648,12 @@ namespace mngl::mods
 
 		[[nodiscard]] std::string blocking_dependent_locked(std::string_view dependency_id) const
 		{
-			const auto depends_on = [dependency_id](const mod_manifest& manifest)
-			{
-				return std::any_of(manifest.dependencies.begin(), manifest.dependencies.end(),
-				                   [dependency_id](const mod_dependency& dependency)
-				                   { return dependency.id == dependency_id; });
-			};
-			for (const auto& [id, module] : m_loaded)
-				if (id != dependency_id && depends_on(module.manifest))
-					return id;
-			for (const auto& [id, module] : m_pending)
-				if (id != dependency_id && depends_on(module.manifest))
-					return id;
-			for (const auto& [id, manifest] : m_loading_manifests)
-				if (id != dependency_id && depends_on(manifest))
-					return id;
+			const auto found = m_dependents.find(dependency_id);
+			if (found != m_dependents.end())
+				for (const auto& id : found->second)
+					if (id != dependency_id &&
+					    (m_loaded.contains(id) || m_pending.contains(id) || m_loading.contains(id)))
+						return id;
 			return {};
 		}
 
@@ -748,6 +832,7 @@ namespace mngl::mods
 		std::unordered_map<std::string, loaded_module> m_pending;
 		std::unordered_set<std::string> m_loading;
 		std::unordered_map<std::string, mod_manifest> m_loading_manifests;
+		std::map<std::string, std::set<std::string>, std::less<>> m_dependents;
 	};
 
 } // namespace mngl::mods

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <g id="tile">
+      <rect id="tile-left" width="8" height="8" fill="#ff0000"/>
+      <rect id="tile-right" x="12" width="8" height="8" fill="#0000ff"/>
+    </g>
+  </defs>
+  <rect x="4" y="4" width="4" height="8" fill="#ff0000"/>
+  <use id="first-instance" href="#tile" x="8" y="8"/>
+  <use id="second-instance" href="#tile" x="36" y="36"/>
+</svg>

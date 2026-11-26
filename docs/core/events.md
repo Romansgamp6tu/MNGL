@@ -112,6 +112,26 @@ int main()
 
 Обычный вызов `emit()` синхронный: подписчики выполняются в потоке вызывающего кода. Это не очередь задач для главного потока. Если рабочий поток вызывает `emit()`, его callbacks тоже работают в этом рабочем потоке; операции с окном и GPU следует передать в цикл приложения отдельно.
 
+## Отдельная шина для подсистем
+
+Для собственных событий подсистем можно создать `mngl::event_bus`. У каждого экземпляра свой набор подписок: событие одной шины не вызывает callbacks другой шины или глобального `event_manager`.
+
+```cpp
+mngl::event_bus gameplay_events;
+mngl::event_bus interface_events;
+
+auto gameplay_score = gameplay_events.on<score_changed>(
+    [](const score_changed& event) { update_score(event.score); });
+auto interface_score = interface_events.on<score_changed>(
+    [](const score_changed& event) { refresh_score_label(event.score); });
+
+score_changed changed{};
+changed.score = 100;
+gameplay_events.emit(changed); // Только gameplay_score.
+```
+
+Локальный `emit()` синхронен: callback работает в потоке вызова. `event_bus` не получает SDL-события и не связан с глобальным менеджером. Для пользовательских событий пока нет `post()` или автоматической передачи callback в главный поток; очередь имеет смысл, когда появится конкретный сценарий отправки событий из рабочего потока. `clear()` отключает подписки, а уничтожение шины тоже отключает соединения.
+
 ## Где и когда выполняется callback
 
 SDL watcher может сработать в потоке, который добавил SDL-событие. Watcher MNGL только сохраняет типизированную копию. Пользовательские подписчики получают её позже при `input::next_frame()` или `poll_events()` в потоке прокачки. Исключение callback проходит через этот обычный C++ вызов; оно не пересекает C callback SDL.

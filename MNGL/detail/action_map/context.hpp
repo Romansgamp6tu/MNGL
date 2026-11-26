@@ -505,4 +505,3 @@ namespace mngl
 		}
 	};
 } // namespace mngl
-

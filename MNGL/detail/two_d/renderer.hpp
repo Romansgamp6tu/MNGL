@@ -2,7 +2,21 @@
 
 #include "frame.hpp"
 #include "geometry.hpp"
+#include "svg_effect_renderer.hpp"
+#include "svg_parser.hpp"
 #include "../container_growth.hpp"
+
+#include <array>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <functional>
+#include <iterator>
+#include <map>
+#include <type_traits>
+#include <unordered_map>
+#include <vector>
 
 namespace mngl::two_d
 {
@@ -22,14 +36,9 @@ namespace mngl::two_d
 		}
 
 		renderer(const gpu::device& device, texture_store& textures, gpu::texture_format target_format)
-		    : m_device(device), m_textures(textures), m_batcher(device, target_format),
-		      m_frame_control(std::make_shared<detail::renderer_frame_control>())
+		    : renderer(device, textures, target_format,
+		               std::make_shared<detail::svg::temporary_target_budget>())
 		{
-			if (m_textures.device_raw() != m_device.raw()) [[unlikely]]
-			{
-				throw std::invalid_argument("2D renderer and texture store must use the same GPU device");
-			}
-			m_frame_control->owner = this;
 		}
 
 		renderer(const renderer&) = delete;
@@ -128,6 +137,21 @@ namespace mngl::two_d
 		[[nodiscard]] bool profiling_enabled() const noexcept { return m_batcher.profiling_enabled(); }
 
 	private:
+		renderer(const gpu::device& device, texture_store& textures, gpu::texture_format target_format,
+		         std::shared_ptr<detail::svg::temporary_target_budget> effect_target_budget)
+		    : m_device(device), m_textures(textures), m_batcher(device, target_format),
+		      m_frame_control(std::make_shared<detail::renderer_frame_control>()),
+		      m_svg_effect_target_budget(std::move(effect_target_budget)),
+		      m_svg_effect_output_targets(m_svg_effect_target_budget),
+		      m_svg_effect_capture_targets(m_svg_effect_target_budget)
+		{
+			if (m_textures.device_raw() != m_device.raw()) [[unlikely]]
+			{
+				throw std::invalid_argument("2D renderer and texture store must use the same GPU device");
+			}
+			m_frame_control->owner = this;
+		}
+
 		[[nodiscard]] bool available_for_frame() const noexcept
 		{
 			return !m_frame_active.load(std::memory_order_acquire) &&
@@ -169,14 +193,19 @@ namespace mngl::two_d
 				m_batcher.destroy_material_instance(instance);
 			}
 			m_automatic_instances.clear();
+			m_automatic_svg_gradient_instances.clear();
+			m_automatic_svg_gradient_fast_cache.clear();
+			std::erase_if(m_svg_gradient_stop_buffers,
+			              [](const auto& entry) { return entry.first.expired(); });
+			std::erase_if(m_svg_image_textures, [](const auto& entry) { return entry.first.expired(); });
 			m_automatic_instance_handles.clear();
 
 			try
 			{
 				m_batcher.begin_frame(clear_color, preserve_target_contents);
 				m_active_target = target;
-				m_active_target_size = target ? target->size()
-				                              : (m_window ? m_window->pixel_size() : glm::uvec2{});
+				m_active_target_size =
+				    target ? target->size() : (m_window ? m_window->pixel_size() : glm::uvec2{});
 				m_active_scissor.reset();
 				m_hit_test_items.clear();
 				m_used_fonts.clear();
@@ -266,6 +295,15 @@ namespace mngl::two_d
 			                                      hit_item_offset + context.m_hit_test_items.size());
 			::mngl::detail::reserve_vector_growth(m_used_fonts,
 			                                      m_used_fonts.size() + context.m_used_fonts.size());
+			if (context.m_svg_images.size() > m_svg_frame_images.max_size() - m_svg_frame_images.size() ||
+			    context.m_svg_effects.size() > m_svg_effect_jobs.max_size() - m_svg_effect_jobs.size())
+			{
+				throw std::length_error("2D frame exhausted its SVG resource capacity");
+			}
+			::mngl::detail::reserve_vector_growth(m_svg_frame_images,
+			                                      m_svg_frame_images.size() + context.m_svg_images.size());
+			::mngl::detail::reserve_vector_growth(m_svg_effect_jobs,
+			                                      m_svg_effect_jobs.size() + context.m_svg_effects.size());
 			if (context.m_order_independent)
 			{
 				m_batcher.merge_order_independent_recording_context(context.m_batcher_context);
@@ -287,6 +325,8 @@ namespace mngl::two_d
 					m_used_fonts.push_back(typeface);
 				}
 			}
+			std::ranges::move(context.m_svg_images, std::back_inserter(m_svg_frame_images));
+			std::ranges::move(context.m_svg_effects, std::back_inserter(m_svg_effect_jobs));
 			context.detach_after_merge();
 		}
 
@@ -444,6 +484,56 @@ namespace mngl::two_d
 		friend class frame_2d;
 		friend class recording_context;
 
+		struct svg_gradient_uniforms
+		{
+			glm::vec4 coordinate_row_x{};
+			glm::vec4 coordinate_row_y{};
+			glm::vec4 parameters0{};
+			glm::vec4 parameters1{};
+			glm::uvec4 control{};
+		};
+		static_assert(sizeof(svg_gradient_uniforms) == 80);
+		static_assert(std::is_trivially_copyable_v<svg_gradient_uniforms>);
+
+		struct svg_gradient_gpu_stop
+		{
+			glm::vec4 color{};
+			glm::vec4 parameters{};
+		};
+		static_assert(sizeof(svg_gradient_gpu_stop) == 32);
+		static_assert(std::is_trivially_copyable_v<svg_gradient_gpu_stop>);
+
+		struct svg_gradient_fast_key
+		{
+			const detail::svg::gradient_definition* definition = nullptr;
+			svg_gradient_uniforms uniforms{};
+			gpu::sprite_blend_mode blend = gpu::sprite_blend_mode::alpha;
+
+			[[nodiscard]] bool operator==(const svg_gradient_fast_key& other) const noexcept
+			{
+				return definition == other.definition && blend == other.blend &&
+				       std::memcmp(&uniforms, &other.uniforms, sizeof(uniforms)) == 0;
+			}
+		};
+
+		struct svg_gradient_fast_key_hash
+		{
+			[[nodiscard]] std::size_t operator()(const svg_gradient_fast_key& key) const noexcept
+			{
+				std::size_t hash = std::hash<const void*>{}(key.definition);
+				hash ^= std::hash<unsigned int>{}(static_cast<unsigned int>(key.blend)) +
+				        0x9e3779b9u + (hash << 6) + (hash >> 2);
+				const auto* bytes = reinterpret_cast<const std::byte*>(&key.uniforms);
+				for (std::size_t offset = 0; offset < sizeof(key.uniforms); offset += sizeof(std::uint64_t))
+				{
+					std::uint64_t word = 0;
+					std::memcpy(&word, bytes + offset, sizeof(word));
+					hash ^= std::hash<std::uint64_t>{}(word) + 0x9e3779b9u + (hash << 6) + (hash >> 2);
+				}
+				return hash;
+			}
+		};
+
 		static gpu::texture_format required_swapchain_format(const gpu::device& device,
 		                                                     const window& target_window)
 		{
@@ -522,6 +612,196 @@ namespace mngl::two_d
 			return cached.stage == shader.stage && cached.format == shader.code.format &&
 			       cached.entrypoint == shader.entrypoint && cached.resources == shader.resources &&
 			       cached.bytecode == shader.code.bytes;
+		}
+
+		[[nodiscard]] static std::size_t svg_gradient_blend_index(gpu::sprite_blend_mode blend)
+		{
+			switch (blend)
+			{
+			case gpu::sprite_blend_mode::alpha:
+				return 0;
+			case gpu::sprite_blend_mode::premultiplied_alpha:
+				return 1;
+			case gpu::sprite_blend_mode::opaque:
+				return 2;
+			case gpu::sprite_blend_mode::additive:
+				return 3;
+			default:
+				throw std::invalid_argument("Unsupported SVG gradient blend mode");
+			}
+		}
+
+		[[nodiscard]] static svg_gradient_uniforms make_svg_gradient_uniforms(
+		    const detail::svg::gradient_paint& gradient)
+		{
+			if (!gradient.definition || gradient.definition->stops.empty() ||
+			    gradient.definition->stops.size() > std::numeric_limits<std::uint32_t>::max()) [[unlikely]]
+			{
+				throw std::invalid_argument("SVG gradient has no valid stop data");
+			}
+			const auto& transform = gradient.coordinate_transform;
+			return {
+			    .coordinate_row_x = {transform[0][0], transform[1][0], transform[3][0], 0.0f},
+			    .coordinate_row_y = {transform[0][1], transform[1][1], transform[3][1], 0.0f},
+			    .parameters0 = gradient.parameters0,
+			    .parameters1 = gradient.parameters1,
+			    .control = {static_cast<std::uint32_t>(gradient.definition->kind),
+				            static_cast<std::uint32_t>(gradient.definition->spread),
+				            static_cast<std::uint32_t>(gradient.definition->stops.size()),
+				            gradient.definition->linear_rgb ? 1u : 0u},
+			};
+		}
+
+		[[nodiscard]] gpu::graphics_shader_asset& svg_gradient_shader()
+		{
+			if (!m_svg_gradient_shader)
+			{
+				gpu::shader_compile_options options{};
+				options.stage = gpu::graphics_shader_stage::fragment;
+				options.format = detail::svg::select_svg_shader_format(m_device);
+				options.resources.storage_buffers = 1;
+				options.resources.uniform_buffers = 1;
+				m_svg_gradient_shader.emplace(detail::svg::load_svg_shader(
+				    paths::shader_directory("svg_gradient.frag.hlsl") / "svg_gradient.frag.hlsl", options));
+			}
+			return *m_svg_gradient_shader;
+		}
+
+		[[nodiscard]] gpu::material_handle svg_gradient_material(gpu::sprite_blend_mode blend,
+		                                                         recording_context* context)
+		{
+			auto& material = m_svg_gradient_materials[svg_gradient_blend_index(blend)];
+			if (material.valid())
+			{
+				return material;
+			}
+			if (context) [[unlikely]]
+			{
+				throw std::logic_error(
+				    "Call frame_2d::prepare(svg_object) before recording SVG gradients in parallel");
+			}
+			material = m_batcher.create_material_for_active_frame(svg_gradient_shader(), blend);
+			return material;
+		}
+
+		[[nodiscard]] gpu::buffer& svg_gradient_stop_buffer(
+		    const std::shared_ptr<const detail::svg::gradient_definition>& definition,
+		    recording_context* context)
+		{
+			if (const auto found = m_svg_gradient_stop_buffers.find(definition);
+			    found != m_svg_gradient_stop_buffers.end())
+			{
+				return found->second;
+			}
+			if (context) [[unlikely]]
+			{
+				throw std::logic_error(
+				    "Call frame_2d::prepare(svg_object) before recording SVG gradients in parallel");
+			}
+
+			std::vector<svg_gradient_gpu_stop> stops;
+			stops.reserve(definition->stops.size());
+			for (const auto& stop : definition->stops)
+			{
+				stops.push_back(
+				    {.color = stop.value.rgba_glsl(), .parameters = {stop.offset, 0.0f, 0.0f, 0.0f}});
+			}
+			gpu::command_buffer command_buffer(m_device);
+			auto buffer = gpu::buffer::create_with_data(m_device, command_buffer,
+			                                            std::span<const svg_gradient_gpu_stop>(stops),
+			                                            gpu::buffer_usage::graphics_storage_read);
+			command_buffer.submit();
+			auto inserted = m_svg_gradient_stop_buffers.emplace(
+			    std::weak_ptr<const detail::svg::gradient_definition>(definition), std::move(buffer));
+			return inserted.first->second;
+		}
+
+		[[nodiscard]] std::vector<std::uint8_t> svg_gradient_instance_key(
+		    const svg_gradient_uniforms& uniforms, std::span<const svg_gradient_gpu_stop> stops,
+		    gpu::sprite_blend_mode blend) const
+		{
+			if (stops.size() > (std::numeric_limits<std::size_t>::max() - sizeof(uniforms) - 1) /
+			                       sizeof(svg_gradient_gpu_stop)) [[unlikely]]
+			{
+				throw std::length_error("SVG gradient material key exceeds the available address space");
+			}
+			std::vector<std::uint8_t> key(1 + sizeof(uniforms) + stops.size_bytes());
+			key[0] = static_cast<std::uint8_t>(blend);
+			std::memcpy(key.data() + 1, &uniforms, sizeof(uniforms));
+			std::memcpy(key.data() + 1 + sizeof(uniforms), stops.data(), stops.size_bytes());
+			return key;
+		}
+
+		[[nodiscard]] gpu::material_instance_handle automatic_svg_gradient_instance(
+		    std::uint64_t token, const detail::svg::gradient_paint& gradient, gpu::sprite_blend_mode blend,
+		    recording_context* context)
+		{
+			ensure_frame(token, context);
+			const auto uniforms = make_svg_gradient_uniforms(gradient);
+			const svg_gradient_fast_key fast_key{gradient.definition.get(), uniforms, blend};
+			if (const auto found = m_automatic_svg_gradient_fast_cache.find(fast_key);
+			    found != m_automatic_svg_gradient_fast_cache.end())
+			{
+				return found->second;
+			}
+
+			std::vector<svg_gradient_gpu_stop> stops;
+			stops.reserve(gradient.definition->stops.size());
+			for (const auto& stop : gradient.definition->stops)
+			{
+				stops.push_back(
+				    {.color = stop.value.rgba_glsl(), .parameters = {stop.offset, 0.0f, 0.0f, 0.0f}});
+			}
+			auto key = svg_gradient_instance_key(uniforms, stops, blend);
+			if (const auto found = m_automatic_svg_gradient_instances.find(key);
+			    found != m_automatic_svg_gradient_instances.end())
+			{
+				m_automatic_svg_gradient_fast_cache.emplace(fast_key, found->second);
+				return found->second;
+			}
+			if (context) [[unlikely]]
+			{
+				throw std::logic_error(
+				    "Call frame_2d::prepare(svg_object) before recording SVG gradients in parallel");
+			}
+
+			auto& stop_buffer = svg_gradient_stop_buffer(gradient.definition, nullptr);
+			auto material = svg_gradient_material(blend, nullptr);
+			gpu::fragment_resource_bindings bindings;
+			bindings.add_storage_buffer(stop_buffer);
+			bindings.add_uniform_block(uniforms);
+			::mngl::detail::reserve_vector_growth(m_automatic_instance_handles,
+			                                      m_automatic_instance_handles.size() + 1);
+			auto instance =
+			    m_batcher.create_material_instance_for_active_frame(material, std::move(bindings));
+			auto canonical = m_automatic_svg_gradient_instances.end();
+			bool canonical_inserted = false;
+			bool fast_inserted = false;
+			try
+			{
+				auto insertion = m_automatic_svg_gradient_instances.emplace(std::move(key), instance);
+				canonical = insertion.first;
+				canonical_inserted = insertion.second;
+				fast_inserted = m_automatic_svg_gradient_fast_cache.emplace(fast_key, instance).second;
+				m_automatic_instance_handles.push_back(instance);
+			}
+			catch (...)
+			{
+				if (fast_inserted)
+					m_automatic_svg_gradient_fast_cache.erase(fast_key);
+				if (canonical_inserted)
+					m_automatic_svg_gradient_instances.erase(canonical);
+				m_batcher.destroy_material_instance(instance);
+				throw;
+			}
+			return instance;
+		}
+
+		void prepare_svg_gradient(std::uint64_t token, const detail::svg::gradient_paint& gradient,
+		                          gpu::sprite_blend_mode blend)
+		{
+			ensure_preparation_allowed(token);
+			(void)automatic_svg_gradient_instance(token, gradient, blend, nullptr);
 		}
 
 		[[nodiscard]] gpu::material_instance_handle automatic_material_instance(
@@ -688,8 +968,8 @@ namespace mngl::two_d
 			{
 				m_batcher.draw_quad_unchecked(source_view, transform, tint, draw_state);
 			}
-			record_hit_item(context, transform, source.uv_bounds, source_texture, draw_state, shape, corner_radius,
-			                click_callback);
+			record_hit_item(context, transform, source.uv_bounds, source_texture, draw_state, shape,
+			                corner_radius, click_callback);
 		}
 
 		void submit_rectangle(recording_context* context, const rectangle& bounds, const color& tint,
@@ -715,6 +995,410 @@ namespace mngl::two_d
 		{
 			submit_geometry<true>(context, value.triangle_vertices(), value.transform, value.tint,
 			                      value.blend);
+		}
+
+		void submit_svg_geometry(recording_context* context, std::span<const glm::vec2> vertices,
+		                         const ::mngl::two_d::transform& transform, const color& tint,
+		                         gpu::sprite_blend_mode blend)
+		{
+			submit_geometry<true>(context, vertices, transform, tint, blend);
+		}
+
+		void submit_svg_gradient(std::uint64_t token, recording_context* context,
+		                         std::span<const glm::vec2> vertices,
+		                         const ::mngl::two_d::transform& transform, const color& tint,
+		                         gpu::sprite_blend_mode blend, const detail::svg::gradient_paint& gradient)
+		{
+			const auto instance = automatic_svg_gradient_instance(token, gradient, blend, context);
+			const auto& white_page = m_textures.resolve(m_textures.white_region().page).raw_gpu_texture();
+			const gpu::texture_region_view source{&white_page, glm::vec4(0.0f, 0.0f, 1.0f, 1.0f)};
+			gpu::quad_draw_state state{};
+			state.blend = blend;
+			state.material = instance;
+			state = apply_frame_scissor(context, state);
+			if (context)
+			{
+				m_batcher.draw_geometry_unchecked<true>(context->m_batcher_context, vertices, source,
+				                                        transform.matrix(), tint, state);
+			}
+			else
+			{
+				m_batcher.draw_geometry_unchecked<true>(vertices, source, transform.matrix(), tint, state);
+			}
+		}
+
+		void submit_svg_gradient_mesh(std::uint64_t token, recording_context* context, const mesh& value,
+		                              const detail::svg::gradient_paint& gradient)
+		{
+			if (!value.m_storage) [[unlikely]]
+			{
+				throw std::logic_error("Cannot draw a moved-from SVG gradient mesh");
+			}
+			const auto instance = automatic_svg_gradient_instance(token, gradient, value.blend, context);
+			const auto& white_page = m_textures.resolve(m_textures.white_region().page).raw_gpu_texture();
+			const gpu::texture_region_view source{&white_page, glm::vec4(0.0f, 0.0f, 1.0f, 1.0f)};
+			gpu::quad_draw_state state{};
+			state.blend = value.blend;
+			state.material = instance;
+			state = apply_frame_scissor(context, state);
+			if (context)
+			{
+				m_batcher.draw_mesh_unchecked(context->m_batcher_context, value.m_storage, source,
+				                              value.transform.matrix(), value.tint, state);
+			}
+			else
+			{
+				m_batcher.draw_mesh_unchecked(value.m_storage, source, value.transform.matrix(), value.tint,
+				                              state);
+			}
+		}
+
+		[[nodiscard]] std::shared_ptr<const ::mngl::texture> svg_image_texture(
+		    const std::shared_ptr<const detail::svg::image_pixels>& image, recording_context* context)
+		{
+			if (const auto found = m_svg_image_textures.find(image); found != m_svg_image_textures.end())
+			{
+				return found->second;
+			}
+			if (context)
+			{
+				throw std::logic_error(
+				    "Call frame_2d::prepare(svg_object) before recording SVG images in parallel");
+			}
+			gpu::command_buffer command(m_device);
+			auto texture = std::make_shared<::mngl::texture>(m_device, image->size.x, image->size.y,
+			                                                 gpu::texture_format::r8g8b8a8_unorm,
+			                                                 gpu::texture::usage_flags::sampler);
+			texture->update_pixels(command, std::span<const std::uint8_t>(image->rgba));
+			command.submit();
+			m_svg_image_textures.emplace(image, texture);
+			return texture;
+		}
+
+		void draw_svg_quad(recording_context* context, const gpu::texture& texture, rectangle bounds,
+		                   glm::vec4 uv, const transform& matrix, const color& tint,
+		                   gpu::sprite_blend_mode blend, std::uint64_t deferred_token = 0)
+		{
+			const gpu::texture_region_view source{&texture, uv};
+			gpu::quad_transform placement{};
+			placement.destination = bounds;
+			placement.matrix(matrix.matrix());
+			gpu::quad_draw_state state{};
+			state.blend = blend;
+			state.filter = gpu::filter_mode::linear;
+			state = apply_frame_scissor(context, state);
+			if (context)
+			{
+				if (deferred_token != 0)
+					m_batcher.draw_quad_deferred(context->m_batcher_context, source, placement, tint, state,
+					                             deferred_token);
+				else
+					m_batcher.draw_quad(context->m_batcher_context, source, placement, tint, state);
+			}
+			else
+			{
+				if (deferred_token != 0)
+					m_batcher.draw_quad_deferred(source, placement, tint, state, deferred_token);
+				else
+					m_batcher.draw_quad(source, placement, tint, state);
+			}
+		}
+
+		void submit_svg_image(recording_context* context, const detail::svg::image_paint& image,
+		                      const transform& matrix, const color& tint, gpu::sprite_blend_mode blend,
+		                      const std::shared_ptr<const detail::svg::uploaded_assets>& assets)
+		{
+			std::shared_ptr<const ::mngl::texture> texture;
+			if (assets)
+			{
+				if (const auto found = assets->images.find(image.pixels.get()); found != assets->images.end())
+					texture = found->second;
+			}
+			if (!texture)
+				texture = svg_image_texture(image.pixels, context);
+			auto& images = context ? context->m_svg_images : m_svg_frame_images;
+			images.push_back(texture);
+			draw_svg_quad(context, texture->raw_gpu_texture(), image.bounds, image.uv, matrix, tint, blend);
+		}
+
+		void submit_svg_effect(const frame_2d& frame,
+		                       const std::shared_ptr<const detail::svg::effect_layer>& layer,
+		                       const transform& matrix, color tint, gpu::sprite_blend_mode blend,
+		                       const std::shared_ptr<const detail::svg::uploaded_assets>& assets)
+		{
+			if (m_active_target_size.x == 0 || m_active_target_size.y == 0)
+				return;
+			const auto region = layer->region;
+			if (region.size.x == 0.0f || region.size.y == 0.0f)
+				return;
+			// Resolve the true size and visibility against the final frame view at finish_frame.
+			const auto& placeholder =
+			    m_textures.resolve(m_textures.white_region().page).raw_gpu_texture();
+			auto deferred_token = m_next_svg_effect_deferred_token.fetch_add(1, std::memory_order_relaxed);
+			if (deferred_token == 0)
+				deferred_token = m_next_svg_effect_deferred_token.fetch_add(1, std::memory_order_relaxed);
+			const bool premultiplied = blend == gpu::sprite_blend_mode::alpha ||
+			                           blend == gpu::sprite_blend_mode::premultiplied_alpha;
+			if (premultiplied)
+			{
+				tint = color(tint.r * tint.a, tint.g * tint.a, tint.b * tint.a, tint.a);
+				blend = gpu::sprite_blend_mode::premultiplied_alpha;
+			}
+			auto* context = frame.m_recording_context;
+			auto& jobs = context ? context->m_svg_effects : m_svg_effect_jobs;
+			gpu::quad_draw_state state{};
+			state.blend = blend;
+			state.filter = gpu::filter_mode::linear;
+			state = apply_frame_scissor(context, state);
+			if (state.scissor && (state.scissor->w == 0 || state.scissor->h == 0))
+				return;
+			if (jobs.size() == jobs.max_size()) [[unlikely]]
+				throw std::length_error("2D frame exhausted its SVG effect capacity");
+			::mngl::detail::reserve_vector_growth(jobs, jobs.size() + 1);
+			draw_svg_quad(context, placeholder, region, {0, 0, 1, 1}, matrix, tint, blend,
+			              deferred_token);
+			jobs.push_back({.layer = layer,
+			                .assets = assets,
+			                .deferred_token = deferred_token,
+			                .placement = matrix.matrix(),
+			                .target_size = m_active_target_size,
+			                .scissor = state.scissor,
+			                .premultiplied = premultiplied});
+		}
+
+		void draw_svg_layer_contents(frame_2d& frame, const std::vector<detail::svg::geometry_data>& parts,
+		                             const std::shared_ptr<const detail::svg::uploaded_assets>& assets)
+		{
+			constexpr auto blend = gpu::sprite_blend_mode::alpha;
+			for (const auto& part : parts)
+			{
+				const transform placement(part.transform);
+				if (part.effect)
+				{
+					frame.submit_svg_effect(part.effect, placement, part.tint, blend, assets);
+					continue;
+				}
+				if (part.image)
+				{
+					frame.submit_svg_image(*part.image, placement, part.tint, blend, assets);
+					continue;
+				}
+				if (assets)
+				{
+					if (const auto found = assets->meshes.find(&part); found != assets->meshes.end())
+					{
+						mesh resident;
+						resident.m_storage = found->second;
+						resident.transform = placement;
+						resident.tint = part.tint;
+						resident.blend = blend;
+						if (part.gradient)
+							frame.submit_svg_gradient_mesh(resident, *part.gradient);
+						else
+							frame.submit_mesh(resident);
+						continue;
+					}
+				}
+				if (part.gradient)
+					frame.submit_svg_gradient(part.triangle_view(), placement, part.tint, blend, *part.gradient);
+				else
+					frame.submit_svg_geometry(part.triangle_view(), placement, part.tint, blend);
+			}
+		}
+
+		void render_svg_effects(gpu::command_buffer& command, const frame_2d& frame)
+		{
+			std::erase_if(m_svg_effect_command_states,
+			              [](const auto& entry) { return entry.second.expired(); });
+			if (m_svg_effect_jobs.empty())
+				return;
+			std::shared_ptr<detail::svg::temporary_target_command_state> command_state;
+			const auto get_command_state = [&]() -> const auto&
+			{
+				if (command_state)
+					return command_state;
+				auto& weak_state = m_svg_effect_command_states[command.raw()];
+				command_state = weak_state.lock();
+				if (!command_state)
+				{
+					command_state = std::make_shared<detail::svg::temporary_target_command_state>();
+					weak_state = command_state;
+					command.retain_resource(command_state);
+				}
+				return command_state;
+			};
+			std::vector<detail::svg::effect_job*> visible_jobs;
+			visible_jobs.reserve(m_svg_effect_jobs.size());
+			std::vector<gpu::batcher2d::deferred_texture_resolution> deferred_resolutions;
+			deferred_resolutions.reserve(m_svg_effect_jobs.size());
+			std::vector<std::shared_ptr<::mngl::texture>> reusable_captures;
+			for (auto& job : m_svg_effect_jobs)
+			{
+				const auto& region = job.layer->region;
+				const auto end = region.pos + region.size;
+				const std::array<glm::vec2, 4> corners = {
+				    detail::svg::apply_transform(job.placement, region.pos),
+				    detail::svg::apply_transform(job.placement, {end.x, region.pos.y}),
+				    detail::svg::apply_transform(job.placement, end),
+				    detail::svg::apply_transform(job.placement, {region.pos.x, end.y})};
+				const auto projection = projection_for_frame(frame, job.target_size);
+				bool intersects_scissor = !job.scissor;
+				if (job.scissor && job.scissor->w > 0 && job.scissor->h > 0)
+				{
+					double left = std::numeric_limits<double>::max();
+					double top = std::numeric_limits<double>::max();
+					double right = std::numeric_limits<double>::lowest();
+					double bottom = std::numeric_limits<double>::lowest();
+					bool finite_projection = true;
+					for (const auto point : corners)
+					{
+						const glm::vec4 clip = projection * glm::vec4(point, 0.0f, 1.0f);
+						if (!std::isfinite(clip.w) || clip.w <= 0.0f)
+						{
+							finite_projection = false;
+							break;
+						}
+						const double pixel_x = (static_cast<double>(clip.x) / clip.w + 1.0) *
+						                       (0.5 * job.target_size.x);
+						const double pixel_y = (1.0 - static_cast<double>(clip.y) / clip.w) *
+						                       (0.5 * job.target_size.y);
+						left = std::min(left, pixel_x);
+						top = std::min(top, pixel_y);
+						right = std::max(right, pixel_x);
+						bottom = std::max(bottom, pixel_y);
+					}
+					if (finite_projection)
+					{
+						const double scissor_left = job.scissor->x;
+						const double scissor_top = job.scissor->y;
+						const double scissor_right = scissor_left + job.scissor->w;
+						const double scissor_bottom = scissor_top + job.scissor->h;
+						intersects_scissor = right > scissor_left && left < scissor_right &&
+						                     bottom > scissor_top && top < scissor_bottom;
+					}
+					else
+					{
+						intersects_scissor = true;
+					}
+				}
+				const bool visible = !m_batcher.outside_target(projection, corners) && intersects_scissor;
+				if (!visible)
+				{
+					deferred_resolutions.push_back(
+					    {.token = job.deferred_token, .texture = nullptr, .visible = false});
+					continue;
+				}
+				const glm::dmat4 local_to_clip = glm::dmat4(projection) * glm::dmat4(job.placement);
+				const glm::dvec2 pixels(job.target_size);
+				const auto dimension = [&](int axis)
+				{
+					const double extent =
+					    glm::length(glm::dvec2(local_to_clip[axis]) * pixels) * (0.5 * region.size[axis]);
+					if (!std::isfinite(extent))
+						throw std::invalid_argument("SVG effect placement overflows the frame projection");
+					return static_cast<unsigned>(std::clamp(std::ceil(extent), 1.0, 2048.0));
+				};
+				const glm::uvec2 size{dimension(0), dimension(1)};
+				const auto& active_command_state = get_command_state();
+				job.resolved_output = m_svg_effect_output_targets.acquire(
+				    size, [&](glm::uvec2 target_size)
+			    {
+				    return std::make_shared<gpu::texture>(
+				        m_device, target_size, detail::svg::effect_format,
+				        gpu::texture::usage_flags::sampler | gpu::texture::usage_flags::color_target);
+			    }, active_command_state);
+				const auto output_handle = job.resolved_output->raw();
+				if (!active_command_state->retained_targets.contains(output_handle))
+				{
+					command.retain_resource(job.resolved_output);
+					active_command_state->retained_targets.insert(output_handle);
+				}
+				m_svg_effect_output_targets.mark_command_owned(job.resolved_output, active_command_state);
+				deferred_resolutions.push_back(
+				    {.token = job.deferred_token, .texture = job.resolved_output->raw(), .visible = true});
+				visible_jobs.push_back(&job);
+			}
+			if (!m_batcher.resolve_deferred_textures(deferred_resolutions))
+				throw std::logic_error("Could not resolve deferred SVG effect batches");
+			if (visible_jobs.empty())
+				return;
+			const auto& active_command_state = get_command_state();
+			if (!m_svg_effect_backend)
+				m_svg_effect_backend =
+				    std::make_shared<detail::svg::effect_renderer>(m_device, m_svg_effect_target_budget);
+			if (!m_svg_offscreen)
+			{
+				m_svg_offscreen = std::unique_ptr<renderer>(
+				    new renderer(m_device, m_textures, detail::svg::effect_format, m_svg_effect_target_budget));
+				m_svg_offscreen->m_svg_effect_backend = m_svg_effect_backend;
+				m_svg_offscreen->disable_gpu_culling();
+			}
+			if (!command_state->retained_effect_backend)
+			{
+				command.retain_resource(m_svg_effect_backend);
+				command_state->retained_effect_backend = true;
+			}
+			for (const auto* job_pointer : visible_jobs)
+			{
+				const auto& job = *job_pointer;
+				const auto size = job.resolved_output->get_size();
+				const auto& layer = *job.layer;
+				const auto capture = [&](const std::vector<detail::svg::geometry_data>& parts)
+				{
+					auto target = std::shared_ptr<::mngl::texture>{};
+					const auto reusable = std::ranges::find_if(
+					    reusable_captures, [&](const auto& candidate) { return candidate->size() == size; });
+					if (reusable != reusable_captures.end())
+					{
+						target = std::move(*reusable);
+						reusable_captures.erase(reusable);
+					}
+					else
+					{
+						target = m_svg_effect_capture_targets.acquire(
+						    size, [&](glm::uvec2 target_size)
+						    {
+							    return std::make_shared<::mngl::texture>(
+							        m_device, target_size.x, target_size.y, detail::svg::effect_format);
+						    }, active_command_state);
+					}
+					const auto capture_handle = target->raw_gpu_texture().raw();
+					if (!active_command_state->retained_targets.contains(capture_handle))
+					{
+						command.retain_resource(target);
+						active_command_state->retained_targets.insert(capture_handle);
+					}
+					m_svg_effect_capture_targets.mark_command_owned(target, active_command_state);
+					auto frame = m_svg_offscreen->begin_frame(*target, color(0, 0, 0, 0));
+					glm::mat4 projection(1.0f);
+					projection[0][0] = 2.0f / layer.region.size.x;
+					projection[1][1] = 2.0f / layer.region.size.y;
+					projection[3][0] = -1.0f - layer.region.pos.x * projection[0][0];
+					projection[3][1] = -1.0f - layer.region.pos.y * projection[1][1];
+					frame.set_view_projection(projection);
+					m_svg_offscreen->draw_svg_layer_contents(frame, parts, job.assets);
+					frame.finish(command);
+					return target;
+				};
+				auto source = capture(layer.source);
+				auto mask = layer.mask && !layer.mask_source.empty() ? capture(layer.mask_source) : nullptr;
+				const auto retain_filter_target = [&](const std::shared_ptr<gpu::texture>& resource)
+				{
+					const auto raw = resource->raw();
+					if (!command_state->retained_targets.contains(raw))
+					{
+						command.retain_resource(resource);
+						command_state->retained_targets.insert(raw);
+					}
+				};
+				m_svg_effect_backend->render(command, *job.resolved_output, source->raw_gpu_texture(),
+				                             mask ? &mask->raw_gpu_texture() : nullptr, layer.region,
+				                             layer.mask, layer.filter, job.premultiplied, active_command_state,
+				                             retain_filter_target);
+				reusable_captures.push_back(std::move(source));
+				if (mask)
+					reusable_captures.push_back(std::move(mask));
+			}
 		}
 
 		void submit_mesh(recording_context* context, const mesh& value)
@@ -899,6 +1583,52 @@ namespace mngl::two_d
 			            value.click_callback);
 		}
 
+		void record_svg_hit_geometry(
+		    std::uint64_t token, recording_context* context,
+		    const std::shared_ptr<const ::mngl::detail::svg_hit_test_geometry>& geometry,
+		    const ::mngl::two_d::transform& transform,
+		    const std::shared_ptr<const ::mngl::hit_test_callback>& click_callback)
+		{
+			ensure_frame(token, context);
+			if (!m_active_target || !m_active_target->m_hit_testing_enabled || !geometry ||
+			    !geometry->triangles || geometry->triangles->empty())
+			{
+				return;
+			}
+
+			auto& hit_test_items = context ? context->m_hit_test_items : m_hit_test_items;
+			gpu::quad_draw_state state{};
+			state = apply_frame_scissor(context, state);
+			std::optional<glm::ivec4> scissor;
+			if (state.scissor)
+			{
+				scissor = glm::ivec4{state.scissor->x, state.scissor->y, state.scissor->w, state.scissor->h};
+			}
+
+			const glm::mat4 local_to_world = transform.matrix();
+			const auto world_bounds =
+			    ::mngl::detail::transformed_bounds(local_to_world, geometry->bounds);
+			const float determinant = glm::determinant(local_to_world);
+			glm::mat4 world_to_local(1.0f);
+			bool inverse_valid =
+			    std::isfinite(determinant) && std::abs(determinant) > std::numeric_limits<float>::min();
+			if (inverse_valid)
+			{
+				world_to_local = glm::inverse(local_to_world);
+				inverse_valid = ::mngl::detail::finite(world_to_local);
+			}
+
+			hit_test_items.push_back(::mngl::detail::hit_test_item{.draw_index = hit_test_items.size(),
+			                                                       .destination = geometry->bounds,
+			                                                       .world_to_local = world_to_local,
+			                                                       .inverse_valid = inverse_valid,
+			                                                       .world_bounds = world_bounds.value_or(::mngl::rectangle{}),
+			                                                       .world_bounds_valid = world_bounds.has_value(),
+			                                                       .scissor = scissor,
+			                                                       .click_callback = click_callback,
+			                                                       .svg_geometry = geometry});
+		}
+
 		void record_hit_item(recording_context* context, const gpu::quad_transform& transform,
 		                     const glm::vec4& uv_bounds, const ::mngl::texture* source,
 		                     const gpu::quad_draw_state& state, ::mngl::detail::hit_test_shape shape,
@@ -912,10 +1642,14 @@ namespace mngl::two_d
 			auto& hit_test_items = context ? context->m_hit_test_items : m_hit_test_items;
 
 			std::shared_ptr<const ::mngl::detail::hit_test_frame> child_frame;
-			if (source && source->m_hit_test_frame &&
-			    source->m_hit_test_frame->depth < ::mngl::detail::hit_test_max_depth)
+			const auto source_hit_frame = source && source->m_hit_test_frame_state
+			                                  ? (source->m_hit_test_frame_state->latest_recorded
+			                                         ? source->m_hit_test_frame_state->latest_recorded
+			                                         : source->m_hit_test_frame_state->completed)
+			                                  : nullptr;
+			if (source_hit_frame && source_hit_frame->depth < ::mngl::detail::hit_test_max_depth)
 			{
-				child_frame = source->m_hit_test_frame;
+				child_frame = source_hit_frame;
 			}
 
 			if (shape == ::mngl::detail::hit_test_shape::quad)
@@ -945,6 +1679,8 @@ namespace mngl::two_d
 				scissor = glm::ivec4{state.scissor->x, state.scissor->y, state.scissor->w, state.scissor->h};
 			}
 			const glm::mat4 local_to_world = transform.model_matrix();
+			const auto world_bounds = ::mngl::detail::transformed_bounds(
+			    local_to_world, ::mngl::rectangle{glm::vec2(0.0f), glm::vec2(1.0f)});
 			const float determinant = glm::determinant(local_to_world);
 			glm::mat4 world_to_local(1.0f);
 			bool inverse_valid =
@@ -959,6 +1695,8 @@ namespace mngl::two_d
 				                              .destination = transform.destination,
 				                              .world_to_local = world_to_local,
 				                              .inverse_valid = inverse_valid,
+					                              .world_bounds = world_bounds.value_or(::mngl::rectangle{}),
+					                              .world_bounds_valid = world_bounds.has_value(),
 				                              .shape = shape,
 				                              .corner_radius = corner_radius,
 				                              .uv_bounds = uv_bounds,
@@ -1148,8 +1886,7 @@ namespace mngl::two_d
 			gpu::quad_draw_state state{};
 			state.scissor = options.scissor;
 			state = apply_frame_scissor(context, state);
-			const bool scissor_empty =
-			    state.scissor && (state.scissor->w == 0 || state.scissor->h == 0);
+			const bool scissor_empty = state.scissor && (state.scissor->w == 0 || state.scissor->h == 0);
 
 			for (std::size_t offset = 0; offset < text.size();)
 			{
@@ -1471,6 +2208,11 @@ namespace mngl::two_d
 						}
 						typeface->upload_pending(cmd);
 					}
+					render_svg_effects(cmd, frame);
+					for (const auto& image : m_svg_frame_images)
+					{
+						cmd.retain_resource(image);
+					}
 
 					auto flush_target = [&](gpu::texture& target)
 					{
@@ -1496,17 +2238,62 @@ namespace mngl::two_d
 				if (external_command_buffer)
 				{
 					flush(*external_command_buffer);
+					if (hit_frame)
+					{
+						auto frame_state = m_active_target->m_hit_test_frame_state;
+						if (!frame_state) [[unlikely]]
+						{
+							throw std::logic_error("Hit testing was enabled without a snapshot state");
+						}
+					std::weak_ptr<::mngl::detail::hit_test_frame_state> weak_state = frame_state;
+					external_command_buffer->on_completion(
+					    [weak_state, hit_frame](bool submitted)
+					    {
+						    if (auto state = weak_state.lock())
+						    {
+							    if (submitted)
+							    {
+								    state->completed = hit_frame;
+							    }
+							    if (state->latest_recorded == hit_frame)
+							    {
+								    state->latest_recorded.reset();
+							    }
+						    }
+				    });
+						frame_state->latest_recorded = hit_frame;
+					}
 				}
 				else
 				{
 					gpu::command_buffer cmd(m_device);
 					flush(cmd);
+					if (hit_frame)
+					{
+						auto frame_state = m_active_target->m_hit_test_frame_state;
+						if (!frame_state) [[unlikely]]
+						{
+							throw std::logic_error("Hit testing was enabled without a snapshot state");
+						}
+					std::weak_ptr<::mngl::detail::hit_test_frame_state> weak_state = frame_state;
+					cmd.on_completion(
+					    [weak_state, hit_frame](bool submitted)
+					    {
+						    if (auto state = weak_state.lock())
+						    {
+							    if (submitted)
+							    {
+								    state->completed = hit_frame;
+							    }
+							    if (state->latest_recorded == hit_frame)
+							    {
+								    state->latest_recorded.reset();
+							    }
+						    }
+				    });
+						frame_state->latest_recorded = hit_frame;
+					}
 					cmd.submit();
-				}
-
-				if (hit_frame)
-				{
-					m_active_target->m_hit_test_frame = std::move(hit_frame);
 				}
 			}
 			catch (...)
@@ -1529,6 +2316,8 @@ namespace mngl::two_d
 				m_recording_state.reset();
 				m_hit_test_items.clear();
 				m_used_fonts.clear();
+				m_svg_frame_images.clear();
+				m_svg_effect_jobs.clear();
 				m_frame_active.store(false, std::memory_order_release);
 				frame.detach();
 				throw;
@@ -1541,6 +2330,8 @@ namespace mngl::two_d
 			m_recording_state.reset();
 			m_hit_test_items.clear();
 			m_used_fonts.clear();
+			m_svg_frame_images.clear();
+			m_svg_effect_jobs.clear();
 			m_frame_active.store(false, std::memory_order_release);
 			frame.detach();
 		}
@@ -1557,6 +2348,8 @@ namespace mngl::two_d
 				m_recording_state.reset();
 				m_hit_test_items.clear();
 				m_used_fonts.clear();
+				m_svg_frame_images.clear();
+				m_svg_effect_jobs.clear();
 				m_frame_active.store(false, std::memory_order_release);
 			}
 		}
@@ -1599,7 +2392,8 @@ namespace mngl::two_d
 			    bounds.size.y < 0.0f || !std::isfinite(bounds.pos.x + bounds.size.x) ||
 			    !std::isfinite(bounds.pos.y + bounds.size.y)) [[unlikely]]
 			{
-				throw std::invalid_argument("Visible 2D bounds must be finite and have non-negative dimensions");
+				throw std::invalid_argument(
+				    "Visible 2D bounds must be finite and have non-negative dimensions");
 			}
 			if (bounds.size.x == 0.0f || bounds.size.y == 0.0f || m_active_target_size.x == 0 ||
 			    m_active_target_size.y == 0)
@@ -1635,10 +2429,7 @@ namespace mngl::two_d
 			return previous;
 		}
 
-		void restore_frame_scissor(std::optional<SDL_Rect> scissor) noexcept
-		{
-			m_active_scissor = scissor;
-		}
+		void restore_frame_scissor(std::optional<SDL_Rect> scissor) noexcept { m_active_scissor = scissor; }
 
 		[[nodiscard]] gpu::quad_draw_state apply_frame_scissor(const recording_context* context,
 		                                                       gpu::quad_draw_state state) const noexcept
@@ -1659,8 +2450,7 @@ namespace mngl::two_d
 			return state;
 		}
 
-		[[nodiscard]] static SDL_Rect intersect_scissors(const SDL_Rect& left,
-		                                                 const SDL_Rect& right) noexcept
+		[[nodiscard]] static SDL_Rect intersect_scissors(const SDL_Rect& left, const SDL_Rect& right) noexcept
 		{
 			const auto left_x = static_cast<std::int64_t>(left.x);
 			const auto left_y = static_cast<std::int64_t>(left.y);
@@ -1711,6 +2501,23 @@ namespace mngl::two_d
 		window* m_window = nullptr;
 		texture_store& m_textures;
 		std::optional<gpu::sampler> m_default_sampler;
+		std::optional<gpu::graphics_shader_asset> m_svg_gradient_shader;
+		std::array<gpu::material_handle, 4> m_svg_gradient_materials{};
+		std::map<std::weak_ptr<const detail::svg::gradient_definition>, gpu::buffer, std::owner_less<>>
+		    m_svg_gradient_stop_buffers;
+		std::map<std::vector<std::uint8_t>, gpu::material_instance_handle> m_automatic_svg_gradient_instances;
+		std::unordered_map<svg_gradient_fast_key, gpu::material_instance_handle, svg_gradient_fast_key_hash>
+		    m_automatic_svg_gradient_fast_cache;
+		std::map<std::weak_ptr<const detail::svg::image_pixels>, std::shared_ptr<const ::mngl::texture>,
+		         std::owner_less<>>
+		    m_svg_image_textures;
+		std::vector<std::shared_ptr<const ::mngl::texture>> m_svg_frame_images;
+		std::vector<detail::svg::effect_job> m_svg_effect_jobs;
+		std::shared_ptr<detail::svg::effect_renderer> m_svg_effect_backend;
+		std::unordered_map<SDL_GPUCommandBuffer*,
+		                   std::weak_ptr<detail::svg::temporary_target_command_state>>
+		    m_svg_effect_command_states;
+		std::unique_ptr<renderer> m_svg_offscreen;
 		gpu::batcher2d m_batcher;
 		std::unordered_map<const gpu::graphics_shader_asset*, automatic_shader_material>
 		    m_automatic_materials;
@@ -1725,8 +2532,12 @@ namespace mngl::two_d
 		std::vector<::mngl::detail::hit_test_item> m_hit_test_items;
 		std::vector<font*> m_used_fonts;
 		detail::tessellation_scratch m_geometry_scratch;
+		std::shared_ptr<detail::svg::temporary_target_budget> m_svg_effect_target_budget;
+		detail::svg::temporary_target_pool<gpu::texture> m_svg_effect_output_targets;
+		detail::svg::temporary_target_pool<::mngl::texture> m_svg_effect_capture_targets;
 		bool m_custom_materials_allowed = false;
 		std::mutex m_frame_start_mutex;
+		std::atomic<std::uint64_t> m_next_svg_effect_deferred_token{1};
 		std::uint64_t m_next_frame_token = 0;
 		std::uint64_t m_active_frame_token = 0;
 		std::atomic_bool m_frame_active{false};

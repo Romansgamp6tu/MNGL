@@ -12,6 +12,7 @@ struct VertexInput
     float2 effect_parameters : TEXCOORD4;
     float4 uv_bounds : TEXCOORD5;
     float4 tint : TEXCOORD6;
+    float4 vertex_tint : TEXCOORD7;
 };
 
 struct VertexOutput
@@ -30,7 +31,7 @@ VertexOutput main(VertexInput input)
     {
         output.position = float4(2.0f, 2.0f, 0.0f, 1.0f);
         output.uv = input.uv_bounds.xy;
-        output.tint = input.tint;
+        output.tint = input.tint * input.vertex_tint;
         output.local_uv = input.corner;
         output.effect_parameters = input.effect_parameters;
         return output;
@@ -44,7 +45,7 @@ VertexOutput main(VertexInput input)
 
     output.position = mul(view_projection, world_position);
     output.uv = lerp(input.uv_bounds.xy, input.uv_bounds.zw, input.corner);
-    output.tint = input.tint;
+    output.tint = input.tint * input.vertex_tint;
     output.local_uv = input.corner;
     output.effect_parameters = input.effect_parameters;
     return output;

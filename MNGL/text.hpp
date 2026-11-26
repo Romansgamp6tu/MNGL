@@ -25,8 +25,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <fstream>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -128,6 +128,16 @@ namespace mngl::two_d
 
 	struct font::implementation
 	{
+		struct atlas_upload_state
+		{
+			std::mutex mutex;
+			std::vector<SDL_Rect> dirty_regions;
+			SDL_GPUCommandBuffer* last_command = nullptr;
+			std::uint64_t revision = 0;
+			bool dirty = true;
+			bool full_dirty = true;
+		};
+
 		struct atlas_page
 		{
 			atlas_page(const gpu::device& device, glm::uvec2 size)
@@ -156,11 +166,11 @@ namespace mngl::two_d
 
 			::mngl::texture texture;
 			std::vector<std::uint8_t> pixels;
+			std::shared_ptr<atlas_upload_state> upload_state = std::make_shared<atlas_upload_state>();
 			glm::uvec2 size{};
 			std::uint32_t cursor_x = 1;
 			std::uint32_t cursor_y = 1;
 			std::uint32_t row_height = 0;
-			bool dirty = false;
 		};
 
 		struct cached_glyph
@@ -247,6 +257,7 @@ namespace mngl::two_d
 
 		cached_glyph& get_glyph(std::uint32_t codepoint)
 		{
+			codepoint = resolve_codepoint(codepoint);
 			if (codepoint < ascii_glyphs.size())
 			{
 				auto& entry = ascii_glyphs[codepoint];
@@ -267,22 +278,7 @@ namespace mngl::two_d
 
 		cached_glyph make_glyph(std::uint32_t requested_codepoint) const
 		{
-			std::uint32_t codepoint = requested_codepoint;
-			if (codepoint != 0 && stbtt_FindGlyphIndex(&font_info, static_cast<int>(codepoint)) == 0)
-			{
-				if (stbtt_FindGlyphIndex(&font_info, 0xFFFD) != 0)
-				{
-					codepoint = 0xFFFD;
-				}
-				else if (stbtt_FindGlyphIndex(&font_info, '?') != 0)
-				{
-					codepoint = '?';
-				}
-				else
-				{
-					codepoint = 0;
-				}
-			}
+			const std::uint32_t codepoint = resolve_codepoint(requested_codepoint);
 
 			int advance_units = 0;
 			stbtt_GetCodepointHMetrics(&font_info, static_cast<int>(codepoint), &advance_units, nullptr);
@@ -311,6 +307,23 @@ namespace mngl::two_d
 			return result;
 		}
 
+		std::uint32_t resolve_codepoint(std::uint32_t codepoint) const
+		{
+			if (codepoint == 0 || stbtt_FindGlyphIndex(&font_info, static_cast<int>(codepoint)) != 0)
+			{
+				return codepoint;
+			}
+			if (stbtt_FindGlyphIndex(&font_info, 0xFFFD) != 0)
+			{
+				return 0xFFFD;
+			}
+			if (stbtt_FindGlyphIndex(&font_info, '?') != 0)
+			{
+				return '?';
+			}
+			return 0;
+		}
+
 		void rasterize(cached_glyph& glyph)
 		{
 			if (glyph.rasterized)
@@ -335,6 +348,7 @@ namespace mngl::two_d
 
 			auto allocation = allocate_glyph(glyph.width, glyph.height);
 			auto& page = pages[allocation.page];
+			std::lock_guard upload_lock(page.upload_state->mutex);
 			for (int row = 0; row < glyph.height; ++row)
 			{
 				for (int column = 0; column < glyph.width; ++column)
@@ -349,7 +363,8 @@ namespace mngl::two_d
 					page.pixels[destination_index + 3] = bitmap[source_index];
 				}
 			}
-			page.dirty = true;
+			mark_dirty_region(page, SDL_Rect{static_cast<int>(allocation.x), static_cast<int>(allocation.y),
+			                                 glyph.width, glyph.height});
 			glyph.atlas_page = allocation.page;
 			glyph.uv_bounds = {
 			    static_cast<float>(allocation.x) / static_cast<float>(page.size.x),
@@ -357,6 +372,45 @@ namespace mngl::two_d
 			    static_cast<float>(allocation.x + glyph.width) / static_cast<float>(page.size.x),
 			    static_cast<float>(allocation.y + glyph.height) / static_cast<float>(page.size.y)};
 			glyph.rasterized = true;
+		}
+
+		void mark_dirty_region(atlas_page& page, SDL_Rect region)
+		{
+			auto& state = *page.upload_state;
+			++state.revision;
+			state.dirty = true;
+			if (state.full_dirty)
+			{
+				return;
+			}
+
+			auto overlaps_or_touches = [](const SDL_Rect& a, const SDL_Rect& b)
+			{
+				return a.x <= b.x + b.w && b.x <= a.x + a.w && a.y <= b.y + b.h && b.y <= a.y + a.h;
+			};
+			for (std::size_t index = 0; index < state.dirty_regions.size();)
+			{
+				const auto current = state.dirty_regions[index];
+				if (!overlaps_or_touches(current, region))
+				{
+					++index;
+					continue;
+				}
+				const int left = std::min(current.x, region.x);
+				const int top = std::min(current.y, region.y);
+				const int right = std::max(current.x + current.w, region.x + region.w);
+				const int bottom = std::max(current.y + current.h, region.y + region.h);
+				region = {left, top, right - left, bottom - top};
+				state.dirty_regions.erase(state.dirty_regions.begin() + static_cast<std::ptrdiff_t>(index));
+				index = 0;
+			}
+			if (state.dirty_regions.size() >= 16)
+			{
+				state.dirty_regions.clear();
+				state.full_dirty = true;
+				return;
+			}
+			state.dirty_regions.push_back(region);
 		}
 
 		struct glyph_allocation
@@ -569,13 +623,83 @@ namespace mngl::two_d
 		{
 			throw std::logic_error("Cannot use a moved-from font");
 		}
+		const auto command_handle = command_buffer.raw();
 		for (auto& page : m_implementation->pages)
 		{
-			if (page.dirty)
+			auto state = page.upload_state;
+			std::unique_lock upload_lock(state->mutex);
+			const bool another_command_pending = state->last_command && state->last_command != command_handle;
+			if (!state->dirty && !another_command_pending)
+			{
+				continue;
+			}
+
+			bool full_upload = state->full_dirty || another_command_pending;
+			const std::uint64_t page_area = static_cast<std::uint64_t>(page.size.x) * page.size.y;
+			std::uint64_t dirty_area = 0;
+			for (const auto& region : state->dirty_regions)
+			{
+				const auto area = static_cast<std::uint64_t>(region.w) * static_cast<std::uint64_t>(region.h);
+				if (area >= page_area || dirty_area >= page_area - area)
+				{
+					dirty_area = page_area;
+					break;
+				}
+				dirty_area += area;
+			}
+			if (state->dirty_regions.size() > 16 || dirty_area >= (page_area + 1) / 2)
+			{
+				full_upload = true;
+			}
+
+			if (full_upload)
 			{
 				page.texture.update_pixels(command_buffer, std::span<const std::uint8_t>(page.pixels));
-				page.dirty = false;
 			}
+			else
+			{
+				const auto source_stride = static_cast<std::size_t>(page.size.x) * 4;
+				for (const auto& region : state->dirty_regions)
+				{
+					const auto offset = (static_cast<std::size_t>(region.y) * page.size.x +
+					                     static_cast<std::size_t>(region.x)) * 4;
+					::mngl::texture::upload_region(
+					    page.texture.m_gpu_tex, command_buffer, page.pixels.data() + offset, source_stride,
+					    static_cast<std::uint32_t>(region.x), static_cast<std::uint32_t>(region.y),
+					    static_cast<std::uint32_t>(region.w), static_cast<std::uint32_t>(region.h), &page.texture);
+				}
+			}
+
+			const auto revision = state->revision;
+			command_buffer.on_completion(
+			    [state, command_handle, revision](bool submitted)
+			    {
+				    std::lock_guard lock(state->mutex);
+				    if (state->last_command == command_handle)
+				    {
+					    state->last_command = nullptr;
+				    }
+				    if (!submitted)
+				    {
+					    state->dirty = true;
+					    state->full_dirty = true;
+					    state->dirty_regions.clear();
+				    }
+				    else if (state->revision == revision)
+				    {
+					    state->dirty = false;
+					    state->full_dirty = false;
+					    state->dirty_regions.clear();
+				    }
+				    else
+				    {
+					    state->dirty = true;
+				    }
+			    });
+			state->dirty = false;
+			state->full_dirty = false;
+			state->dirty_regions.clear();
+			state->last_command = command_handle;
 		}
 	}
 
@@ -585,7 +709,11 @@ namespace mngl::two_d
 		{
 			for (auto& page : m_implementation->pages)
 			{
-				page.dirty = true;
+			std::lock_guard upload_lock(page.upload_state->mutex);
+			page.upload_state->dirty = true;
+			page.upload_state->full_dirty = true;
+			page.upload_state->dirty_regions.clear();
+			++page.upload_state->revision;
 			}
 		}
 	}

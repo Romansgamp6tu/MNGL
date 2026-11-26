@@ -69,11 +69,12 @@ namespace mngl
 			throw std::logic_error("Cannot move a texture while it is being rendered to");
 		}
 		m_gpu_tex = std::move(other.m_gpu_tex);
+		m_upload_staging = std::move(other.m_upload_staging);
 		m_view = std::move(other.m_view);
 		m_hit_testing_enabled = std::exchange(other.m_hit_testing_enabled, false);
-		m_hit_test_frame = std::move(other.m_hit_test_frame);
+		m_hit_test_frame_state = std::move(other.m_hit_test_frame_state);
 		other.m_view.reset();
-		other.m_hit_test_frame.reset();
+		other.m_hit_test_frame_state.reset();
 	}
 
 	inline texture& texture::operator=(texture&& other)
@@ -86,11 +87,12 @@ namespace mngl
 				    "Cannot move-assign a texture while either texture is being rendered to");
 			}
 			m_gpu_tex = std::move(other.m_gpu_tex);
+			m_upload_staging = std::move(other.m_upload_staging);
 			m_view = std::move(other.m_view);
 			m_hit_testing_enabled = std::exchange(other.m_hit_testing_enabled, false);
-			m_hit_test_frame = std::move(other.m_hit_test_frame);
+			m_hit_test_frame_state = std::move(other.m_hit_test_frame_state);
 			other.m_view.reset();
-			other.m_hit_test_frame.reset();
+			other.m_hit_test_frame_state.reset();
 		}
 		return *this;
 	}
@@ -199,7 +201,6 @@ namespace mngl
 			if (!m_render_session || !m_render_session->frame().active())
 			{
 				reset_active_frame();
-				m_hit_test_frame.reset();
 			}
 			throw;
 		}
@@ -373,6 +374,8 @@ namespace mngl::two_d
 		m_token = 0;
 		m_hit_test_items.clear();
 		m_used_fonts.clear();
+		m_svg_images.clear();
+		m_svg_effects.clear();
 		m_view_projection.reset();
 		m_view.reset();
 		m_scissor.reset();
@@ -471,6 +474,7 @@ namespace mngl::two_d
 		}
 
 		SDL_Rect region{x0, y0, x1 - x0, y1 - y0};
+		constexpr std::size_t maximum_dirty_regions = 64;
 		for (std::size_t index = 0; index < m_dirty_regions.size();)
 		{
 			const auto& existing = m_dirty_regions[index];
@@ -491,6 +495,18 @@ namespace mngl::two_d
 			index = 0;
 		}
 		m_dirty_regions.push_back(region);
+
+		long double damaged_area = 0.0L;
+		for (const auto& dirty_region : m_dirty_regions)
+		{
+			damaged_area += static_cast<long double>(dirty_region.w) * dirty_region.h;
+		}
+		const long double target_area = static_cast<long double>(pixel_size.x) * pixel_size.y;
+		if (m_dirty_regions.size() >= maximum_dirty_regions || damaged_area * 2.0L >= target_area)
+		{
+			m_full_dirty = true;
+			m_dirty_regions.clear();
+		}
 	}
 
 	template <typename DrawFunction>
@@ -598,22 +614,31 @@ namespace mngl::two_d
 	inline mesh::mesh(const gpu::device& device, gpu::command_buffer& command_buffer,
 	                  std::span<const glm::vec2> triangle_vertices)
 	{
+		std::vector<detail::resident_mesh_vertex> packed_vertices;
+		packed_vertices.reserve(triangle_vertices.size());
+		for (const auto vertex : triangle_vertices)
+			packed_vertices.push_back({vertex.x, vertex.y});
+		m_storage = create_storage(device, command_buffer, packed_vertices);
+	}
+
+	inline mesh::mesh(const gpu::device& device, gpu::command_buffer& command_buffer,
+	                  std::span<const detail::resident_mesh_vertex> triangle_vertices)
+	    : m_storage(create_storage(device, command_buffer, triangle_vertices))
+	{
+	}
+
+	inline std::shared_ptr<detail::resident_mesh_storage> mesh::create_storage(
+	    const gpu::device& device, gpu::command_buffer& command_buffer,
+	    std::span<const detail::resident_mesh_vertex> triangle_vertices)
+	{
 		if (triangle_vertices.empty()) [[unlikely]]
-		{
 			throw std::invalid_argument("A 2D mesh requires at least one triangle");
-		}
 		if (triangle_vertices.size() % 3 != 0) [[unlikely]]
-		{
 			throw std::invalid_argument("A 2D mesh requires a triangle-list vertex count");
-		}
 		if (!device.raw()) [[unlikely]]
-		{
 			throw std::invalid_argument("Cannot create a 2D mesh with a null GPU device");
-		}
 		if (!command_buffer.valid()) [[unlikely]]
-		{
 			throw std::invalid_argument("Cannot create a 2D mesh with an invalid command buffer");
-		}
 		if (command_buffer.device_raw() && command_buffer.device_raw() != device.raw()) [[unlikely]]
 		{
 			throw std::invalid_argument("2D mesh and command buffer must use the same GPU device");
@@ -629,9 +654,6 @@ namespace mngl::two_d
 		const std::size_t block_count =
 		    (triangle_vertices.size() - 1) / detail::resident_mesh_block_vertex_capacity + 1;
 		storage->blocks.reserve(block_count);
-
-		std::vector<detail::resident_mesh_vertex> packed_vertices;
-		packed_vertices.reserve(triangle_vertices.size());
 		storage->bounds_min = glm::vec2(std::numeric_limits<float>::max());
 		storage->bounds_max = glm::vec2(std::numeric_limits<float>::lowest());
 		for (std::size_t block_offset = 0; block_offset < triangle_vertices.size();
@@ -649,10 +671,7 @@ namespace mngl::two_d
 			{
 				const auto vertex = triangle_vertices[vertex_index];
 				if (!std::isfinite(vertex.x) || !std::isfinite(vertex.y)) [[unlikely]]
-				{
 					throw std::invalid_argument("2D mesh vertices must be finite");
-				}
-				packed_vertices.push_back({vertex.x, vertex.y});
 				block.bounds_min.x = std::min(block.bounds_min.x, vertex.x);
 				block.bounds_min.y = std::min(block.bounds_min.y, vertex.y);
 				block.bounds_max.x = std::max(block.bounds_max.x, vertex.x);
@@ -664,10 +683,9 @@ namespace mngl::two_d
 		}
 
 		command_buffer.retain_resource(storage);
-		storage->vertex_buffer = gpu::buffer::create_with_data(
-		    device, command_buffer, std::span<const detail::resident_mesh_vertex>(packed_vertices),
-		    gpu::buffer_usage::vertex);
-		m_storage = std::move(storage);
+		storage->vertex_buffer = gpu::buffer::create_with_data(device, command_buffer, triangle_vertices,
+		                                                       gpu::buffer_usage::vertex);
+		return storage;
 	}
 
 	inline mesh::mesh(const gpu::device& device, gpu::command_buffer& command_buffer,
@@ -933,6 +951,67 @@ namespace mngl::two_d
 		m_control->owner->submit_prepared_vertex_array(m_recording_context, value);
 	}
 
+	inline void frame_2d::submit_svg_gradient(std::span<const glm::vec2> vertices,
+	                                          const ::mngl::two_d::transform& transform, const color& tint,
+	                                          gpu::sprite_blend_mode blend,
+	                                          const detail::svg::gradient_paint& gradient)
+	{
+		ensure_recording_allowed();
+		m_control->owner->submit_svg_gradient(m_token, m_recording_context, vertices, transform, tint, blend,
+		                                      gradient);
+	}
+
+	inline void frame_2d::submit_svg_geometry(std::span<const glm::vec2> vertices,
+	                                          const ::mngl::two_d::transform& transform, const color& tint,
+	                                          gpu::sprite_blend_mode blend)
+	{
+		ensure_recording_allowed();
+		m_control->owner->submit_svg_geometry(m_recording_context, vertices, transform, tint, blend);
+	}
+
+	inline void frame_2d::submit_svg_image(const detail::svg::image_paint& image, const transform& matrix,
+	                                       const color& tint, gpu::sprite_blend_mode blend,
+	                                       const std::shared_ptr<const detail::svg::uploaded_assets>& assets)
+	{
+		ensure_recording_allowed();
+		m_control->owner->submit_svg_image(m_recording_context, image, matrix, tint, blend, assets);
+	}
+
+	inline void frame_2d::prepare_svg_image(const std::shared_ptr<const detail::svg::image_pixels>& image)
+	{
+		ensure_active();
+		if (m_recording_context)
+			throw std::logic_error("SVG images must be prepared on the parent frame");
+		m_control->owner->ensure_preparation_allowed(m_token);
+		(void)m_control->owner->svg_image_texture(image, nullptr);
+	}
+
+	inline void frame_2d::submit_svg_effect(const std::shared_ptr<const detail::svg::effect_layer>& layer,
+	                                        const transform& matrix, const color& tint,
+	                                        gpu::sprite_blend_mode blend,
+	                                        const std::shared_ptr<const detail::svg::uploaded_assets>& assets)
+	{
+		ensure_recording_allowed();
+		m_control->owner->submit_svg_effect(*this, layer, matrix, tint, blend, assets);
+	}
+
+	inline void frame_2d::record_svg_hit_geometry(
+	    const std::shared_ptr<const ::mngl::detail::svg_hit_test_geometry>& geometry,
+	    const ::mngl::two_d::transform& transform,
+	    const std::shared_ptr<const ::mngl::hit_test_callback>& click_callback)
+	{
+		ensure_recording_allowed();
+		m_control->owner->record_svg_hit_geometry(m_token, m_recording_context, geometry, transform,
+		                                          click_callback);
+	}
+
+	inline void frame_2d::submit_svg_gradient_mesh(const mesh& value,
+	                                               const detail::svg::gradient_paint& gradient)
+	{
+		ensure_recording_allowed();
+		m_control->owner->submit_svg_gradient_mesh(m_token, m_recording_context, value, gradient);
+	}
+
 	inline void frame_2d::submit_mesh(const mesh& value)
 	{
 		m_control->owner->submit_mesh(m_recording_context, value);
@@ -966,6 +1045,17 @@ namespace mngl::two_d
 		}
 		m_control->owner->ensure_preparation_allowed(m_token);
 		value.prepare(*this);
+	}
+
+	inline void frame_2d::prepare_svg_gradient(gpu::sprite_blend_mode blend,
+	                                           const detail::svg::gradient_paint& gradient)
+	{
+		ensure_active();
+		if (m_recording_context) [[unlikely]]
+		{
+			throw std::logic_error("SVG gradient resources can only be prepared on the parent frame_2d");
+		}
+		m_control->owner->prepare_svg_gradient(m_token, gradient, blend);
 	}
 
 	inline void frame_2d::prepare(font& typeface, std::string_view text)

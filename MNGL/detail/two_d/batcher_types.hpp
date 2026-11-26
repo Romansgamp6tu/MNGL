@@ -46,6 +46,7 @@ namespace mngl::two_d::detail
 	{
 		float x;
 		float y;
+		std::array<float, 4> tint{1.0f, 1.0f, 1.0f, 1.0f};
 	};
 
 	struct resident_mesh_block
@@ -444,6 +445,8 @@ namespace mngl::gpu
 		graphics_shader_asset fragment;
 		// Set only when the vertex shader recognizes the NaN sentinel in TEXCOORD4.y and clips it.
 		bool supports_instance_culling = false;
+		// Set only by the built-in asset loader; caller-provided shader sets remain private to their batcher.
+		bool shareable_default = false;
 
 		static batcher2d_shader_assets load_default(const device& gpu_device)
 		{
@@ -460,14 +463,20 @@ namespace mngl::gpu
 			return load_default_format(static_cast<shader_format>(::mngl::gpu::default_shader_format));
 		}
 
+		static batcher2d_shader_assets load_default(shader_format format)
+		{
+			return load_default_format(format);
+		}
+
 	private:
 		static batcher2d_shader_assets load_default_format(shader_format format)
 		{
-			const auto base_path = paths::application_directory();
-			const auto directory = base_path / "shaders";
+			const auto directory = paths::application_directory() / "shaders";
 			if (format == shader_format::dxil)
 			{
-				return load_dxil(directory);
+				auto shaders = load_dxil(directory);
+				shaders.shareable_default = true;
+				return shaders;
 			}
 
 			shader_compile_options vertex_options{};
@@ -481,8 +490,8 @@ namespace mngl::gpu
 			fragment_options.resources.samplers = 1;
 			fragment_options.resources.uniform_buffers = 1;
 
-			return {shader_loader::compile(directory / "batcher2d.vert.hlsl", vertex_options),
-			        shader_loader::compile(directory / "batcher2d.frag.hlsl", fragment_options), true};
+			return {load_shader(directory / "batcher2d.vert.hlsl", vertex_options),
+			        load_shader(directory / "batcher2d.frag.hlsl", fragment_options), true, true};
 		}
 
 	public:
@@ -505,6 +514,31 @@ namespace mngl::gpu
 			shaders.fragment.resources.uniform_buffers = 1;
 			shaders.fragment.debug_name = "batcher2d.frag";
 			return shaders;
+		}
+
+	private:
+		static graphics_shader_asset load_shader(const std::filesystem::path& source,
+		                                         const shader_compile_options& options)
+		{
+			if (options.format == shader_format::spirv)
+			{
+				auto binary = source;
+				binary.replace_extension(".spv");
+				if (!std::filesystem::is_regular_file(binary)) [[unlikely]]
+				{
+					throw std::runtime_error("Precompiled SPIR-V shader is missing: " + binary.string());
+				}
+				return shader_loader::load_binary(binary, source, options);
+			}
+			if (options.format == shader_format::msl)
+			{
+				auto binary = source;
+				binary.replace_extension(".msl");
+				if (std::filesystem::is_regular_file(binary))
+					return shader_loader::load_binary(binary, source, options);
+			}
+
+			return shader_loader::compile(source, options);
 		}
 	};
 } // namespace mngl::gpu

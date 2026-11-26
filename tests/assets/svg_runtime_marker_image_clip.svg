@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <marker id="image-marker" markerUnits="userSpaceOnUse" markerWidth="4" markerHeight="4">
+      <image x="-2" y="-2" width="8" height="8"
+             href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg=="/>
+    </marker>
+    <marker id="effect-marker" markerUnits="userSpaceOnUse" markerWidth="4" markerHeight="4">
+      <image x="-2" y="-2" width="8" height="8" opacity=".5"
+             href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg=="/>
+    </marker>
+  </defs>
+  <path id="image-owner" d="M10 10H30" fill="none" stroke="none" marker-end="url(#image-marker)"/>
+  <path id="effect-owner" d="M10 30H30" fill="none" stroke="none" marker-end="url(#effect-marker)"/>
+</svg>
