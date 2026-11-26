@@ -19,3 +19,28 @@ SDL вызывает внутренний watcher при добавлении с
 Не захватывайте в callback объекты по ссылке, если они могут быть уничтожены раньше соединения. Callback получает событие как `const`-ссылку и не должен сохранять эту ссылку после возврата.
 
 Типизированный интерфейс также позволяет объявить собственный тип, унаследованный от `mngl::event_base`, зарегистрировать на него `on<T>()` и отправлять его через `event_manager::emit()`.
+
+## Отдельная шина для подсистем
+
+Для собственных событий подсистем можно создать `mngl::event_bus`. У каждого экземпляра свой набор подписок: событие одной шины не вызывает callbacks другой шины или глобального `event_manager`.
+
+```cpp
+struct score_changed : mngl::event_base
+{
+	int score{};
+};
+
+mngl::event_bus gameplay_events;
+mngl::event_bus interface_events;
+
+auto gameplay_score = gameplay_events.on<score_changed>(
+    [](const score_changed& event) { update_score(event.score); });
+auto interface_score = interface_events.on<score_changed>(
+    [](const score_changed& event) { refresh_score_label(event.score); });
+
+score_changed changed{};
+changed.score = 100;
+gameplay_events.emit(changed); // Только gameplay_score.
+```
+
+Локальный `emit()` синхронен: callback работает в потоке вызова. `event_bus` не получает SDL-события и не связан с глобальным менеджером. Для пользовательских событий пока нет `post()` или автоматической передачи callback в главный поток; очередь имеет смысл, когда появится конкретный сценарий отправки событий из рабочего потока. `clear()` отключает подписки, а уничтожение шины тоже отключает соединения.
