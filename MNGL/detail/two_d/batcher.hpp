@@ -54,7 +54,7 @@ namespace mngl::gpu
 			explicit default_gpu_resources(const device& device) : device_owner(device) {}
 
 			device device_owner;
-			vertex_layout vertex_layout;
+			vertex_layout layout;
 			graphics_shader vertex_shader;
 			graphics_shader fragment_shader;
 			std::array<graphics_pipeline, 4> pipelines;
@@ -283,7 +283,7 @@ namespace mngl::gpu
 
 			m_shared_default_resources = acquire_default_gpu_resources(m_device, m_target_format, shaders);
 			m_vertex_instance_culling_supported = m_shared_default_resources->supports_instance_culling;
-			m_vertex_layout = m_shared_default_resources->vertex_layout;
+			m_vertex_layout = m_shared_default_resources->layout;
 
 			m_instances.reserve(initial_sprite_capacity);
 			m_batches.reserve(std::min<std::size_t>(initial_sprite_capacity, 256));
@@ -1488,22 +1488,22 @@ namespace mngl::gpu
 		{
 			auto resources = std::make_shared<default_gpu_resources>(device);
 			resources->supports_instance_culling = shaders.supports_instance_culling;
-			resources->vertex_layout.add_buffer(0, sizeof(quad_vertex));
-			resources->vertex_layout.add_attribute(0, 0, vertex_elemetn_fmt::float2, offsetof(quad_vertex, x));
-			resources->vertex_layout.add_buffer(1, sizeof(sprite_instance), vertex_input_rate::instance);
-			resources->vertex_layout.add_attribute(1, 1, vertex_elemetn_fmt::float2,
+			resources->layout.add_buffer(0, sizeof(quad_vertex));
+			resources->layout.add_attribute(0, 0, vertex_elemetn_fmt::float2, offsetof(quad_vertex, x));
+			resources->layout.add_buffer(1, sizeof(sprite_instance), vertex_input_rate::instance);
+			resources->layout.add_attribute(1, 1, vertex_elemetn_fmt::float2,
 			                                      offsetof(sprite_instance, transform_x));
-			resources->vertex_layout.add_attribute(2, 1, vertex_elemetn_fmt::float2,
+			resources->layout.add_attribute(2, 1, vertex_elemetn_fmt::float2,
 			                                      offsetof(sprite_instance, transform_y));
-			resources->vertex_layout.add_attribute(3, 1, vertex_elemetn_fmt::float2,
+			resources->layout.add_attribute(3, 1, vertex_elemetn_fmt::float2,
 			                                      offsetof(sprite_instance, transform_translation));
-			resources->vertex_layout.add_attribute(4, 1, vertex_elemetn_fmt::float2,
+			resources->layout.add_attribute(4, 1, vertex_elemetn_fmt::float2,
 			                                      offsetof(sprite_instance, effect_parameters));
-			resources->vertex_layout.add_attribute(5, 1, vertex_elemetn_fmt::float4,
+			resources->layout.add_attribute(5, 1, vertex_elemetn_fmt::float4,
 			                                      offsetof(sprite_instance, uv));
-			resources->vertex_layout.add_attribute(6, 1, vertex_elemetn_fmt::ubyte4_norm,
+			resources->layout.add_attribute(6, 1, vertex_elemetn_fmt::ubyte4_norm,
 			                                      offsetof(sprite_instance, tint));
-			resources->vertex_layout.add_attribute(7, 0, vertex_elemetn_fmt::float4,
+			resources->layout.add_attribute(7, 0, vertex_elemetn_fmt::float4,
 			                                      offsetof(quad_vertex, tint));
 
 			resources->vertex_shader = graphics_shader(device, shaders.vertex);
@@ -1518,7 +1518,7 @@ namespace mngl::gpu
 				                        std::to_string(static_cast<unsigned int>(blend)))
 				        .set_vertex_shader(resources->vertex_shader)
 				        .set_fragment_shader(resources->fragment_shader)
-				        .set_vertex_layout(resources->vertex_layout)
+				        .set_vertex_layout(resources->layout)
 				        .set_primitive_type(primitive_type::triangle_list)
 				        .set_cull_mode(cull_mode::none)
 				        .add_color_target(static_cast<SDL_GPUTextureFormat>(target_format),
