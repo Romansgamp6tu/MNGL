@@ -75,6 +75,7 @@ jobs:
       - name: Restore runner workspace ownership
         if: always()
         run: |
-          runner_uid="$(stat -c '%u' "$RUNNER_TEMP/_github_workflow/event.json")"
-          runner_gid="$(stat -c '%g' "$RUNNER_TEMP/_github_workflow/event.json")"
+          runner_workspace_parent="$(dirname "$GITHUB_WORKSPACE")"
+          runner_uid="$(stat -c '%u' "$runner_workspace_parent")"
+          runner_gid="$(stat -c '%g' "$runner_workspace_parent")"
           chown -R "$runner_uid:$runner_gid" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
