@@ -20,7 +20,7 @@
 | `process.hpp` | Запуск процессов, управление потоками и получение кода завершения | [Процессы](../core/processes.md) |
 | `paths.hpp` | Каталоги приложения и стандартные папки пользователя | [Runtime и утилиты](../core/runtime-and-utilities.md) |
 | `imgui_compat.hpp` | MNGL scopes и классы-виджеты с собственным состоянием поверх Dear ImGui; меню, canvas, ввод, GPU overlay и шрифты | [Окна и ввод](../core/windows-and-input.md) |
-| `event.hpp` | Типизированная система событий | [События](../core/events.md) |
+| `event.hpp` | Типизированные события SDL и приложения, глобальный менеджер и локальные `event_bus` для подсистем | [События](../core/events.md) |
 | `surface.hpp`, `pixel_format.hpp` | SDL surfaces, изображения и форматы пикселей | [Поверхности и цвета](../core/media-and-colors.md) |
 | `color.hpp` | Цвета, преобразования RGB/HSV/HSL | [Поверхности и цвета](../core/media-and-colors.md) |
 | `line.hpp`, `rectangle.hpp` | Геометрические примитивы и пересечения | [Геометрия](../core/geometry.md) |

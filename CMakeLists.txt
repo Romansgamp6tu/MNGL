@@ -377,6 +377,12 @@ if(BUILD_TESTING)
 	set_tests_properties(mngl_core_api_test PROPERTIES
 		TIMEOUT 20
 		ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+	add_executable(mngl_event_bus_test tests/event_bus_test.cpp)
+	target_link_libraries(mngl_event_bus_test PRIVATE mngl)
+	add_test(NAME mngl_event_bus_test COMMAND mngl_event_bus_test)
+	set_tests_properties(mngl_event_bus_test PROPERTIES
+		TIMEOUT 20
+		ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
 	add_executable(mngl_async_io_close_retry_test tests/async_io_close_retry_test.cpp)
 	target_compile_features(mngl_async_io_close_retry_test PRIVATE cxx_std_23)
 	target_compile_definitions(mngl_async_io_close_retry_test PRIVATE MNGL_ASYNC_IO_TESTING=1)
