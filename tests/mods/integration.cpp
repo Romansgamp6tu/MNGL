@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -109,6 +110,36 @@ namespace
 		require(registry.property<float>(mngl_mod_demo::tree_node_gap_property_id).get() == 24.0f,
 		        "host numeric property did not return to its default value");
 	}
+
+	struct unload_reentry_probe
+	{
+		mngl::mods::mod_loader* loader{};
+		std::string provider_id;
+		std::filesystem::path same_id_package;
+		std::optional<mngl::mods::mod_unload_result> provider_unload;
+		std::vector<mngl::mods::mod_unload_result> unload_all_results;
+		std::optional<mngl::mods::mod_load_result> same_id_load;
+		std::string error;
+	};
+
+	void MNGL_MOD_CALL attempt_reentrant_loader_operations(void* raw_probe) noexcept
+	{
+		auto& probe = *static_cast<unload_reentry_probe*>(raw_probe);
+		try
+		{
+			probe.provider_unload.emplace(probe.loader->unload(probe.provider_id));
+			probe.unload_all_results = probe.loader->unload_all();
+			probe.same_id_load.emplace(probe.loader->load_package(probe.same_id_package));
+		}
+		catch (const std::exception& error)
+		{
+			probe.error = error.what();
+		}
+		catch (...)
+		{
+			probe.error = "unknown exception during reentrant loader calls";
+		}
+	}
 } // namespace
 
 REGISTER_MODDABLE_CLASS(tree_base, "demo.tree");
@@ -197,6 +228,138 @@ int main(int argc, char** argv)
 				        "unload_all did not return dependent-first unload order");
 			}
 			std::cout << "PASS: dependencies loaded in order and providers stayed in use\n";
+		}
+
+		{
+			mngl::mods::registry chain_registry;
+			chain_registry.apply_declarations();
+			mngl::mods::mod_loader chain_loader(chain_registry);
+			constexpr std::size_t chain_length = 128;
+			const auto chain_root = temp.path() / "long-dependency-chain";
+			for (std::size_t i = 0; i < chain_length; ++i)
+			{
+				const auto suffix = std::to_string(1000 + i).substr(1);
+				const auto id = "test.chain." + suffix;
+				const auto dependencies =
+				    i == 0 ? std::string("{}")
+					       : ("{\"test.chain." + std::to_string(999 + i).substr(1) + "\":\"*\"}");
+				(void)write_package(chain_root, "node-" + suffix, id, dependency_module,
+				                    mngl::mods::native_binary_abi_tag(), "1.0.0", dependencies);
+			}
+
+			const auto chain_loads = chain_loader.load_all(chain_root);
+			require(chain_loads.size() == chain_length,
+			        "long dependency chain did not produce one load result per package");
+			for (const auto& result : chain_loads)
+				require(static_cast<bool>(result),
+				        "long dependency chain failed to load: " + result.mod_id + ": " + result.message);
+
+			const auto planning_started = std::chrono::steady_clock::now();
+			const auto chain_unloads = chain_loader.unload_all();
+			const auto planning_elapsed = std::chrono::steady_clock::now() - planning_started;
+			require(chain_unloads.size() == chain_length,
+			        "long dependency chain did not produce one unload result per package");
+			for (std::size_t i = 0; i < chain_length; ++i)
+			{
+				require(chain_unloads[i].state == mngl::mods::mod_unload_state::unloaded,
+				        "long dependency chain unload failed: " + chain_unloads[i].mod_id);
+				const auto expected_id = "test.chain." + std::to_string(999 + chain_length - i).substr(1);
+				require(chain_unloads[i].mod_id == expected_id,
+				        "long dependency chain was not unloaded dependent-first");
+			}
+			std::cout << "PASS: " << chain_length << "-mod shutdown chain planned and unloaded in "
+			          << std::chrono::duration_cast<std::chrono::microseconds>(planning_elapsed).count()
+			          << " us\n";
+
+			mngl::mods::registry wide_registry;
+			wide_registry.apply_declarations();
+			mngl::mods::mod_loader wide_loader(wide_registry);
+			constexpr std::size_t wide_count = 64;
+			const auto wide_root = temp.path() / "wide-dependency-graph";
+			for (std::size_t i = 0; i < wide_count; ++i)
+			{
+				const auto suffix = std::to_string(1000 + i).substr(1);
+				const auto id = "test.wide." + suffix;
+				(void)write_package(wide_root, "node-" + suffix, id, dependency_module,
+				                    mngl::mods::native_binary_abi_tag());
+			}
+			const auto wide_loads = wide_loader.load_all(wide_root);
+			require(wide_loads.size() == wide_count,
+			        "wide dependency graph did not produce one load result per package");
+			for (const auto& result : wide_loads)
+				require(static_cast<bool>(result),
+				        "wide dependency graph failed to load: " + result.mod_id + ": " + result.message);
+
+			const auto wide_unloads = wide_loader.unload_all();
+			require(wide_unloads.size() == wide_count,
+			        "wide dependency graph did not produce one unload result per package");
+			for (std::size_t i = 0; i < wide_count; ++i)
+			{
+				require(wide_unloads[i].state == mngl::mods::mod_unload_state::unloaded,
+				        "wide dependency graph unload failed: " + wide_unloads[i].mod_id);
+				const auto expected_id = "test.wide." + std::to_string(1000 + i).substr(1);
+				require(wide_unloads[i].mod_id == expected_id,
+				        "independent mods were not unloaded in stable ID order");
+			}
+			std::cout << "PASS: " << wide_count << " independent mods unloaded in stable ID order\n";
+		}
+
+		{
+			mngl::mods::registry reentry_registry;
+			reentry_registry.apply_declarations();
+			mngl::mods::mod_loader reentry_loader(reentry_registry);
+			const auto reentry_root = temp.path() / "deferred-reentry";
+			const auto provider_id = "test.reentry.provider";
+			const auto dependent_id = "test.reentry.dependent";
+			(void)write_package(reentry_root, "provider", provider_id, dependency_module,
+			                    mngl::mods::native_binary_abi_tag());
+			const auto dependent_package = write_package(
+			    reentry_root, "dependent", dependent_id, dependency_module,
+			    mngl::mods::native_binary_abi_tag(), "1.0.0", "{\"test.reentry.provider\":\"*\"}");
+			require(static_cast<bool>(reentry_loader.load_package(reentry_root / "provider")),
+			        "reentrant provider mod failed to load");
+			require(static_cast<bool>(reentry_loader.load_package(dependent_package)),
+			        "reentrant dependent mod failed to load");
+
+			const auto dependent_binary = dependent_package / "bin" / dependency_module.filename();
+			std::unique_ptr<SDL_SharedObject, decltype(&SDL_UnloadObject)> probe_library(
+			    SDL_LoadObject(dependent_binary.string().c_str()), SDL_UnloadObject);
+			require(static_cast<bool>(probe_library),
+			        "could not open dependent probe module for reentry test");
+			using unload_callback = void(MNGL_MOD_CALL*)(void*);
+			using configure_callback = void(MNGL_MOD_CALL*)(void*, unload_callback);
+			auto configure = reinterpret_cast<configure_callback>(
+			    SDL_LoadFunction(probe_library.get(), "mngl_test_set_unload_callback"));
+			require(configure != nullptr, "dependent probe module has no reentry configuration function");
+
+			unload_reentry_probe probe{&reentry_loader, provider_id,
+			                           write_package(reentry_root, "dependent-reload", dependent_id,
+			                                         dependency_module, mngl::mods::native_binary_abi_tag(),
+			                                         "1.0.0", "{\"test.reentry.provider\":\"*\"}")};
+			configure(&probe, &attempt_reentrant_loader_operations);
+			probe_library.reset();
+			const auto first_unload = reentry_loader.unload(dependent_id);
+			require(first_unload.state == mngl::mods::mod_unload_state::unloaded,
+			        "reentrant dependent did not finish unloading");
+			require(probe.error.empty(), "reentrant unload callback failed: " + probe.error);
+			require(probe.provider_unload &&
+			            probe.provider_unload->state == mngl::mods::mod_unload_state::dependency_in_use,
+			        "provider became unloadable during its dependent's shutdown callback");
+			require(probe.unload_all_results.size() == 1 &&
+			            probe.unload_all_results.front().mod_id == provider_id &&
+			            probe.unload_all_results.front().state ==
+			                mngl::mods::mod_unload_state::dependency_in_use,
+			        "unload_all ignored the deferred dependent while planning provider shutdown");
+			require(probe.same_id_load && !*probe.same_id_load,
+			        "same mod ID was reusable during its native unload callback");
+			require(static_cast<bool>(reentry_loader.load_package(probe.same_id_package)),
+			        "same mod ID did not become reusable after collection completed");
+			require(reentry_loader.unload(dependent_id).state == mngl::mods::mod_unload_state::unloaded,
+			        "reloaded dependent did not unload");
+			require(reentry_loader.unload(provider_id).state == mngl::mods::mod_unload_state::unloaded,
+			        "provider did not become unloadable after dependent collection completed");
+			std::cout
+			    << "PASS: deferred IDs and dependencies stay reserved during reentrant unload callbacks\n";
 		}
 
 		{

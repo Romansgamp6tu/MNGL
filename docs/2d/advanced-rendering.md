@@ -22,7 +22,7 @@
 
 ## Группы, порядок которых не важен
 
-По умолчанию `frame_2d::draw()` сохраняет порядок отрисовки. Если набор объектов можно рисовать в любом порядке, оберните его в `draw_order_independent()`: MNGL отсортирует draw batches этого callback по render state — материалу, текстуре, фильтру и scissor — чтобы сократить переключения GPU-состояния.
+По умолчанию `frame_2d::draw()` сохраняет порядок отрисовки. Если набор объектов можно рисовать в любом порядке, оберните его в `draw_order_independent()`: MNGL отсортирует draw batches этого callback по render state — материалу, текстуре, фильтру и scissor — и объединит совместимые batches в один instanced draw. Это сокращает и переключения GPU-состояния, и число draw calls; повторные экземпляры одной resident mesh также рисуются вместе.
 
 ```cpp
 frame.draw_order_independent([&](auto& group)

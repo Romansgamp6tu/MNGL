@@ -1,7 +1,15 @@
 @PACKAGE_INIT@
 
+# Capture the package-relative (or explicitly absolute) shader location before
+# find_dependency() calls, which may overwrite PACKAGE_PREFIX_DIR on older CMake.
+set(_MNGL_SHADER_INSTALL_DIRECTORY "@PACKAGE_CMAKE_INSTALL_BINDIR@/shaders")
+
 @MNGL_CONFIG_FIND_DEPENDENCIES@
 
 include("${CMAKE_CURRENT_LIST_DIR}/MNGLTargets.cmake")
+if(TARGET MNGL::MNGL)
+	set_property(TARGET MNGL::MNGL APPEND PROPERTY INTERFACE_COMPILE_DEFINITIONS
+		"MNGL_SHADER_INSTALL_DIRECTORY=\"${_MNGL_SHADER_INSTALL_DIRECTORY}\"")
+endif()
 check_required_components(MNGL)
 

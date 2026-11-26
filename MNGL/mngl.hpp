@@ -22,6 +22,8 @@
 #include "render_window.hpp"
 #include "runtime.hpp"
 #include "storage.hpp"
+#include "svg_object.hpp"
+#include "svg_sprite.hpp"
 #include "text.hpp"
 #include "texture.hpp"
 #include "window.hpp"

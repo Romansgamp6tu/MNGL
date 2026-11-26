@@ -851,6 +851,7 @@ namespace mngl::gpu
 
 		[[nodiscard]] SDL_GPUShader* raw() const noexcept { return m_handle; }
 		[[nodiscard]] SDL_GPUShader* handle() const noexcept { return raw(); }
+		[[nodiscard]] SDL_GPUDevice* device_raw() const noexcept { return m_device; }
 		[[nodiscard]] std::string_view debug_name() const noexcept { return m_debug_name; }
 		[[nodiscard]] bool valid() const noexcept { return m_handle != nullptr; }
 		explicit operator bool() const noexcept { return valid(); }

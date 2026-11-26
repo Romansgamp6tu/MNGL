@@ -336,7 +336,7 @@ namespace mngl::gpu
 				throw std::logic_error("A frame graph cannot be reused after a pass failed during execution");
 			}
 
-			const auto order = build_execution_order();
+			const auto& order = build_execution_order();
 			m_executing = true;
 			try
 			{
@@ -372,6 +372,12 @@ namespace mngl::gpu
 		struct resource_use
 		{
 			std::uint32_t resource_index;
+			access mode;
+		};
+
+		struct ordered_resource_use
+		{
+			std::size_t pass;
 			access mode;
 		};
 
@@ -413,6 +419,7 @@ namespace mngl::gpu
 			}
 			const auto index = static_cast<std::uint32_t>(m_resources.size());
 			m_resources.push_back(std::move(resource));
+			invalidate_execution_order();
 			return index;
 		}
 
@@ -457,6 +464,7 @@ namespace mngl::gpu
 			}
 			const auto index = static_cast<std::uint32_t>(m_passes.size());
 			m_passes.push_back(std::move(pass));
+			invalidate_execution_order();
 			return pass_builder(*this, pass_handle(this, index));
 		}
 
@@ -574,6 +582,7 @@ namespace mngl::gpu
 				return;
 			}
 			uses.push_back({resource, mode});
+			invalidate_execution_order();
 		}
 
 		void add_dependency(pass_handle pass, pass_handle prerequisite)
@@ -585,6 +594,7 @@ namespace mngl::gpu
 			if (std::find(prerequisites.begin(), prerequisites.end(), prerequisite_id) == prerequisites.end())
 			{
 				prerequisites.push_back(prerequisite_id);
+				invalidate_execution_order();
 			}
 		}
 
@@ -614,11 +624,30 @@ namespace mngl::gpu
 			}
 		}
 
-		[[nodiscard]] std::vector<std::size_t> build_execution_order() const
+		void invalidate_execution_order() noexcept
 		{
+			m_execution_order_dirty = true;
+			m_cached_execution_order.clear();
+		}
+
+		[[nodiscard]] const std::vector<std::size_t>& build_execution_order()
+		{
+			if (!m_execution_order_dirty)
+			{
+				return m_cached_execution_order;
+			}
+
 			const std::size_t pass_count = m_passes.size();
 			std::vector<std::vector<std::size_t>> outgoing(pass_count);
 			std::vector<std::size_t> indegree(pass_count, 0);
+			std::vector<std::vector<ordered_resource_use>> uses_by_resource(m_resources.size());
+			for (std::size_t pass = 0; pass < pass_count; ++pass)
+			{
+				for (const auto& use : m_passes[pass].resources)
+				{
+					uses_by_resource[use.resource_index].push_back({pass, use.mode});
+				}
+			}
 			auto add_edge = [&](std::size_t prerequisite, std::size_t dependent)
 			{
 				auto& successors = outgoing[prerequisite];
@@ -640,31 +669,26 @@ namespace mngl::gpu
 			for (std::uint32_t resource_index = 0; resource_index < m_resources.size(); ++resource_index)
 			{
 				const auto& resource = m_resources[resource_index];
+				const auto& resource_uses = uses_by_resource[resource_index];
 				std::optional<std::size_t> first_writer;
-				for (std::size_t pass = 0; pass < pass_count && !first_writer; ++pass)
+				for (const auto& use : resource_uses)
 				{
-					for (const auto& use : m_passes[pass].resources)
+					if (use.mode != access::read)
 					{
-						if (use.resource_index == resource_index && use.mode != access::read)
-						{
-							first_writer = pass;
-							break;
-						}
+						first_writer = use.pass;
+						break;
 					}
 				}
 
 				if (!resource.initially_initialized && !first_writer)
 				{
-					for (std::size_t pass = 0; pass < pass_count; ++pass)
+					for (const auto& use : resource_uses)
 					{
-						for (const auto& use : m_passes[pass].resources)
+						if (use.mode != access::write) [[unlikely]]
 						{
-							if (use.resource_index == resource_index && use.mode != access::write) [[unlikely]]
-							{
-								throw std::logic_error("Transient frame-graph resource " +
-								                       std::to_string(resource_index) +
-								                       " is read but has no producing pass");
-							}
+							throw std::logic_error("Transient frame-graph resource " +
+							                       std::to_string(resource_index) +
+							                       " is read but has no producing pass");
 						}
 					}
 				}
@@ -672,19 +696,11 @@ namespace mngl::gpu
 				std::optional<std::size_t> last_writer;
 				std::vector<std::size_t> readers;
 				std::vector<std::size_t> readers_before_first_write;
-				for (std::size_t pass = 0; pass < pass_count; ++pass)
+				for (const auto& use : resource_uses)
 				{
-					const auto use =
-					    std::find_if(m_passes[pass].resources.begin(), m_passes[pass].resources.end(),
-						             [resource_index](const resource_use& item)
-						             { return item.resource_index == resource_index; });
-					if (use == m_passes[pass].resources.end())
-					{
-						continue;
-					}
-
-					const bool reads = use->mode != access::write;
-					const bool writes = use->mode != access::read;
+					const std::size_t pass = use.pass;
+					const bool reads = use.mode != access::write;
+					const bool writes = use.mode != access::read;
 					if (reads)
 					{
 						if (last_writer)
@@ -693,12 +709,12 @@ namespace mngl::gpu
 						}
 						else if (resource.initially_initialized)
 						{
-							if (use->mode == access::read)
+							if (use.mode == access::read)
 							{
 								readers.push_back(pass);
 							}
 						}
-						else if (first_writer && pass < *first_writer && use->mode == access::read)
+						else if (first_writer && pass < *first_writer && use.mode == access::read)
 						{
 							add_edge(*first_writer, pass);
 							readers_before_first_write.push_back(pass);
@@ -764,7 +780,9 @@ namespace mngl::gpu
 			{
 				throw std::logic_error("Frame graph contains a dependency cycle");
 			}
-			return order;
+			m_cached_execution_order = std::move(order);
+			m_execution_order_dirty = false;
+			return m_cached_execution_order;
 		}
 
 		void execute_passes(const std::vector<std::size_t>& order)
@@ -820,6 +838,8 @@ namespace mngl::gpu
 		device m_device;
 		std::vector<resource_entry> m_resources;
 		std::vector<pass_node> m_passes;
+		std::vector<std::size_t> m_cached_execution_order;
+		bool m_execution_order_dirty = true;
 		bool m_executing = false;
 		bool m_execution_failed = false;
 	};

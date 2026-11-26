@@ -70,6 +70,11 @@ namespace mngl::gpu
 			{
 				throw std::invalid_argument("Render pass supports at most four color targets");
 			}
+			if (!cmd.valid()) [[unlikely]]
+			{
+				throw std::invalid_argument("Cannot begin a render pass with an invalid command buffer");
+			}
+			m_device = cmd.device_raw();
 
 			std::array<SDL_GPUColorTargetInfo, 4> sdl_color_targets{};
 			std::uint32_t color_target_count = 0;
@@ -115,10 +120,14 @@ namespace mngl::gpu
 			}
 
 			const auto* color_target_data = color_target_count ? sdl_color_targets.data() : nullptr;
+			cmd.begin_pass();
+			m_command_owner = &cmd;
 			handle = SDL_BeginGPURenderPass(cmd.raw(), color_target_data, color_target_count, depth_ptr);
 
 			if (!handle) [[unlikely]]
 			{
+				cmd.end_pass();
+				m_command_owner = nullptr;
 				throw sdl_error("Failed to begin GPU render pass: ");
 			}
 		}
@@ -151,14 +160,31 @@ namespace mngl::gpu
 				SDL_EndGPURenderPass(handle);
 				handle = nullptr;
 			}
+			if (m_command_owner)
+			{
+				m_command_owner->end_pass();
+				m_command_owner = nullptr;
+			}
 		}
 
 		// =========================================================================
 		// МЕТОДЫ ОТРИСОВКИ И СВЯЗЫВАНИЯ (binding / drawing commands)
 		// =========================================================================
 
-		void bind_pipeline(const graphics_pipeline& pipeline) const noexcept
+		void bind_pipeline(const graphics_pipeline& pipeline) const
 		{
+			if (!handle) [[unlikely]]
+			{
+				throw std::logic_error("Render pass is not active");
+			}
+			if (!pipeline.valid()) [[unlikely]]
+			{
+				throw std::invalid_argument("Cannot bind an invalid graphics pipeline");
+			}
+			if (m_device && pipeline.device_raw() != m_device) [[unlikely]]
+			{
+				throw std::invalid_argument("Graphics pipeline and render pass must use the same GPU device");
+			}
 			SDL_BindGPUGraphicsPipeline(handle, pipeline.raw());
 		}
 
@@ -243,11 +269,15 @@ namespace mngl::gpu
 
 	private:
 		SDL_GPURenderPass* handle = nullptr;
+		SDL_GPUDevice* m_device = nullptr;
+		command_buffer* m_command_owner = nullptr;
 
 		friend inline void swap(render_pass& l, render_pass& r) noexcept
 		{
 			using std::swap;
 			swap(l.handle, r.handle);
+			swap(l.m_device, r.m_device);
+			swap(l.m_command_owner, r.m_command_owner);
 		}
 	};
 } // namespace mngl::gpu

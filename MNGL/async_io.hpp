@@ -5,6 +5,9 @@
 #include <SDL3/SDL_asyncio.h>
 
 #include <algorithm>
+#if defined(MNGL_ASYNC_IO_TESTING)
+#include <atomic>
+#endif
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -77,6 +80,38 @@ namespace mngl::async_io
 
 	namespace detail
 	{
+	#if defined(MNGL_ASYNC_IO_TESTING)
+		struct async_io_close_test_hooks
+		{
+			inline static std::atomic_size_t injected_failures{0};
+			inline static std::atomic_size_t close_attempts{0};
+
+			static void fail_next_close_attempts(std::size_t count) noexcept
+			{
+				injected_failures.store(count, std::memory_order_relaxed);
+				close_attempts.store(0, std::memory_order_relaxed);
+			}
+		};
+	#endif
+
+		inline bool close_async_io(SDL_AsyncIO* file, bool flush, SDL_AsyncIOQueue* queue, void* userdata) noexcept
+		{
+		#if defined(MNGL_ASYNC_IO_TESTING)
+			async_io_close_test_hooks::close_attempts.fetch_add(1, std::memory_order_relaxed);
+			auto failures = async_io_close_test_hooks::injected_failures.load(std::memory_order_relaxed);
+			while (failures != 0)
+			{
+				if (async_io_close_test_hooks::injected_failures.compare_exchange_weak(
+				        failures, failures - 1, std::memory_order_relaxed))
+				{
+					SDL_SetError("injected SDL_CloseAsyncIO failure");
+					return false;
+				}
+			}
+		#endif
+			return SDL_CloseAsyncIO(file, flush, queue, userdata);
+		}
+
 		struct queue_identity
 		{
 		};
@@ -96,6 +131,7 @@ namespace mngl::async_io
 			bool io_succeeded = false;
 			bool io_cancelled = false;
 			bool close_queued = false;
+			bool close_retry_pending = false;
 			bool close_done = false;
 			bool close_succeeded = false;
 			bool close_cancelled = false;
@@ -537,7 +573,8 @@ namespace mngl::async_io
 				state->error = detail::sdl_error_message("failed to queue async file read: ");
 			}
 
-			try_queue_close(state);
+			if (!try_queue_close(state))
+				queue_close_retry(state);
 			return request(std::move(state));
 		}
 
@@ -569,39 +606,93 @@ namespace mngl::async_io
 				state->error = detail::sdl_error_message("failed to queue async file write: ");
 			}
 
-			try_queue_close(state);
+			if (!try_queue_close(state))
+				queue_close_retry(state);
 			return request(std::move(state));
 		}
 
 		void retry_closes() noexcept
 		{
-			for (auto& [_, state] : m_requests)
+			if (m_close_retry_scan_needed)
 			{
+				m_close_retries.clear();
+				bool still_pending = false;
+				for (auto& [_, state] : m_requests)
+				{
+					bool should_retry_close = false;
+					{
+						std::lock_guard state_lock(state->mutex);
+						state->close_retry_pending = false;
+						should_retry_close = state->io_done && state->file && !state->close_queued;
+					}
+					if (should_retry_close && !try_queue_close(state))
+						still_pending = true;
+				}
+				m_close_retry_scan_needed = still_pending;
+				return;
+			}
+
+			const auto retry_count = m_close_retries.size();
+			for (std::size_t index = 0; index < retry_count; ++index)
+			{
+				void* identity = m_close_retries[index];
+				const auto found = m_requests.find(identity);
+				if (found == m_requests.end())
+					continue;
+				const auto& state = found->second;
 				bool should_retry_close = false;
 				{
 					std::lock_guard state_lock(state->mutex);
+					state->close_retry_pending = false;
 					should_retry_close = state->io_done && state->file && !state->close_queued;
 				}
-				if (should_retry_close)
+				if (should_retry_close && !try_queue_close(state))
 				{
-					try_queue_close(state);
+					queue_close_retry(state);
 				}
 			}
+			m_close_retries.erase(m_close_retries.begin(),
+			                      m_close_retries.begin() + static_cast<std::ptrdiff_t>(retry_count));
 		}
 
-		void try_queue_close(const std::shared_ptr<detail::request_state>& state) noexcept
+		bool try_queue_close(const std::shared_ptr<detail::request_state>& state) noexcept
 		{
 			std::lock_guard state_lock(state->mutex);
 			if (!state->file || state->close_queued || !m_queue)
 			{
-				return;
+				return true;
 			}
 
-			if (SDL_CloseAsyncIO(state->file, state->flush_on_close, m_queue, state.get()))
+			if (detail::close_async_io(state->file, state->flush_on_close, m_queue, state.get()))
 			{
 				// A successful SDL_CloseAsyncIO invalidates the handle immediately.
 				state->file = nullptr;
 				state->close_queued = true;
+				state->close_retry_pending = false;
+				return true;
+			}
+			return false;
+		}
+
+		void queue_close_retry(const std::shared_ptr<detail::request_state>& state) noexcept
+		{
+			if (m_close_retry_scan_needed)
+				return;
+			std::lock_guard state_lock(state->mutex);
+			if (!state->io_done || !state->file || state->close_queued || state->close_retry_pending)
+			{
+				return;
+			}
+
+			try
+			{
+				m_close_retries.push_back(state.get());
+				state->close_retry_pending = true;
+			}
+			catch (...)
+			{
+				// Fall back to a scan only if allocation prevents tracking this retry.
+				m_close_retry_scan_needed = true;
 			}
 		}
 
@@ -674,7 +765,8 @@ namespace mngl::async_io
 
 			if (retry_close)
 			{
-				try_queue_close(state);
+				if (!try_queue_close(state))
+					queue_close_retry(state);
 			}
 			if (final)
 			{
@@ -708,12 +800,16 @@ namespace mngl::async_io
 				}
 			}
 			m_requests.clear();
+			m_close_retries.clear();
+			m_close_retry_scan_needed = false;
 		}
 
 		std::shared_ptr<detail::queue_identity> m_identity;
 		SDL_AsyncIOQueue* m_queue = nullptr;
 		mutable std::mutex m_mutex;
 		std::unordered_map<void*, std::shared_ptr<detail::request_state>> m_requests;
+		std::vector<void*> m_close_retries;
+		bool m_close_retry_scan_needed = false;
 	};
 } // namespace mngl::async_io
 

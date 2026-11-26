@@ -191,8 +191,7 @@ namespace mngl
 				m_command_buffer->submit();
 				if (m_swapchain_texture)
 				{
-					m_hit_test_frame =
-					    m_hit_testing_enabled ? m_swapchain_texture->m_hit_test_frame : nullptr;
+					m_hit_test_frame = m_hit_testing_enabled ? m_swapchain_texture->completed_hit_test_frame() : nullptr;
 				}
 			}
 			catch (...)

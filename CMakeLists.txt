@@ -5,6 +5,86 @@ project(MNGL LANGUAGES C CXX)
 include(CTest)
 include(GNUInstallDirs)
 
+set(MNGL_METAL_SHADER_ASSET_DIR "" CACHE PATH
+	"Directory with offline-generated MSL sidecars for built-in runtime shaders")
+
+file(GLOB MNGL_RUNTIME_SHADER_ASSETS CONFIGURE_DEPENDS LIST_DIRECTORIES false
+	"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/shaders/*")
+set(MNGL_RUNTIME_SHADER_ASSET_NAMES)
+foreach(MNGL_RUNTIME_SHADER_ASSET IN LISTS MNGL_RUNTIME_SHADER_ASSETS)
+	get_filename_component(MNGL_RUNTIME_SHADER_ASSET_NAME "${MNGL_RUNTIME_SHADER_ASSET}" NAME)
+	list(APPEND MNGL_RUNTIME_SHADER_ASSET_NAMES "${MNGL_RUNTIME_SHADER_ASSET_NAME}")
+endforeach()
+string(REPLACE ";" "\n" MNGL_RUNTIME_SHADER_ASSET_MANIFEST_CONTENT
+	"${MNGL_RUNTIME_SHADER_ASSET_NAMES}")
+file(CONFIGURE
+	OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/mngl-runtime-shader-assets.txt"
+	CONTENT "${MNGL_RUNTIME_SHADER_ASSET_MANIFEST_CONTENT}\n")
+file(CONFIGURE
+	OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/mngl-stage-runtime-shaders.cmake"
+	CONTENT [=[
+if(NOT DEFINED MNGL_SHADER_SOURCE OR NOT DEFINED MNGL_SHADER_DESTINATION OR NOT DEFINED MNGL_SHADER_MANIFEST)
+	message(FATAL_ERROR "Runtime shader staging requires source, destination, and manifest paths")
+endif()
+
+file(MAKE_DIRECTORY "${MNGL_SHADER_DESTINATION}")
+file(LOCK "${MNGL_SHADER_DESTINATION}/.mngl-runtime-shaders.lock" GUARD PROCESS TIMEOUT 60)
+file(STRINGS "${MNGL_SHADER_MANIFEST}" source_assets)
+set(current_assets ${source_assets})
+if(DEFINED MNGL_METAL_SHADER_SOURCE AND IS_DIRECTORY "${MNGL_METAL_SHADER_SOURCE}")
+	file(GLOB metal_shader_assets LIST_DIRECTORIES false "${MNGL_METAL_SHADER_SOURCE}/*.msl")
+	foreach(metal_shader IN LISTS metal_shader_assets)
+		get_filename_component(metal_shader_name "${metal_shader}" NAME)
+		list(APPEND current_assets "${metal_shader_name}")
+	endforeach()
+endif()
+list(REMOVE_DUPLICATES current_assets)
+list(SORT current_assets)
+set(current_manifest_content "")
+foreach(asset IN LISTS current_assets)
+	string(APPEND current_manifest_content "${asset}\n")
+endforeach()
+set(managed_manifest "${MNGL_SHADER_DESTINATION}/.mngl-runtime-shaders.manifest")
+if(EXISTS "${managed_manifest}")
+	file(STRINGS "${managed_manifest}" previously_managed_assets)
+	foreach(asset IN LISTS previously_managed_assets)
+		if(NOT asset IN_LIST current_assets)
+			file(REMOVE "${MNGL_SHADER_DESTINATION}/${asset}")
+		endif()
+	endforeach()
+endif()
+
+foreach(asset IN LISTS current_assets)
+	if(EXISTS "${MNGL_SHADER_SOURCE}/${asset}")
+		file(COPY_FILE "${MNGL_SHADER_SOURCE}/${asset}" "${MNGL_SHADER_DESTINATION}/${asset}" ONLY_IF_DIFFERENT)
+	elseif(DEFINED MNGL_METAL_SHADER_SOURCE AND EXISTS "${MNGL_METAL_SHADER_SOURCE}/${asset}")
+		file(COPY_FILE "${MNGL_METAL_SHADER_SOURCE}/${asset}" "${MNGL_SHADER_DESTINATION}/${asset}" ONLY_IF_DIFFERENT)
+	else()
+		message(FATAL_ERROR "Runtime shader asset is missing: ${asset}")
+	endif()
+endforeach()
+file(WRITE "${managed_manifest}" "${current_manifest_content}")
+]=]
+	@ONLY)
+
+function(mngl_stage_runtime_shaders target)
+	set(shader_destination "$<TARGET_FILE_DIR:${target}>/shaders")
+	add_custom_target("${target}_runtime_shaders"
+		COMMAND "${CMAKE_COMMAND}"
+			"-DMNGL_SHADER_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/MNGL/shaders"
+			"-DMNGL_METAL_SHADER_SOURCE=${MNGL_METAL_SHADER_ASSET_DIR}"
+			"-DMNGL_SHADER_DESTINATION=${shader_destination}"
+			"-DMNGL_SHADER_MANIFEST=${CMAKE_CURRENT_BINARY_DIR}/mngl-runtime-shader-assets.txt"
+			-P "${CMAKE_CURRENT_BINARY_DIR}/mngl-stage-runtime-shaders.cmake"
+		DEPENDS ${MNGL_RUNTIME_SHADER_ASSETS}
+			"${CMAKE_CURRENT_BINARY_DIR}/mngl-runtime-shader-assets.txt"
+			"${CMAKE_CURRENT_BINARY_DIR}/mngl-stage-runtime-shaders.cmake"
+		COMMENT "Staging runtime shaders for ${target}"
+		VERBATIM
+	)
+	add_dependencies("${target}" "${target}_runtime_shaders")
+endfunction()
+
 option(MNGL_CUSTOM_AUDIO_BACKEND
 	"Disable all MNGL audio integration" OFF)
 option(MNGL_CUSTOM_AUDIO_INTERFACE
@@ -263,12 +343,7 @@ if(MNGL_BUILD_2D_BENCHMARK)
 	if(MSVC)
 		target_compile_options(mngl_2d_benchmark PRIVATE /utf-8)
 	endif()
-	add_custom_command(TARGET mngl_2d_benchmark POST_BUILD
-		COMMAND "${CMAKE_COMMAND}" -E copy_directory
-			"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/shaders"
-			"$<TARGET_FILE_DIR:mngl_2d_benchmark>/shaders"
-		VERBATIM
-	)
+	mngl_stage_runtime_shaders(mngl_2d_benchmark)
 	if(WIN32)
 		add_custom_command(TARGET mngl_2d_benchmark POST_BUILD
 			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
@@ -302,6 +377,19 @@ if(BUILD_TESTING)
 	set_tests_properties(mngl_core_api_test PROPERTIES
 		TIMEOUT 20
 		ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+	add_executable(mngl_async_io_close_retry_test tests/async_io_close_retry_test.cpp)
+	target_compile_features(mngl_async_io_close_retry_test PRIVATE cxx_std_23)
+	target_compile_definitions(mngl_async_io_close_retry_test PRIVATE MNGL_ASYNC_IO_TESTING=1)
+	target_link_libraries(mngl_async_io_close_retry_test PRIVATE mngl)
+	add_test(NAME mngl_async_io_close_retry_test COMMAND mngl_async_io_close_retry_test)
+	set_tests_properties(mngl_async_io_close_retry_test PROPERTIES
+		TIMEOUT 20
+		ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+	add_executable(mngl_hit_test_spatial_index_test tests/hit_test_spatial_index_test.cpp)
+	target_compile_features(mngl_hit_test_spatial_index_test PRIVATE cxx_std_23)
+	target_link_libraries(mngl_hit_test_spatial_index_test PRIVATE mngl Threads::Threads)
+	add_test(NAME mngl_hit_test_spatial_index_test COMMAND mngl_hit_test_spatial_index_test)
+	set_tests_properties(mngl_hit_test_spatial_index_test PROPERTIES TIMEOUT 20)
 	if(MNGL_HAS_SDL3_MIXER)
 		add_executable(mngl_audio_runtime_smoke tests/audio_runtime_smoke.cpp)
 		target_link_libraries(mngl_audio_runtime_smoke PRIVATE mngl)
@@ -316,15 +404,94 @@ if(BUILD_TESTING)
 	set_tests_properties(mngl_gpu_runtime_smoke PROPERTIES
 		TIMEOUT 30
 		SKIP_RETURN_CODE 77)
+	add_executable(mngl_metal_shader_assets_smoke tests/metal_shader_assets_smoke.cpp)
+	target_link_libraries(mngl_metal_shader_assets_smoke PRIVATE mngl)
+	if(APPLE)
+		mngl_stage_runtime_shaders(mngl_metal_shader_assets_smoke)
+		add_test(NAME mngl_metal_shader_assets_smoke COMMAND mngl_metal_shader_assets_smoke)
+		set_tests_properties(mngl_metal_shader_assets_smoke PROPERTIES TIMEOUT 20)
+	endif()
+	add_executable(mngl_svg_test tests/svg_rendering_test.cpp)
+	target_link_libraries(mngl_svg_test PRIVATE mngl)
+	add_test(NAME mngl_svg_test COMMAND mngl_svg_test)
+	set_tests_properties(mngl_svg_test PROPERTIES TIMEOUT 20)
+	add_executable(mngl_svg_upload_lifecycle_test tests/svg_upload_lifecycle_test.cpp)
+	target_link_libraries(mngl_svg_upload_lifecycle_test PRIVATE mngl)
+	target_compile_definitions(mngl_svg_upload_lifecycle_test PRIVATE
+		"MNGL_TEST_FONT_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui/misc/fonts/ProggyClean.ttf\"")
+	mngl_stage_runtime_shaders(mngl_svg_upload_lifecycle_test)
+	add_test(NAME mngl_svg_upload_lifecycle_test COMMAND mngl_svg_upload_lifecycle_test)
+	set_tests_properties(mngl_svg_upload_lifecycle_test PROPERTIES
+		TIMEOUT 30
+		SKIP_RETURN_CODE 77)
+	add_executable(mngl_svg_stroke_overlap_test tests/svg_stroke_overlap_test.cpp)
+	target_link_libraries(mngl_svg_stroke_overlap_test PRIVATE mngl)
+	mngl_stage_runtime_shaders(mngl_svg_stroke_overlap_test)
+	add_test(NAME mngl_svg_stroke_overlap_test COMMAND mngl_svg_stroke_overlap_test)
+	set_tests_properties(mngl_svg_stroke_overlap_test PROPERTIES TIMEOUT 30 SKIP_RETURN_CODE 77)
+	add_executable(mngl_svg_runtime_test tests/svg_runtime_test.cpp)
+	target_link_libraries(mngl_svg_runtime_test PRIVATE mngl)
+	mngl_stage_runtime_shaders(mngl_svg_runtime_test)
+	target_compile_features(mngl_svg_runtime_test PRIVATE cxx_std_23)
+	target_compile_definitions(mngl_svg_runtime_test PRIVATE
+		"MNGL_SVG_TEST_ASSET_DIRECTORY=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/assets\"")
+	foreach(svg_backend IN ITEMS direct3d12 vulkan)
+		string(REPLACE "-" "_" svg_backend_target "${svg_backend}")
+		add_test(NAME "mngl_svg_runtime_${svg_backend_target}" COMMAND mngl_svg_runtime_test)
+		set_tests_properties("mngl_svg_runtime_${svg_backend_target}" PROPERTIES
+			TIMEOUT 60
+			SKIP_RETURN_CODE 77
+			ENVIRONMENT "SDL_GPU_DRIVER=${svg_backend}")
+	endforeach()
+	if(NOT WIN32)
+		add_test(NAME mngl_svg_runtime_default COMMAND mngl_svg_runtime_test)
+		set_tests_properties(mngl_svg_runtime_default PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
+	endif()
 	if(MSVC)
 		target_compile_options(mngl_public_headers PRIVATE /utf-8)
 		target_compile_options(mngl_public_headers_no_audio PRIVATE /utf-8)
 		target_compile_options(mngl_core_api_test PRIVATE /utf-8)
+		target_compile_options(mngl_async_io_close_retry_test PRIVATE /utf-8)
+		target_compile_options(mngl_hit_test_spatial_index_test PRIVATE /utf-8)
+		target_compile_options(mngl_svg_test PRIVATE /utf-8)
+		target_compile_options(mngl_svg_upload_lifecycle_test PRIVATE /utf-8)
+		target_compile_options(mngl_svg_stroke_overlap_test PRIVATE /utf-8)
+		target_compile_options(mngl_svg_runtime_test PRIVATE /utf-8)
+		add_custom_command(TARGET mngl_svg_runtime_test POST_BUILD
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+				"$<TARGET_FILE:mngl_imgui>" "${MNGL_LIBRARY_DIRECTORY}/SDL3.dll"
+				"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.dll" "${MNGL_LIBRARY_DIRECTORY}/freetype.dll"
+				"$<TARGET_FILE_DIR:mngl_svg_runtime_test>"
+			VERBATIM)
+		add_custom_command(TARGET mngl_svg_test POST_BUILD
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+				"${MNGL_LIBRARY_DIRECTORY}/SDL3.dll"
+				"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.dll"
+				"$<TARGET_FILE_DIR:mngl_svg_test>"
+			VERBATIM)
+		add_custom_command(TARGET mngl_svg_upload_lifecycle_test POST_BUILD
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+				"${MNGL_LIBRARY_DIRECTORY}/SDL3.dll"
+				"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.dll"
+				"$<TARGET_FILE_DIR:mngl_svg_upload_lifecycle_test>"
+			VERBATIM)
+		add_custom_command(TARGET mngl_svg_stroke_overlap_test POST_BUILD
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+				"${MNGL_LIBRARY_DIRECTORY}/SDL3.dll"
+				"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.dll"
+				"$<TARGET_FILE_DIR:mngl_svg_stroke_overlap_test>"
+			VERBATIM)
 		add_custom_command(TARGET mngl_core_api_test POST_BUILD
 			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
 				"$<TARGET_FILE:mngl_imgui>" "${MNGL_LIBRARY_DIRECTORY}/SDL3.dll"
 				"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.dll" "${MNGL_LIBRARY_DIRECTORY}/freetype.dll"
 				"$<TARGET_FILE_DIR:mngl_core_api_test>"
+			VERBATIM)
+		add_custom_command(TARGET mngl_async_io_close_retry_test POST_BUILD
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+				"$<TARGET_FILE:mngl_imgui>" "${MNGL_LIBRARY_DIRECTORY}/SDL3.dll"
+				"${MNGL_LIBRARY_DIRECTORY}/SDL3_image.dll" "${MNGL_LIBRARY_DIRECTORY}/freetype.dll"
+				"$<TARGET_FILE_DIR:mngl_async_io_close_retry_test>"
 			VERBATIM)
 		if(MNGL_HAS_SDL3_MIXER)
 			add_custom_command(TARGET mngl_core_api_test POST_BUILD
@@ -387,9 +554,6 @@ include(cmake/MNGLMods.cmake)
 mngl_add_mod_targets("${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
 
 add_custom_command(TARGET mngl_demo POST_BUILD
-	COMMAND "${CMAKE_COMMAND}" -E copy_directory
-		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/shaders"
-		"$<TARGET_FILE_DIR:mngl_demo>/shaders"
 	COMMAND "${CMAKE_COMMAND}" -E make_directory
 		"$<TARGET_FILE_DIR:mngl_demo>/imgui/misc/fonts"
 	COMMAND "${CMAKE_COMMAND}" -E copy_if_different
@@ -397,6 +561,7 @@ add_custom_command(TARGET mngl_demo POST_BUILD
 		"$<TARGET_FILE_DIR:mngl_demo>/imgui/misc/fonts/Roboto-Medium.ttf"
 	VERBATIM
 )
+mngl_stage_runtime_shaders(mngl_demo)
 
 if(WIN32)
 	add_custom_command(TARGET mngl_demo POST_BUILD
@@ -519,6 +684,18 @@ find_dependency(Freetype REQUIRED)]=])
 		LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 		ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 	)
+	# Built-in shaders are loaded from application_directory()/shaders at runtime.
+	install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/MNGL/shaders"
+		DESTINATION "${CMAKE_INSTALL_BINDIR}"
+		COMPONENT library
+	)
+	if(MNGL_METAL_SHADER_ASSET_DIR)
+		install(DIRECTORY "${MNGL_METAL_SHADER_ASSET_DIR}/"
+			DESTINATION "${CMAKE_INSTALL_BINDIR}/shaders"
+			COMPONENT library
+			FILES_MATCHING PATTERN "*.msl"
+		)
+	endif()
 	install(EXPORT MNGLTargets
 		FILE MNGLTargets.cmake
 		NAMESPACE MNGL::
@@ -632,6 +809,7 @@ find_dependency(Freetype REQUIRED)]=])
 		"${CMAKE_CURRENT_SOURCE_DIR}/cmake/MNGLConfig.cmake.in"
 		"${CMAKE_CURRENT_BINARY_DIR}/MNGLConfig.cmake"
 		INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/MNGL"
+		PATH_VARS CMAKE_INSTALL_BINDIR
 	)
 	write_basic_package_version_file(
 		"${CMAKE_CURRENT_BINARY_DIR}/MNGLConfigVersion.cmake"

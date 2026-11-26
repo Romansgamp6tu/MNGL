@@ -22,6 +22,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -31,6 +32,26 @@
 namespace mngl::audio::detail
 {
 	inline std::string sdl_error_message(std::string_view prefix);
+
+#if defined(MNGL_AUDIO_TESTING)
+	inline std::size_t voice_status_query_count{};
+#endif
+
+	inline bool track_is_playing(MIX_Track* track) noexcept
+	{
+#if defined(MNGL_AUDIO_TESTING)
+		++voice_status_query_count;
+#endif
+		return MIX_TrackPlaying(track);
+	}
+
+	inline bool track_is_paused(MIX_Track* track) noexcept
+	{
+#if defined(MNGL_AUDIO_TESTING)
+		++voice_status_query_count;
+#endif
+		return MIX_TrackPaused(track);
+	}
 
 	class capture_resource
 	{
@@ -96,7 +117,6 @@ namespace mngl::audio::detail
 
 	struct voice
 	{
-		std::uint64_t id;
 		MIX_Track* track;
 		mngl::audio::bus bus;
 		float base_volume;
@@ -559,7 +579,7 @@ namespace mngl::audio::detail
 			// throw after playback has already started.
 			try
 			{
-				::mngl::detail::reserve_vector_growth(voices, voices.size() + 1);
+				voices.reserve(voices.size() + 1);
 			}
 			catch (const std::bad_alloc&)
 			{
@@ -625,13 +645,23 @@ namespace mngl::audio::detail
 			}
 
 			const std::uint64_t id = next_voice_id;
+			try
+			{
+				if (!voices.emplace(id, voice{track.get(), options.bus, volume, {}}).second)
+					return fail_track(error_code::sound_playback, "Voice ID is already in use");
+			}
+			catch (const std::bad_alloc&)
+			{
+				return fail_track(error_code::sound_playback, "Failed to allocate voice tracking state");
+			}
 			if (!MIX_PlayTrack(track.get(), play_properties.get()))
 			{
+				voices.erase(id);
 				return fail_track(error_code::sound_playback,
 				                  sdl_error_message("Failed to start sound playback"));
 			}
 
-			voices.push_back(voice{id, track.release(), options.bus, volume, {}});
+			track.release();
 			next_voice_id = id == std::numeric_limits<std::uint64_t>::max() ? 0 : id + 1;
 			return id;
 		}
@@ -679,7 +709,7 @@ namespace mngl::audio::detail
 
 			try
 			{
-				::mngl::detail::reserve_vector_growth(voices, voices.size() + 1);
+				voices.reserve(voices.size() + 1);
 			}
 			catch (const std::bad_alloc&)
 			{
@@ -750,19 +780,30 @@ namespace mngl::audio::detail
 			}
 
 			const std::uint64_t id = next_voice_id;
+			try
+			{
+				if (!voices.emplace(id, voice{track.get(), options.bus, volume, {}}).second)
+					return std::unexpected(error{error_code::music_playback, "Voice ID is already in use"});
+			}
+			catch (const std::bad_alloc&)
+			{
+				return std::unexpected(
+				    error{error_code::music_playback, "Failed to allocate voice tracking state"});
+			}
 			if (!MIX_PlayTrack(track.get(), play_properties.get()))
 			{
+				voices.erase(id);
 				return std::unexpected(
 				    error{error_code::music_playback, sdl_error_message("Failed to start music playback")});
 			}
 
-			voices.push_back(voice{id, track.release(), options.bus, volume, {}});
+			track.release();
 			next_voice_id = id == std::numeric_limits<std::uint64_t>::max() ? 0 : id + 1;
 			return id;
 		}
 
 		std::expected<std::uint64_t, error> play_stream(const std::shared_ptr<audio_stream_resource>& stream,
-		                                               play_options options)
+		                                                play_options options)
 		{
 			reap_finished_voices();
 			if (!stream || !stream->native_stream())
@@ -805,11 +846,12 @@ namespace mngl::audio::detail
 
 			try
 			{
-				::mngl::detail::reserve_vector_growth(voices, voices.size() + 1);
+				voices.reserve(voices.size() + 1);
 			}
 			catch (const std::bad_alloc&)
 			{
-				return std::unexpected(error{error_code::stream_playback, "Failed to allocate voice tracking state"});
+				return std::unexpected(
+				    error{error_code::stream_playback, "Failed to allocate voice tracking state"});
 			}
 
 			bool expected_detached = false;
@@ -829,57 +871,70 @@ namespace mngl::audio::detail
 				}
 			} attachment{stream};
 
-			std::unique_ptr<MIX_Track, decltype(&MIX_DestroyTrack)> track(MIX_CreateTrack(mixer), MIX_DestroyTrack);
+			std::unique_ptr<MIX_Track, decltype(&MIX_DestroyTrack)> track(MIX_CreateTrack(mixer),
+			                                                              MIX_DestroyTrack);
 			if (!track)
 			{
-				return std::unexpected(
-				    error{error_code::stream_playback, sdl_error_message("Failed to create a streaming track")});
+				return std::unexpected(error{error_code::stream_playback,
+				                             sdl_error_message("Failed to create a streaming track")});
 			}
 			if (!MIX_SetTrackAudioStream(track.get(), stream->native_stream()))
 			{
-				return std::unexpected(
-				    error{error_code::stream_playback, sdl_error_message("Failed to attach audio stream to track")});
+				return std::unexpected(error{error_code::stream_playback,
+				                             sdl_error_message("Failed to attach audio stream to track")});
 			}
 
 			const float volume = std::clamp(options.volume, 0.0f, 1.0f);
 			const float bus_volume = options.bus == bus::sfx ? sfx_volume_level : music_volume_level;
 			if (!MIX_SetTrackGain(track.get(), volume * bus_volume))
 			{
-				return std::unexpected(
-				    error{error_code::volume_control, sdl_error_message("Failed to set stream voice volume")});
+				return std::unexpected(error{error_code::volume_control,
+				                             sdl_error_message("Failed to set stream voice volume")});
 			}
 			if (!MIX_TagTrack(track.get(), bus_tag))
 			{
-				return std::unexpected(error{error_code::stream_playback,
-				                             sdl_error_message("Failed to assign stream voice to audio bus")});
+				return std::unexpected(
+				    error{error_code::stream_playback,
+					      sdl_error_message("Failed to assign stream voice to audio bus")});
 			}
 			if (options.position)
 			{
 				const MIX_Point3D position{options.position->x, options.position->y, options.position->z};
 				if (!MIX_SetTrack3DPosition(track.get(), &position))
 				{
-					return std::unexpected(
-					    error{error_code::spatial_control, sdl_error_message("Failed to set stream position")});
+					return std::unexpected(error{error_code::spatial_control,
+					                             sdl_error_message("Failed to set stream position")});
 				}
 			}
 
 			properties_guard play_properties;
 			play_properties.reset(SDL_CreateProperties());
-			if (!play_properties ||
-			    !SDL_SetBooleanProperty(play_properties.get(), MIX_PROP_PLAY_HALT_WHEN_EXHAUSTED_BOOLEAN, false))
+			if (!play_properties || !SDL_SetBooleanProperty(play_properties.get(),
+			                                                MIX_PROP_PLAY_HALT_WHEN_EXHAUSTED_BOOLEAN, false))
 			{
 				return std::unexpected(error{error_code::stream_playback,
 				                             sdl_error_message("Failed to configure a live audio stream")});
 			}
 
 			const std::uint64_t id = next_voice_id;
-			if (!MIX_PlayTrack(track.get(), play_properties.get()))
+			try
+			{
+				if (!voices.emplace(id, voice{track.get(), options.bus, volume, stream}).second)
+					return std::unexpected(error{error_code::stream_playback, "Voice ID is already in use"});
+			}
+			catch (const std::bad_alloc&)
 			{
 				return std::unexpected(
-				    error{error_code::stream_playback, sdl_error_message("Failed to start audio stream playback")});
+				    error{error_code::stream_playback, "Failed to allocate voice tracking state"});
+			}
+			if (!MIX_PlayTrack(track.get(), play_properties.get()))
+			{
+				voices.erase(id);
+				return std::unexpected(error{error_code::stream_playback,
+				                             sdl_error_message("Failed to start audio stream playback")});
 			}
 
-			voices.push_back(voice{id, track.release(), options.bus, volume, stream});
+			track.release();
 			attachment.active = false;
 			next_voice_id = id == std::numeric_limits<std::uint64_t>::max() ? 0 : id + 1;
 			return id;
@@ -887,16 +942,26 @@ namespace mngl::audio::detail
 
 		bool voice_is_playing(std::uint64_t id)
 		{
-			reap_finished_voices();
 			voice* voice = find_voice(id);
-			return voice && MIX_TrackPlaying(voice->track);
+			if (!voice)
+				return false;
+
+			const bool playing = detail::track_is_playing(voice->track);
+			if (!playing && !detail::track_is_paused(voice->track))
+				erase_finished_voice(id);
+			return playing;
 		}
 
 		bool voice_is_paused(std::uint64_t id)
 		{
-			reap_finished_voices();
 			voice* voice = find_voice(id);
-			return voice && MIX_TrackPaused(voice->track);
+			if (!voice)
+				return false;
+
+			const bool paused = detail::track_is_paused(voice->track);
+			if (!paused && !detail::track_is_playing(voice->track))
+				erase_finished_voice(id);
+			return paused;
 		}
 
 		std::expected<void, error> try_set_master_volume(float volume)
@@ -949,12 +1014,12 @@ namespace mngl::audio::detail
 			}
 
 			reap_finished_voices();
-			for (auto& voice : voices)
+			for (auto& [_, voice] : voices)
 			{
 				if (voice.bus == bus && !MIX_SetTrackGain(voice.track, voice.base_volume * clamped_volume))
 				{
 					const std::string message = sdl_error_message("Failed to set bus volume");
-					for (auto& rollback_voice : voices)
+					for (auto& [_, rollback_voice] : voices)
 					{
 						if (rollback_voice.bus == bus)
 						{
@@ -1026,19 +1091,19 @@ namespace mngl::audio::detail
 				return std::unexpected(detail::inactive_voice_error());
 			}
 
-			if (!MIX_StopTrack(voice->track, 0))
+			if (!MIX_StopTrack(voice->second.track, 0))
 			{
 				const std::string message = sdl_error_message("Failed to stop voice");
-				MIX_DestroyTrack(voice->track);
-				if (voice->stream)
-					voice->stream->attached.store(false, std::memory_order_release);
+				MIX_DestroyTrack(voice->second.track);
+				if (voice->second.stream)
+					voice->second.stream->attached.store(false, std::memory_order_release);
 				voices.erase(voice);
 				return std::unexpected(error{error_code::sound_playback, message});
 			}
 
-			MIX_DestroyTrack(voice->track);
-			if (voice->stream)
-				voice->stream->attached.store(false, std::memory_order_release);
+			MIX_DestroyTrack(voice->second.track);
+			if (voice->second.stream)
+				voice->second.stream->attached.store(false, std::memory_order_release);
 			voices.erase(voice);
 			return {};
 		}
@@ -1117,31 +1182,36 @@ namespace mngl::audio::detail
 
 		voice* find_voice(std::uint64_t id)
 		{
-			for (auto& voice : voices)
-			{
-				if (voice.id == id)
-				{
-					return &voice;
-				}
-			}
-			return nullptr;
+			const auto found = voices.find(id);
+			return found == voices.end() ? nullptr : &found->second;
 		}
 
-		std::vector<voice>::iterator find_voice_iterator(std::uint64_t id)
+		std::unordered_map<std::uint64_t, voice>::iterator find_voice_iterator(std::uint64_t id)
 		{
-			return std::find_if(voices.begin(), voices.end(),
-			                    [id](const voice& voice) { return voice.id == id; });
+			return voices.find(id);
+		}
+
+		void erase_finished_voice(std::uint64_t id)
+		{
+			const auto found = voices.find(id);
+			if (found == voices.end())
+				return;
+			MIX_DestroyTrack(found->second.track);
+			if (found->second.stream)
+				found->second.stream->attached.store(false, std::memory_order_release);
+			voices.erase(found);
 		}
 
 		void reap_finished_voices()
 		{
 			for (auto voice = voices.begin(); voice != voices.end();)
 			{
-				if (!MIX_TrackPlaying(voice->track) && !MIX_TrackPaused(voice->track))
+				if (!detail::track_is_playing(voice->second.track) &&
+				    !detail::track_is_paused(voice->second.track))
 				{
-					MIX_DestroyTrack(voice->track);
-					if (voice->stream)
-						voice->stream->attached.store(false, std::memory_order_release);
+					MIX_DestroyTrack(voice->second.track);
+					if (voice->second.stream)
+						voice->second.stream->attached.store(false, std::memory_order_release);
 					voice = voices.erase(voice);
 				}
 				else
@@ -1157,7 +1227,7 @@ namespace mngl::audio::detail
 		std::size_t sound_registration_count = 0;
 		std::vector<std::weak_ptr<audio_stream_resource>> audio_stream_resources;
 		std::size_t audio_stream_registration_count = 0;
-		std::vector<voice> voices;
+		std::unordered_map<std::uint64_t, voice> voices;
 		std::uint64_t next_voice_id = 1;
 		float master_volume_level = 1.0f;
 		float music_volume_level = 1.0f;

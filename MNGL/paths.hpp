@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 
 namespace mngl::paths
@@ -135,6 +136,27 @@ namespace mngl::paths
 	{
 		return detail::value_or_throw(try_application_directory());
 	}
+
+	// Resolve built-in shaders beside the executable first, then fall back to the
+	// shader directory supplied by an installed MNGL CMake package.
+	[[nodiscard]] inline std::filesystem::path shader_directory(std::string_view required_shader)
+	{
+		const auto application_shaders = application_directory() / "shaders";
+		const auto required_path = std::filesystem::path(std::string(required_shader));
+		std::error_code error;
+		if (std::filesystem::is_regular_file(application_shaders / required_path, error))
+			return application_shaders;
+
+#if defined(MNGL_SHADER_INSTALL_DIRECTORY)
+		const auto installed_shaders = std::filesystem::path(MNGL_SHADER_INSTALL_DIRECTORY);
+		error.clear();
+		if (std::filesystem::is_regular_file(installed_shaders / required_path, error))
+			return installed_shaders;
+#endif
+
+		return application_shaders;
+	}
+
 	[[nodiscard]] inline std::filesystem::path user_data_directory()
 	{
 		return detail::value_or_throw(try_user_data_directory());

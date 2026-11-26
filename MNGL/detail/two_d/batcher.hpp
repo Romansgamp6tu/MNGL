@@ -6,6 +6,10 @@
 #include "../../compute_pipeline.hpp"
 
 #include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_map>
 
 namespace mngl::gpu
 {
@@ -23,6 +27,7 @@ namespace mngl::gpu
 		{
 			float x;
 			float y;
+			std::array<float, 4> tint{1.0f, 1.0f, 1.0f, 1.0f};
 		};
 
 		struct geometry_block
@@ -42,6 +47,21 @@ namespace mngl::gpu
 			std::array<float, 2> transform_translation{};
 			std::uint32_t first_vertex = 0;
 			std::uint32_t vertex_count = 0;
+		};
+
+		struct default_gpu_resources
+		{
+			explicit default_gpu_resources(const device& device) : device_owner(device) {}
+
+			device device_owner;
+			vertex_layout vertex_layout;
+			graphics_shader vertex_shader;
+			graphics_shader fragment_shader;
+			std::array<graphics_pipeline, 4> pipelines;
+			std::array<sampler, 2> samplers;
+			buffer quad_vertices;
+			buffer quad_indices;
+			bool supports_instance_culling = false;
 		};
 
 		struct geometry_culling_uniforms
@@ -94,6 +114,8 @@ namespace mngl::gpu
 			quad_effect effect = quad_effect::textured;
 			std::optional<SDL_Rect> scissor;
 			material_instance_handle material{};
+			// Nonzero tokens isolate a deferred draw and identify it for texture resolution.
+			std::uint64_t deferred_token = 0;
 			std::uint32_t first_instance = 0;
 			std::uint32_t instance_count = 0;
 			bool geometry = false;
@@ -242,8 +264,8 @@ namespace mngl::gpu
 		          std::size_t initial_sprite_capacity = 1024)
 		    : m_device(dev), m_target_format(target_format),
 		      m_instance_buffer(dev, instance_buffer_size(initial_sprite_capacity),
-		                        buffer_usage::vertex | buffer_usage::compute_storage_read |
-		                            buffer_usage::compute_storage_write)
+			                    buffer_usage::vertex | buffer_usage::compute_storage_read |
+			                        buffer_usage::compute_storage_write)
 		{
 			if (!m_device.raw()) [[unlikely]]
 			{
@@ -259,53 +281,19 @@ namespace mngl::gpu
 				throw std::invalid_argument("batcher2d requires vertex and fragment shader assets");
 			}
 
-			m_vertex_shader = graphics_shader(m_device, shaders.vertex);
-			m_fragment_shader = graphics_shader(m_device, shaders.fragment);
-			m_vertex_instance_culling_supported = shaders.supports_instance_culling;
-
-			m_vertex_layout.add_buffer(0, sizeof(quad_vertex));
-			m_vertex_layout.add_attribute(0, 0, vertex_elemetn_fmt::float2, offsetof(quad_vertex, x));
-			m_vertex_layout.add_buffer(1, sizeof(sprite_instance), vertex_input_rate::instance);
-			m_vertex_layout.add_attribute(1, 1, vertex_elemetn_fmt::float2,
-			                              offsetof(sprite_instance, transform_x));
-			m_vertex_layout.add_attribute(2, 1, vertex_elemetn_fmt::float2,
-			                              offsetof(sprite_instance, transform_y));
-			m_vertex_layout.add_attribute(3, 1, vertex_elemetn_fmt::float2,
-			                              offsetof(sprite_instance, transform_translation));
-			m_vertex_layout.add_attribute(4, 1, vertex_elemetn_fmt::float2,
-			                              offsetof(sprite_instance, effect_parameters));
-			m_vertex_layout.add_attribute(5, 1, vertex_elemetn_fmt::float4, offsetof(sprite_instance, uv));
-			m_vertex_layout.add_attribute(6, 1, vertex_elemetn_fmt::ubyte4_norm,
-			                              offsetof(sprite_instance, tint));
-
-			for (std::uint8_t i = 0; i < static_cast<std::uint8_t>(sprite_blend_mode::additive) + 1; ++i)
-			{
-				const auto blend = static_cast<sprite_blend_mode>(i);
-				m_pipelines[blend_index(blend)] = build_pipeline(m_fragment_shader, blend);
-			}
-
-			m_samplers[filter_index(filter_mode::linear)] = sampler_builder::create_linear_clamp(m_device);
-			m_samplers[filter_index(filter_mode::nearest)] = sampler_builder::create_point_clamp(m_device);
+			m_shared_default_resources = acquire_default_gpu_resources(m_device, m_target_format, shaders);
+			m_vertex_instance_culling_supported = m_shared_default_resources->supports_instance_culling;
+			m_vertex_layout = m_shared_default_resources->vertex_layout;
 
 			m_instances.reserve(initial_sprite_capacity);
 			m_batches.reserve(std::min<std::size_t>(initial_sprite_capacity, 256));
 			m_instance_culling_ranges.reserve(std::min<std::size_t>(initial_sprite_capacity, 256));
 
-			const std::array<quad_vertex, 4> vertices{
-			    {{0.0f, 0.0f}, {1.0f, 0.0f}, {0.0f, 1.0f}, {1.0f, 1.0f}}};
-			const std::array<std::uint16_t, 6> indices{0, 1, 2, 2, 1, 3};
-
-			command_buffer cmd(m_device);
-			m_quad_vertices = buffer::create_with_data(m_device, cmd, std::span<const quad_vertex>(vertices),
-			                                           buffer_usage::vertex);
-			m_quad_indices = buffer::create_with_data(m_device, cmd, std::span<const std::uint16_t>(indices),
-			                                          buffer_usage::index);
-			cmd.submit();
 		}
 
 		explicit batcher2d(const device& dev, texture_format target_format,
 		                   std::size_t initial_sprite_capacity = 1024)
-		    : batcher2d(dev, target_format, batcher2d_shader_assets::load_default(), initial_sprite_capacity)
+		    : batcher2d(dev, target_format, batcher2d_shader_assets::load_default(dev), initial_sprite_capacity)
 		{
 		}
 
@@ -548,6 +536,79 @@ namespace mngl::gpu
 			m_last_stats = {};
 		}
 
+		struct deferred_texture_resolution
+		{
+			std::uint64_t token = 0;
+			SDL_GPUTexture* texture = nullptr;
+			bool visible = false;
+		};
+
+		// Resolve all effect placeholders with one pass over the merged batch list.
+		[[nodiscard]] bool resolve_deferred_textures(std::span<const deferred_texture_resolution> resolutions)
+		{
+			std::unordered_map<std::uint64_t, std::size_t> resolution_indices;
+			resolution_indices.reserve(resolutions.size());
+			std::vector<draw_batch*> matched_batches(resolutions.size(), nullptr);
+			for (std::size_t index = 0; index < resolutions.size(); ++index)
+			{
+				const auto& resolution = resolutions[index];
+				if (resolution.token == 0 || (resolution.visible && !resolution.texture) ||
+				    !resolution_indices.emplace(resolution.token, index).second)
+				{
+					return false;
+				}
+			}
+
+			for (auto& batch : m_batches)
+			{
+				if (batch.deferred_token == 0)
+				{
+					continue;
+				}
+				const auto resolution = resolution_indices.find(batch.deferred_token);
+				if (resolution == resolution_indices.end())
+				{
+					return false;
+				}
+				auto*& matched = matched_batches[resolution->second];
+				if (matched || batch.geometry || batch.instance_count != 1)
+				{
+					return false;
+				}
+				matched = &batch;
+			}
+
+			for (const auto* matched : matched_batches)
+			{
+				if (!matched)
+				{
+					return false;
+				}
+			}
+
+			for (std::size_t index = 0; index < resolutions.size(); ++index)
+			{
+				const auto& resolution = resolutions[index];
+				if (resolution.visible)
+				{
+					matched_batches[index]->texture = resolution.texture;
+				}
+				else
+				{
+					matched_batches[index]->instance_count = 0;
+				}
+			}
+			return true;
+		}
+
+		// Shared visibility predicate for deferred renderer work and batch submission.
+		template <std::size_t PointCount>
+		[[nodiscard]] static bool is_outside_target(const glm::mat4& view_projection,
+		                                           const std::array<glm::vec2, PointCount>& points) noexcept
+		{
+			return outside_target(view_projection, points);
+		}
+
 		// Consecutive commands with identical page and render state are batched without reordering.
 		// Texture pages must remain alive until the command buffer is submitted.
 		void draw_quad(const texture_region_view& source, const quad_transform& transform,
@@ -634,6 +695,7 @@ namespace mngl::gpu
 			{
 				throw std::invalid_argument("batcher2d and command buffer must use the same GPU device");
 			}
+			cmd.retain_resource(m_shared_default_resources);
 
 			if (!target.valid() || target.width() == 0 || target.height() == 0)
 			{
@@ -674,6 +736,30 @@ namespace mngl::gpu
 				}
 			}
 
+			const bool order_independent_sorting_enabled =
+			    ::mngl::gpu::order_independent_batch_sorting_enabled();
+			const bool cpu_culling_enabled = ::mngl::gpu::cpu_culling_enabled();
+			const bool defer_batch_sorting_for_geometry_culling =
+			    !m_gpu_culling_enabled && cpu_culling_enabled && !m_geometry_vertices.empty();
+			if (order_independent_sorting_enabled && !defer_batch_sorting_for_geometry_culling)
+			{
+				sort_order_independent_batches();
+			}
+			const auto culling_started_at = profile ? profile_clock::now() : profile_clock::time_point{};
+			std::uint32_t visible_batch_count =
+			    cull_offscreen_primitives(view_projection, m_gpu_culling_enabled, cpu_culling_enabled);
+			if (profile)
+			{
+				m_last_stats.culling_cpu_time = std::chrono::duration_cast<std::chrono::nanoseconds>(
+				    profile_clock::now() - culling_started_at);
+			}
+			if (order_independent_sorting_enabled && defer_batch_sorting_for_geometry_culling)
+			{
+				sort_order_independent_batches();
+				visible_batch_count = static_cast<std::uint32_t>(std::count_if(
+				    m_batches.begin(), m_batches.end(), [](const draw_batch& batch)
+				    { return batch.instance_count != 0 && (!batch.geometry || batch.vertex_count != 0); }));
+			}
 			for (const auto& batch : m_batches)
 			{
 				if (batch.resident_mesh)
@@ -681,23 +767,10 @@ namespace mngl::gpu
 					cmd.retain_resource(batch.resident_mesh);
 				}
 			}
-			const auto culling_started_at = profile ? profile_clock::now() : profile_clock::time_point{};
-			const std::uint32_t visible_batch_count =
-			    cull_offscreen_primitives(view_projection, m_gpu_culling_enabled,
-			                             ::mngl::gpu::cpu_culling_enabled());
-			if (::mngl::gpu::order_independent_batch_sorting_enabled())
-			{
-				sort_order_independent_batches();
-			}
 			if (m_gpu_culling_enabled)
 			{
 				build_geometry_culling_blocks();
 				build_instance_culling_ranges();
-			}
-			if (profile)
-			{
-				m_last_stats.culling_cpu_time = std::chrono::duration_cast<std::chrono::nanoseconds>(
-				    profile_clock::now() - culling_started_at);
 			}
 			m_last_stats.sprites = static_cast<std::uint32_t>(m_instances.size());
 			m_last_stats.batches = visible_batch_count;
@@ -711,13 +784,13 @@ namespace mngl::gpu
 			if (instance_bytes > std::numeric_limits<std::uint32_t>::max() ||
 			    geometry_bytes > std::numeric_limits<std::uint32_t>::max() - instance_bytes ||
 			    culling_bytes > std::numeric_limits<std::uint32_t>::max() - instance_bytes - geometry_bytes ||
-			    instance_culling_bytes >
-			        std::numeric_limits<std::uint32_t>::max() - instance_bytes - geometry_bytes - culling_bytes)
-			    [[unlikely]]
+			    instance_culling_bytes > std::numeric_limits<std::uint32_t>::max() - instance_bytes -
+			                                 geometry_bytes - culling_bytes) [[unlikely]]
 			{
 				throw std::length_error("batcher2d frame upload exceeds SDL's 32-bit buffer size limit");
 			}
-			const std::size_t upload_bytes = instance_bytes + geometry_bytes + culling_bytes + instance_culling_bytes;
+			const std::size_t upload_bytes =
+			    instance_bytes + geometry_bytes + culling_bytes + instance_culling_bytes;
 			m_last_stats.upload_bytes = static_cast<std::uint32_t>(upload_bytes);
 			ensure_instance_culling_capacity(static_cast<std::uint32_t>(instance_culling_bytes));
 
@@ -797,9 +870,9 @@ namespace mngl::gpu
 				culling_pass.bind_storage_buffer(0, m_instance_culling_input);
 				culling_pass.push_uniform(
 				    0, instance_culling_uniforms{view_projection,
-				                                static_cast<std::uint32_t>(m_instances.size()),
-				                                static_cast<std::uint32_t>(m_instance_culling_ranges.size()),
-				                                {}});
+					                             static_cast<std::uint32_t>(m_instances.size()),
+					                             static_cast<std::uint32_t>(m_instance_culling_ranges.size()),
+					                             {}});
 				culling_pass.dispatch_for({static_cast<std::uint32_t>(m_instances.size()), 1, 1});
 			}
 			if (!m_geometry_culling_blocks.empty())
@@ -817,7 +890,8 @@ namespace mngl::gpu
 			}
 
 			render_pass pass(cmd, target, m_clear_color,
-			                m_preserve_target_contents ? render_pass::loader::load : render_pass::loader::clear);
+			                 m_preserve_target_contents ? render_pass::loader::load
+			                                            : render_pass::loader::clear);
 			const SDL_GPUViewport viewport{.x = 0.0f,
 			                               .y = 0.0f,
 			                               .w = static_cast<float>(target.width()),
@@ -891,16 +965,16 @@ namespace mngl::gpu
 					}
 					else
 					{
-						auto* pipeline = m_pipelines[blend_index(batch.blend)].raw();
+						auto* pipeline = m_shared_default_resources->pipelines[blend_index(batch.blend)].raw();
 						if (bound_pipeline != pipeline)
 						{
-							pass.bind_pipeline(m_pipelines[blend_index(batch.blend)]);
+							pass.bind_pipeline(m_shared_default_resources->pipelines[blend_index(batch.blend)]);
 							bound_pipeline = pipeline;
 						}
 						if (bound_texture != batch.texture || !bound_filter || *bound_filter != batch.filter)
 						{
 							pass.bind_fragment_sampler(0, batch.texture,
-							                           m_samplers[filter_index(batch.filter)].raw());
+							                           m_shared_default_resources->samplers[filter_index(batch.filter)].raw());
 							bound_texture = batch.texture;
 							bound_filter = batch.filter;
 						}
@@ -935,11 +1009,13 @@ namespace mngl::gpu
 					}
 					else
 					{
-						vertex_buffer = m_quad_vertices.raw();
-						if (!has_bound_index_buffer || bound_index_buffer != m_quad_indices.raw())
+						vertex_buffer = m_shared_default_resources->quad_vertices.raw();
+						if (!has_bound_index_buffer ||
+						    bound_index_buffer != m_shared_default_resources->quad_indices.raw())
 						{
-							pass.bind_index_buffer(m_quad_indices.raw(), SDL_GPU_INDEXELEMENTSIZE_16BIT);
-							bound_index_buffer = m_quad_indices.raw();
+							pass.bind_index_buffer(m_shared_default_resources->quad_indices.raw(),
+							                       SDL_GPU_INDEXELEMENTSIZE_16BIT);
+							bound_index_buffer = m_shared_default_resources->quad_indices.raw();
 							has_bound_index_buffer = true;
 						}
 					}
@@ -1043,8 +1119,8 @@ namespace mngl::gpu
 		{
 			if (enabled && !m_vertex_instance_culling_supported) [[unlikely]]
 			{
-				throw std::logic_error(
-				    "GPU culling requires a vertex shader that declares and consumes the instance-visibility mask");
+				throw std::logic_error("GPU culling requires a vertex shader that declares and consumes the "
+				                       "instance-visibility mask");
 			}
 			if (enabled && (!m_geometry_culling_pipeline.valid() || !m_instance_culling_pipeline.valid()))
 			{
@@ -1055,12 +1131,30 @@ namespace mngl::gpu
 		friend class ::mngl::two_d::renderer;
 
 		// The renderer checks its public frame/context boundary before reaching these fast paths.
+		void draw_quad_deferred(const texture_region_view& source, const quad_transform& transform,
+		                        const color& tint, const quad_draw_state& state,
+		                        std::uint64_t deferred_token)
+		{
+			ensure_frame_active();
+			draw_quad_unchecked(source, transform, tint, state, deferred_token);
+		}
+
+		void draw_quad_deferred(recording_context& context, const texture_region_view& source,
+		                        const quad_transform& transform, const color& tint,
+		                        const quad_draw_state& state, std::uint64_t deferred_token) const
+		{
+			ensure_recording_context(context, false);
+			draw_quad_unchecked(context, source, transform, tint, state, deferred_token);
+		}
+
 		void draw_quad_unchecked(const texture_region_view& source, const quad_transform& transform,
-		                         const color& tint, const quad_draw_state& state)
+		                         const color& tint, const quad_draw_state& state,
+		                         std::uint64_t deferred_token = 0)
 		{
 			const bool allow_extension = !m_batch_extension_blocked;
 			const std::size_t batch_count = m_batches.size();
-			draw_quad_into(m_instances, m_batches, source, transform, tint, state, allow_extension);
+			draw_quad_into(m_instances, m_batches, source, transform, tint, state, allow_extension,
+			               deferred_token);
 			if (!allow_extension && m_batches.size() != batch_count)
 			{
 				m_batch_extension_blocked = false;
@@ -1069,9 +1163,10 @@ namespace mngl::gpu
 
 		void draw_quad_unchecked(recording_context& context, const texture_region_view& source,
 		                         const quad_transform& transform, const color& tint,
-		                         const quad_draw_state& state) const
+		                         const quad_draw_state& state, std::uint64_t deferred_token = 0) const
 		{
-			draw_quad_into(context.m_instances, context.m_batches, source, transform, tint, state);
+			draw_quad_into(context.m_instances, context.m_batches, source, transform, tint, state, true,
+			               deferred_token);
 		}
 
 		template <bool vertices_validated = false>
@@ -1297,13 +1392,153 @@ namespace mngl::gpu
 			return graphics_pipeline_builder{}
 			    .set_debug_name(std::string("MNGL 2D batcher blend mode ") +
 			                    std::to_string(static_cast<unsigned int>(blend)))
-			    .set_vertex_shader(m_vertex_shader)
+			    .set_vertex_shader(m_shared_default_resources->vertex_shader)
 			    .set_fragment_shader(fragment_shader)
 			    .set_vertex_layout(m_vertex_layout)
 			    .set_primitive_type(primitive_type::triangle_list)
 			    .set_cull_mode(cull_mode::none)
 			    .add_color_target(static_cast<SDL_GPUTextureFormat>(m_target_format), blend_state_for(blend))
 			    .build(m_device);
+		}
+
+		static std::shared_ptr<const default_gpu_resources> acquire_default_gpu_resources(
+		    const device& device, texture_format target_format, const batcher2d_shader_assets& shaders)
+		{
+			if (!shaders.shareable_default)
+			{
+				return create_default_gpu_resources(device, target_format, shaders);
+			}
+
+			static std::mutex cache_mutex;
+			static std::unordered_map<std::string, std::weak_ptr<const default_gpu_resources>> cache;
+			const auto key = default_gpu_resources_key(device, target_format, shaders);
+			std::lock_guard lock(cache_mutex);
+			for (auto entry = cache.begin(); entry != cache.end();)
+			{
+				if (entry->second.expired())
+				{
+					entry = cache.erase(entry);
+				}
+				else
+				{
+					++entry;
+				}
+			}
+
+			if (const auto found = cache.find(key); found != cache.end())
+			{
+				if (auto shared = found->second.lock())
+				{
+					return shared;
+				}
+			}
+
+			auto created = create_default_gpu_resources(device, target_format, shaders);
+			cache.insert_or_assign(key, created);
+			return created;
+		}
+
+		static std::string default_gpu_resources_key(const device& device, texture_format target_format,
+		                                             const batcher2d_shader_assets& shaders)
+		{
+			std::string key;
+			auto append = [&](const void* data, std::size_t size)
+			{
+				key.append(static_cast<const char*>(data), size);
+			};
+			auto append_value = [&]<typename T>(const T& value)
+			{
+				static_assert(std::is_trivially_copyable_v<T>);
+				append(&value, sizeof(value));
+			};
+			auto append_string = [&](std::string_view value)
+			{
+				const auto size = value.size();
+				append_value(size);
+				append(value.data(), value.size());
+			};
+			auto append_shader = [&](const graphics_shader_asset& shader)
+			{
+				append_value(shader.stage);
+				append_value(shader.code.format);
+				append_string(shader.entrypoint);
+				append_value(shader.resources.samplers);
+				append_value(shader.resources.storage_textures);
+				append_value(shader.resources.storage_buffers);
+				append_value(shader.resources.uniform_buffers);
+				append_value(shader.resources.read_write_storage_textures);
+				append_value(shader.resources.read_write_storage_buffers);
+				const auto size = shader.code.bytes.size();
+				append_value(size);
+				append(shader.code.bytes.data(), size);
+			};
+
+		const auto device_address = reinterpret_cast<std::uintptr_t>(device.raw());
+		append_value(device_address);
+		append_value(target_format);
+		append_value(shaders.supports_instance_culling);
+		append_shader(shaders.vertex);
+		append_shader(shaders.fragment);
+		return key;
+		}
+
+		static std::shared_ptr<const default_gpu_resources> create_default_gpu_resources(
+		    const device& device, texture_format target_format, const batcher2d_shader_assets& shaders)
+		{
+			auto resources = std::make_shared<default_gpu_resources>(device);
+			resources->supports_instance_culling = shaders.supports_instance_culling;
+			resources->vertex_layout.add_buffer(0, sizeof(quad_vertex));
+			resources->vertex_layout.add_attribute(0, 0, vertex_elemetn_fmt::float2, offsetof(quad_vertex, x));
+			resources->vertex_layout.add_buffer(1, sizeof(sprite_instance), vertex_input_rate::instance);
+			resources->vertex_layout.add_attribute(1, 1, vertex_elemetn_fmt::float2,
+			                                      offsetof(sprite_instance, transform_x));
+			resources->vertex_layout.add_attribute(2, 1, vertex_elemetn_fmt::float2,
+			                                      offsetof(sprite_instance, transform_y));
+			resources->vertex_layout.add_attribute(3, 1, vertex_elemetn_fmt::float2,
+			                                      offsetof(sprite_instance, transform_translation));
+			resources->vertex_layout.add_attribute(4, 1, vertex_elemetn_fmt::float2,
+			                                      offsetof(sprite_instance, effect_parameters));
+			resources->vertex_layout.add_attribute(5, 1, vertex_elemetn_fmt::float4,
+			                                      offsetof(sprite_instance, uv));
+			resources->vertex_layout.add_attribute(6, 1, vertex_elemetn_fmt::ubyte4_norm,
+			                                      offsetof(sprite_instance, tint));
+			resources->vertex_layout.add_attribute(7, 0, vertex_elemetn_fmt::float4,
+			                                      offsetof(quad_vertex, tint));
+
+			resources->vertex_shader = graphics_shader(device, shaders.vertex);
+			resources->fragment_shader = graphics_shader(device, shaders.fragment);
+			for (std::uint8_t index = 0;
+			     index <= static_cast<std::uint8_t>(sprite_blend_mode::additive); ++index)
+			{
+				const auto blend = static_cast<sprite_blend_mode>(index);
+				resources->pipelines[blend_index(blend)] =
+				    graphics_pipeline_builder{}
+				        .set_debug_name(std::string("MNGL 2D batcher blend mode ") +
+				                        std::to_string(static_cast<unsigned int>(blend)))
+				        .set_vertex_shader(resources->vertex_shader)
+				        .set_fragment_shader(resources->fragment_shader)
+				        .set_vertex_layout(resources->vertex_layout)
+				        .set_primitive_type(primitive_type::triangle_list)
+				        .set_cull_mode(cull_mode::none)
+				        .add_color_target(static_cast<SDL_GPUTextureFormat>(target_format),
+				                          blend_state_for(blend))
+				        .build(device);
+			}
+			resources->samplers[filter_index(filter_mode::linear)] =
+			    sampler_builder::create_linear_clamp(device);
+			resources->samplers[filter_index(filter_mode::nearest)] =
+			    sampler_builder::create_point_clamp(device);
+
+			const std::array<quad_vertex, 4> vertices{
+			    {{0.0f, 0.0f}, {1.0f, 0.0f}, {0.0f, 1.0f}, {1.0f, 1.0f}}};
+			const std::array<std::uint16_t, 6> indices{0, 1, 2, 2, 1, 3};
+			command_buffer commands(device);
+			resources->quad_vertices = buffer::create_with_data(
+			    device, commands, std::span<const quad_vertex>(vertices), buffer_usage::vertex);
+			resources->quad_indices = buffer::create_with_data(
+			    device, commands, std::span<const std::uint16_t>(indices), buffer_usage::index);
+			commands.submit();
+			return resources;
 		}
 
 		void ensure_resource_changes_allowed() const
@@ -1470,10 +1705,10 @@ namespace mngl::gpu
 			}
 			if (left.scissor && right.scissor)
 			{
-				const auto left_rect = std::array{left.scissor->x, left.scissor->y, left.scissor->w,
-				                                 left.scissor->h};
-				const auto right_rect = std::array{right.scissor->x, right.scissor->y, right.scissor->w,
-				                                  right.scissor->h};
+				const auto left_rect =
+				    std::array{left.scissor->x, left.scissor->y, left.scissor->w, left.scissor->h};
+				const auto right_rect =
+				    std::array{right.scissor->x, right.scissor->y, right.scissor->w, right.scissor->h};
 				if (left_rect != right_rect)
 				{
 					return left_rect < right_rect;
@@ -1496,13 +1731,119 @@ namespace mngl::gpu
 
 		void sort_order_independent_batches()
 		{
-			for (const auto& range : m_order_independent_batch_ranges)
+			for (std::size_t range_index = 0; range_index < m_order_independent_batch_ranges.size();
+			     ++range_index)
 			{
+				auto& range = m_order_independent_batch_ranges[range_index];
+				const auto old_batch_count = range.batch_count;
+				if (old_batch_count < 2)
+				{
+					continue;
+				}
+
 				auto first = m_batches.begin() + static_cast<std::ptrdiff_t>(range.first_batch);
-				auto last = first + static_cast<std::ptrdiff_t>(range.batch_count);
+				auto last = first + static_cast<std::ptrdiff_t>(old_batch_count);
+				std::size_t first_instance = std::numeric_limits<std::size_t>::max();
+				for (auto batch = first; batch != last; ++batch)
+				{
+					first_instance =
+					    std::min(first_instance, static_cast<std::size_t>(batch->first_instance));
+				}
+
 				std::sort(first, last, [this](const draw_batch& left, const draw_batch& right)
 				          { return batch_state_less(left, right); });
+
+				// Sorting batch metadata also changes the order of the instance ranges those
+				// batches refer to, even when no adjacent batches can be merged.
+				m_order_independent_instance_scratch.clear();
+				std::size_t write_batch = range.first_batch;
+				for (std::size_t read_batch = range.first_batch;
+				     read_batch < range.first_batch + old_batch_count; ++read_batch)
+				{
+					auto batch = m_batches[read_batch];
+					const std::size_t source_first = batch.first_instance;
+					const std::size_t source_count = batch.instance_count;
+					if (source_first > m_instances.size() || source_count > m_instances.size() - source_first)
+					    [[unlikely]]
+					{
+						throw std::logic_error(
+						    "batcher2d order-independent batch has an invalid instance range");
+					}
+					constexpr std::size_t max_instances =
+					    std::numeric_limits<std::uint32_t>::max() / sizeof(sprite_instance);
+					if (first_instance > max_instances ||
+					    m_order_independent_instance_scratch.size() > max_instances - first_instance ||
+					    source_count > max_instances - first_instance -
+					                       m_order_independent_instance_scratch.size()) [[unlikely]]
+					{
+						throw std::length_error("batcher2d sorted instance range exceeds SDL's 32-bit limit");
+					}
+
+					const auto sorted_first_instance = static_cast<std::uint32_t>(
+					    first_instance + m_order_independent_instance_scratch.size());
+					m_order_independent_instance_scratch.insert(
+					    m_order_independent_instance_scratch.end(),
+					    m_instances.begin() + static_cast<std::ptrdiff_t>(source_first),
+					    m_instances.begin() + static_cast<std::ptrdiff_t>(source_first + source_count));
+
+					if (write_batch != range.first_batch &&
+					    can_merge_order_independent_batches(m_batches[write_batch - 1], batch))
+					{
+						auto& merged = m_batches[write_batch - 1];
+						if (batch.instance_count >
+						    std::numeric_limits<std::uint32_t>::max() - merged.instance_count) [[unlikely]]
+						{
+							throw std::length_error(
+							    "batcher2d merged instance count exceeds SDL's 32-bit limit");
+						}
+						merged.instance_count += batch.instance_count;
+					}
+					else
+					{
+						batch.first_instance = sorted_first_instance;
+						m_batches[write_batch++] = std::move(batch);
+					}
+				}
+
+				std::copy(m_order_independent_instance_scratch.begin(),
+				          m_order_independent_instance_scratch.end(),
+				          m_instances.begin() + static_cast<std::ptrdiff_t>(first_instance));
+				const auto new_batch_count = write_batch - range.first_batch;
+				const auto removed_batch_count = old_batch_count - new_batch_count;
+				if (removed_batch_count != 0)
+				{
+					const auto old_batch_end = range.first_batch + old_batch_count;
+					m_batches.erase(m_batches.begin() + static_cast<std::ptrdiff_t>(write_batch),
+					                m_batches.begin() + static_cast<std::ptrdiff_t>(old_batch_end));
+					for (std::size_t next_range = range_index + 1;
+					     next_range < m_order_independent_batch_ranges.size(); ++next_range)
+					{
+						if (m_order_independent_batch_ranges[next_range].first_batch >= old_batch_end)
+						{
+							m_order_independent_batch_ranges[next_range].first_batch -= removed_batch_count;
+						}
+					}
+				}
+				range.batch_count = new_batch_count;
 			}
+		}
+
+		[[nodiscard]] static bool can_merge_order_independent_batches(const draw_batch& left,
+		                                                              const draw_batch& right) noexcept
+		{
+			if (left.deferred_token != right.deferred_token || left.geometry || right.geometry ||
+			    left.resident_mesh != right.resident_mesh ||
+			    left.material != right.material || left.scissor.has_value() != right.scissor.has_value() ||
+			    (left.scissor && !equal_scissor(*left.scissor, *right.scissor)))
+			{
+				return false;
+			}
+			if (left.material.valid())
+			{
+				return true;
+			}
+			return left.texture == right.texture && left.filter == right.filter &&
+			       left.blend == right.blend && left.effect == right.effect;
 		}
 
 		static void register_recording_context(recording_context& context)
@@ -1552,7 +1893,7 @@ namespace mngl::gpu
 		void draw_quad_into(std::vector<sprite_instance>& instances, std::vector<draw_batch>& batches,
 		                    const texture_region_view& source, const quad_transform& transform,
 		                    const color& tint, const quad_draw_state& state,
-		                    bool allow_extension = true) const
+		                    bool allow_extension = true, std::uint64_t deferred_token = 0) const
 		{
 			const auto& destination = transform.destination;
 			if (!std::isfinite(destination.pos.x) || !std::isfinite(destination.pos.y) ||
@@ -1633,7 +1974,7 @@ namespace mngl::gpu
 			auto* raw_texture = source.page ? source.page->raw() : nullptr;
 			if (allow_extension && !batches.empty() && !batches.back().geometry &&
 			    !batches.back().resident_mesh &&
-			    same_batch_key(batches.back(), raw_texture, state))
+			    same_batch_key(batches.back(), raw_texture, state, deferred_token))
 			{
 				instances.push_back(instance);
 				++batches.back().instance_count;
@@ -1646,6 +1987,7 @@ namespace mngl::gpu
 			                             .effect = state.effect,
 			                             .scissor = state.scissor,
 			                             .material = state.material,
+			                             .deferred_token = deferred_token,
 			                             .first_instance = static_cast<std::uint32_t>(instances.size()),
 			                             .instance_count = 1});
 			try
@@ -1673,9 +2015,9 @@ namespace mngl::gpu
 			{
 				throw std::invalid_argument("2D mesh and renderer must use the same GPU device");
 			}
-			if (state.material.valid() || state.effect != quad_effect::textured) [[unlikely]]
+			if (state.effect != quad_effect::textured) [[unlikely]]
 			{
-				throw std::invalid_argument("batcher2d meshes require the built-in textured effect");
+				throw std::invalid_argument("batcher2d meshes require the textured effect");
 			}
 			if (!source.page || !source.page->valid() ||
 			    !source.page->has_usage(texture::usage_flags::sampler)) [[unlikely]]
@@ -1748,7 +2090,7 @@ namespace mngl::gpu
 				                             .blend = state.blend,
 				                             .effect = quad_effect::textured,
 				                             .scissor = state.scissor,
-				                             .material = {},
+				                             .material = state.material,
 				                             .first_instance = first_instance,
 				                             .instance_count = 1,
 				                             .vertex_count = mesh_storage->vertex_count,
@@ -1782,9 +2124,9 @@ namespace mngl::gpu
 			{
 				throw std::invalid_argument("batcher2d geometry requires a triangle-list vertex count");
 			}
-			if (state.material.valid() || state.effect != quad_effect::textured) [[unlikely]]
+			if (state.effect != quad_effect::textured) [[unlikely]]
 			{
-				throw std::invalid_argument("batcher2d geometry requires the built-in textured effect");
+				throw std::invalid_argument("batcher2d geometry requires the textured effect");
 			}
 			if (!source.page || !source.page->valid() ||
 			    !source.page->has_usage(texture::usage_flags::sampler)) [[unlikely]]
@@ -1956,7 +2298,7 @@ namespace mngl::gpu
 					           .blend = state.blend,
 					           .effect = quad_effect::textured,
 					           .scissor = state.scissor,
-					           .material = {},
+					           .material = state.material,
 					           .first_instance = first_instance,
 					           .instance_count = 1,
 					           .geometry = true,
@@ -1984,8 +2326,12 @@ namespace mngl::gpu
 		}
 
 		static bool same_batch_key(const draw_batch& batch, SDL_GPUTexture* texture_handle,
-		                           const quad_draw_state& state) noexcept
+		                           const quad_draw_state& state, std::uint64_t deferred_token = 0) noexcept
 		{
+			if (batch.deferred_token != deferred_token)
+			{
+				return false;
+			}
 			if (batch.material.valid() || state.material.valid())
 			{
 				return batch.material == state.material &&
@@ -2091,24 +2437,22 @@ namespace mngl::gpu
 			geometry_options.resources.read_write_storage_buffers = 1;
 			geometry_options.resources.uniform_buffers = 1;
 			const auto geometry_shader = shader_loader::compile_compute(
-			    paths::application_directory() / "shaders" / "batcher2d.cull.hlsl", geometry_options);
-			auto geometry_pipeline =
-			    compute_pipeline_builder{}
-			        .set_debug_name("MNGL 2D geometry block culling")
-			        .set_compute_shader(geometry_shader)
-			        .build(m_device);
+			    paths::shader_directory("batcher2d.cull.hlsl") / "batcher2d.cull.hlsl", geometry_options);
+			auto geometry_pipeline = compute_pipeline_builder{}
+			                             .set_debug_name("MNGL 2D geometry block culling")
+			                             .set_compute_shader(geometry_shader)
+			                             .build(m_device);
 
 			auto instance_options = geometry_options;
 			instance_options.resources.storage_buffers = 1;
 			instance_options.resources.read_write_storage_buffers = 1;
 			const auto instance_shader = shader_loader::compile_compute(
-			    paths::application_directory() / "shaders" / "batcher2d.cull_instances.hlsl",
+			    paths::shader_directory("batcher2d.cull_instances.hlsl") / "batcher2d.cull_instances.hlsl",
 			    instance_options);
-			auto instance_pipeline =
-			    compute_pipeline_builder{}
-			        .set_debug_name("MNGL 2D instance culling")
-			        .set_compute_shader(instance_shader)
-			        .build(m_device);
+			auto instance_pipeline = compute_pipeline_builder{}
+			                             .set_debug_name("MNGL 2D instance culling")
+			                             .set_compute_shader(instance_shader)
+			                             .build(m_device);
 
 			m_geometry_culling_pipeline = std::move(geometry_pipeline);
 			m_instance_culling_pipeline = std::move(instance_pipeline);
@@ -2157,7 +2501,8 @@ namespace mngl::gpu
 				}
 				if (capacity < required) [[unlikely]]
 				{
-					throw std::length_error("batcher2d instance-culling buffer exceeds SDL's 32-bit size limit");
+					throw std::length_error(
+					    "batcher2d instance-culling buffer exceeds SDL's 32-bit size limit");
 				}
 				return static_cast<std::uint32_t>(capacity);
 			};
@@ -2165,9 +2510,9 @@ namespace mngl::gpu
 			if (range_bytes != 0 &&
 			    (!m_instance_culling_input.valid() || m_instance_culling_input.size() < range_bytes))
 			{
-				m_instance_culling_input = buffer(
-				    m_device, grow_capacity(m_instance_culling_input.size(), range_bytes),
-				    buffer_usage::compute_storage_read);
+				m_instance_culling_input =
+				    buffer(m_device, grow_capacity(m_instance_culling_input.size(), range_bytes),
+					       buffer_usage::compute_storage_read);
 			}
 		}
 
@@ -2263,8 +2608,7 @@ namespace mngl::gpu
 			if (gpu_culling_enabled || !cpu_culling_enabled)
 			{
 				return static_cast<std::uint32_t>(std::count_if(
-				    m_batches.begin(), m_batches.end(),
-				    [](const draw_batch& batch)
+				    m_batches.begin(), m_batches.end(), [](const draw_batch& batch)
 				    { return batch.instance_count != 0 && (!batch.geometry || batch.vertex_count != 0); }));
 			}
 
@@ -2483,16 +2827,11 @@ namespace mngl::gpu
 		device m_device;
 		texture_format m_target_format = texture_format::invalid;
 		vertex_layout m_vertex_layout;
-		graphics_shader m_vertex_shader;
-		graphics_shader m_fragment_shader;
-		std::array<graphics_pipeline, 4> m_pipelines;
-		std::array<sampler, 2> m_samplers;
+		std::shared_ptr<const default_gpu_resources> m_shared_default_resources;
 		std::vector<custom_material_slot> m_custom_materials;
 		std::vector<custom_material_instance_slot> m_custom_material_instances;
 		std::vector<std::uint32_t> m_free_material_slots;
 		std::vector<std::uint32_t> m_free_material_instance_slots;
-		buffer m_quad_vertices;
-		buffer m_quad_indices;
 		buffer m_instance_buffer;
 		buffer m_geometry_buffer;
 		buffer m_geometry_culling_input;
@@ -2507,6 +2846,7 @@ namespace mngl::gpu
 		std::vector<instance_culling_range> m_instance_culling_ranges;
 		std::vector<draw_batch> m_batches;
 		std::vector<order_independent_batch_range> m_order_independent_batch_ranges;
+		std::vector<sprite_instance> m_order_independent_instance_scratch;
 		color m_clear_color = color(0.0f, 0.0f, 0.0f, 1.0f);
 		bool m_preserve_target_contents = false;
 		frame_stats m_last_stats{};

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="zero-line-pad" x1="0" y1="0" x2="0" y2="0" spreadMethod="pad">
+      <stop stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff"/>
+    </linearGradient>
+    <linearGradient id="zero-line-repeat" x1="0" y1="0" x2="0" y2="0" spreadMethod="repeat">
+      <stop stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff"/>
+    </linearGradient>
+    <linearGradient id="zero-line-reflect" x1="0" y1="0" x2="0" y2="0" spreadMethod="reflect">
+      <stop stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff"/>
+    </linearGradient>
+    <radialGradient id="zero-radius-pad" gradientUnits="userSpaceOnUse" cx="32" cy="44" r="0"
+                    spreadMethod="pad">
+      <stop stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff"/>
+    </radialGradient>
+    <radialGradient id="zero-radius-repeat" gradientUnits="userSpaceOnUse" cx="32" cy="44" r="0"
+                    spreadMethod="repeat">
+      <stop stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff"/>
+    </radialGradient>
+    <radialGradient id="zero-radius-reflect" gradientUnits="userSpaceOnUse" cx="32" cy="44" r="0"
+                    spreadMethod="reflect">
+      <stop stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff"/>
+    </radialGradient>
+  </defs>
+  <rect id="linear-degenerate-pad" x="4" y="4" width="16" height="20" fill="url(#zero-line-pad)"/>
+  <rect id="linear-degenerate-repeat" x="24" y="4" width="16" height="20" fill="url(#zero-line-repeat)"/>
+  <rect id="linear-degenerate-reflect" x="44" y="4" width="16" height="20" fill="url(#zero-line-reflect)"/>
+  <rect id="radial-degenerate-pad" x="4" y="34" width="16" height="20" fill="url(#zero-radius-pad)"/>
+  <rect id="radial-degenerate-repeat" x="24" y="34" width="16" height="20" fill="url(#zero-radius-repeat)"/>
+  <rect id="radial-degenerate-reflect" x="44" y="34" width="16" height="20" fill="url(#zero-radius-reflect)"/>
+  <rect x="4" y="54" width="8" height="8" fill="#ff0000"/>
+</svg>

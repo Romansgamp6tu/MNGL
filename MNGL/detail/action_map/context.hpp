@@ -365,11 +365,21 @@ namespace mngl
 			bool baseline = m_baseline || revision != m_last_revision;
 			const bool waiting_for_neutral = m_wait_for_neutral && focused;
 			std::lock_guard lock(input::state_mutex);
-			std::unordered_map<std::string, action_state> next;
-			next.reserve(m_map->actions.size());
+			if (revision != m_last_revision)
+			{
+				for (auto state = m_states.begin(); state != m_states.end();)
+				{
+					if (!m_map->actions.contains(state->first))
+						state = m_states.erase(state);
+					else
+						++state;
+				}
+			}
 			bool any_binding_active = false;
 			for (const auto& [name, bindings] : m_map->actions)
 			{
+				auto [state_entry, inserted] = m_states.try_emplace(name);
+				(void)inserted;
 				bool current_down = false;
 				bool source_pressed = false;
 				bool source_released = false;
@@ -405,8 +415,7 @@ namespace mngl
 					value = 0.0f;
 				}
 
-				const auto previous = m_states.find(name);
-				const bool previous_down = previous != m_states.end() && previous->second.down;
+				const bool previous_down = state_entry->second.down;
 				action_state state;
 				state.down = current_down;
 				state.value = m_enabled ? value : 0.0f;
@@ -425,7 +434,7 @@ namespace mngl
 					if (state.released)
 						state.release_reason = reason;
 				}
-				next.emplace(name, state);
+				state_entry->second = state;
 			}
 			if (waiting_for_neutral && !any_binding_active)
 			{
@@ -433,7 +442,6 @@ namespace mngl
 				baseline = true;
 			}
 
-			m_states = std::move(next);
 			m_last_frame = frame;
 			m_last_revision = revision;
 			m_baseline = false;

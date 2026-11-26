@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="base" x1="20%" y1="0%" x2="80%" y2="0%">
+      <stop offset="0" stop-color="#ff0000"/>
+      <stop offset="1" stop-color="#0000ff"/>
+    </linearGradient>
+    <linearGradient id="middle" href="#base"/>
+    <linearGradient id="derived" href="#middle"/>
+    <linearGradient id="explicit" x1="20%" y1="0%" x2="80%" y2="0%">
+      <stop offset="0" stop-color="#ff0000"/>
+      <stop offset="1" stop-color="#0000ff"/>
+    </linearGradient>
+  </defs>
+  <rect id="inherited" x="4" y="4" width="24" height="16" fill="url(#derived)"/>
+  <rect id="explicit-shape" x="36" y="4" width="24" height="16" fill="url(#explicit)"/>
+  <rect x="4" y="54" width="8" height="8" fill="#ff0000"/>
+</svg>

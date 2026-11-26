@@ -15,16 +15,33 @@ namespace mngl::detail
 
 namespace mngl::two_d
 {
-	inline void enable_scene_culling() noexcept { ::mngl::gpu::enable_scene_culling(); }
-	inline void disable_scene_culling() noexcept { ::mngl::gpu::disable_scene_culling(); }
+	namespace detail
+	{
+		struct resident_mesh_vertex;
+	}
+
+	inline void enable_scene_culling() noexcept
+	{
+		::mngl::gpu::enable_scene_culling();
+	}
+	inline void disable_scene_culling() noexcept
+	{
+		::mngl::gpu::disable_scene_culling();
+	}
 
 	[[nodiscard]] inline bool scene_culling_enabled() noexcept
 	{
 		return ::mngl::gpu::scene_culling_enabled();
 	}
 
-	inline void enable_dirty_region_updates() noexcept { ::mngl::gpu::enable_dirty_region_updates(); }
-	inline void disable_dirty_region_updates() noexcept { ::mngl::gpu::disable_dirty_region_updates(); }
+	inline void enable_dirty_region_updates() noexcept
+	{
+		::mngl::gpu::enable_dirty_region_updates();
+	}
+	inline void disable_dirty_region_updates() noexcept
+	{
+		::mngl::gpu::disable_dirty_region_updates();
+	}
 
 	[[nodiscard]] inline bool dirty_region_updates_enabled() noexcept
 	{
@@ -157,7 +174,8 @@ namespace mngl::two_d
 namespace mngl::two_d
 {
 	class frame_2d;
-}
+	class svg_sprite;
+} // namespace mngl::two_d
 
 namespace mngl
 {
@@ -456,8 +474,7 @@ namespace mngl::two_d
 		// Uploads a fixed triangle-list mesh into a persistent GPU vertex buffer.
 		mesh(const gpu::device& device, gpu::command_buffer& command_buffer,
 		     std::span<const glm::vec2> triangle_vertices);
-		mesh(const gpu::device& device, gpu::command_buffer& command_buffer,
-		     const vertex_array& source);
+		mesh(const gpu::device& device, gpu::command_buffer& command_buffer, const vertex_array& source);
 		mesh(const gpu::device& device, gpu::command_buffer& command_buffer,
 		     const prepared_vertex_array& source);
 		mesh(const mesh&) = delete;
@@ -483,6 +500,14 @@ namespace mngl::two_d
 	private:
 		friend class frame_2d;
 		friend class renderer;
+		friend class svg_object;
+		friend class svg_sprite;
+		mesh() = default;
+		mesh(const gpu::device& device, gpu::command_buffer& command_buffer,
+		     std::span<const detail::resident_mesh_vertex> triangle_vertices);
+		[[nodiscard]] static std::shared_ptr<detail::resident_mesh_storage> create_storage(
+		    const gpu::device& device, gpu::command_buffer& command_buffer,
+		    std::span<const detail::resident_mesh_vertex> triangle_vertices);
 		void draw(frame_2d& frame) const override;
 
 		std::shared_ptr<detail::resident_mesh_storage> m_storage;

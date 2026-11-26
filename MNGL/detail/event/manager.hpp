@@ -108,7 +108,10 @@ namespace mngl
 			{
 				if constexpr (std::copy_constructible<T>)
 				{
-					event_collector->emplace_back([event] { dispatch_typed_event(event); });
+					const auto listeners =
+					    std::atomic_load_explicit(&listeners_for<T>().callbacks, std::memory_order_acquire);
+					event_collector->emplace_back(
+					    [event, listeners] { dispatch_typed_event(event, listeners); });
 				}
 				else
 				{
@@ -155,15 +158,23 @@ namespace mngl
 		static inline std::mutex pending_events_mutex;
 		static inline std::deque<pending_event_batch> pending_events;
 		static inline thread_local std::vector<deferred_callback>* event_collector = nullptr;
+		static inline std::vector<std::vector<deferred_callback>> reusable_callback_buffers;
 		static inline std::mutex imgui_input_events_mutex;
 		static inline std::vector<SDL_Event> imgui_input_events;
 		static inline std::atomic_bool imgui_input_enabled = false;
 
 		template <event_payload T> static void dispatch_typed_event(const T& event)
 		{
-			std::lock_guard lock(dispatch_mutex);
 			const auto listeners =
 			    std::atomic_load_explicit(&listeners_for<T>().callbacks, std::memory_order_acquire);
+			dispatch_typed_event(event, listeners);
+		}
+
+		template <event_payload T, typename ListenerVector>
+		static void dispatch_typed_event(const T& event,
+		                                const std::shared_ptr<const ListenerVector>& listeners)
+		{
+			std::lock_guard lock(dispatch_mutex);
 			for (const auto& weak_listener : *listeners)
 			{
 				if (auto listener = weak_listener.lock();
@@ -178,6 +189,15 @@ namespace mngl
 		{
 			// Copy pointer-backed SDL fields into typed payloads before the event leaves the watcher.
 			std::vector<deferred_callback> callbacks;
+			{
+				std::lock_guard lock(pending_events_mutex);
+				if (!reusable_callback_buffers.empty())
+				{
+					callbacks = std::move(reusable_callback_buffers.back());
+					reusable_callback_buffers.pop_back();
+					callbacks.clear();
+				}
+			}
 			auto* previous_collector = std::exchange(event_collector, &callbacks);
 			try
 			{
@@ -192,6 +212,21 @@ namespace mngl
 
 			if (callbacks.empty())
 			{
+				if (callbacks.capacity() <= 64)
+				{
+					std::lock_guard lock(pending_events_mutex);
+					if (reusable_callback_buffers.size() < 64)
+					{
+						try
+						{
+							reusable_callback_buffers.push_back(std::move(callbacks));
+						}
+						catch (...)
+						{
+							// Reuse is an optimization; an empty SDL event has no work to queue.
+						}
+					}
+				}
 				return;
 			}
 
@@ -224,6 +259,18 @@ namespace mngl
 					callback = std::move(batch.callbacks[batch.next_callback++]);
 					if (batch.next_callback == batch.callbacks.size())
 					{
+						batch.callbacks.clear();
+						if (batch.callbacks.capacity() <= 64 && reusable_callback_buffers.size() < 64)
+						{
+							try
+							{
+								reusable_callback_buffers.push_back(std::move(batch.callbacks));
+							}
+							catch (...)
+							{
+								// Reuse is an optimization; dispatch must still finish if the pool is full.
+							}
+						}
 						pending_events.pop_front();
 					}
 				}

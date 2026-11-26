@@ -24,6 +24,7 @@ nav:
       - Рендер в текстуру: 2d/render-to-texture.md
       - Координаты и view: 2d/coordinates-and-view.md
       - Произвольная геометрия: 2d/geometry.md
+      - SVG: 2d/svg.md
       - Трансформации: 2d/transforms.md
       - Hit testing: 2d/hit-testing.md
       - Профилирование: 2d/benchmarking.md

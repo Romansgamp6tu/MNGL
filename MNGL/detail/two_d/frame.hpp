@@ -2,6 +2,8 @@
 
 #include "geometry.hpp"
 
+#include <unordered_map>
+
 namespace mngl::two_d
 {
 	class renderer;
@@ -9,6 +11,35 @@ namespace mngl::two_d
 
 	namespace detail
 	{
+		namespace svg
+		{
+			struct gradient_paint;
+			struct geometry_data;
+			struct image_pixels;
+			struct image_paint;
+			struct effect_layer;
+
+			struct uploaded_assets
+			{
+				std::unordered_map<const geometry_data*, std::shared_ptr<resident_mesh_storage>> meshes;
+				std::unordered_map<const std::vector<glm::vec2>*,
+				                   std::shared_ptr<resident_mesh_storage>> shared_meshes;
+				std::unordered_map<const image_pixels*, std::shared_ptr<const ::mngl::texture>> images;
+			};
+
+			struct effect_job
+			{
+				std::shared_ptr<const effect_layer> layer;
+				std::shared_ptr<const uploaded_assets> assets;
+				std::shared_ptr<gpu::texture> resolved_output;
+				std::uint64_t deferred_token = 0;
+				glm::mat4 placement{1.0f};
+				glm::uvec2 target_size{};
+				std::optional<SDL_Rect> scissor;
+				bool premultiplied = false;
+			};
+		} // namespace svg
+
 		struct renderer_frame_control
 		{
 			renderer* owner = nullptr;
@@ -83,6 +114,8 @@ namespace mngl::two_d
 		friend class mesh;
 		friend class convex_polygon;
 		friend class text;
+		friend class svg_object;
+		friend class svg_sprite;
 
 		void submit_sprite(const ::mngl::sprite& value);
 		void submit_circle(const circle& value);
@@ -91,6 +124,25 @@ namespace mngl::two_d
 		void submit_rectangle_shape(const rectangle_shape& value);
 		void submit_vertex_array(const vertex_array& value);
 		void submit_prepared_vertex_array(const prepared_vertex_array& value);
+		void submit_svg_gradient(std::span<const glm::vec2> vertices,
+		                         const ::mngl::two_d::transform& transform, const color& tint,
+		                         gpu::sprite_blend_mode blend, const detail::svg::gradient_paint& gradient);
+		void submit_svg_geometry(std::span<const glm::vec2> vertices,
+		                         const ::mngl::two_d::transform& transform, const color& tint,
+		                         gpu::sprite_blend_mode blend);
+		void submit_svg_gradient_mesh(const mesh& value, const detail::svg::gradient_paint& gradient);
+		void prepare_svg_gradient(gpu::sprite_blend_mode blend, const detail::svg::gradient_paint& gradient);
+		void submit_svg_image(const detail::svg::image_paint& image, const transform& matrix,
+		                      const color& tint, gpu::sprite_blend_mode blend,
+		                      const std::shared_ptr<const detail::svg::uploaded_assets>& assets = {});
+		void prepare_svg_image(const std::shared_ptr<const detail::svg::image_pixels>& image);
+		void submit_svg_effect(const std::shared_ptr<const detail::svg::effect_layer>& layer,
+		                       const transform& matrix, const color& tint, gpu::sprite_blend_mode blend,
+		                       const std::shared_ptr<const detail::svg::uploaded_assets>& assets = {});
+		void record_svg_hit_geometry(
+		    const std::shared_ptr<const ::mngl::detail::svg_hit_test_geometry>& geometry,
+		    const ::mngl::two_d::transform& transform,
+		    const std::shared_ptr<const ::mngl::hit_test_callback>& click_callback);
 		void submit_mesh(const mesh& value);
 		void submit_convex_polygon(const convex_polygon& value);
 		void submit_text(const text& value);
@@ -144,10 +196,10 @@ namespace mngl::two_d
 		      m_token(std::exchange(other.m_token, 0)), m_batcher_context(std::move(other.m_batcher_context)),
 		      m_geometry_scratch(std::move(other.m_geometry_scratch)),
 		      m_hit_test_items(std::move(other.m_hit_test_items)),
-		      m_used_fonts(std::move(other.m_used_fonts)),
+		      m_used_fonts(std::move(other.m_used_fonts)), m_svg_images(std::move(other.m_svg_images)),
+		      m_svg_effects(std::move(other.m_svg_effects)),
 		      m_view_projection(std::move(other.m_view_projection)), m_view(std::move(other.m_view)),
-		      m_scissor(std::move(other.m_scissor)),
-		      m_registered(std::exchange(other.m_registered, false)),
+		      m_scissor(std::move(other.m_scissor)), m_registered(std::exchange(other.m_registered, false)),
 		      m_finished(std::exchange(other.m_finished, false)),
 		      m_order_independent(std::exchange(other.m_order_independent, false))
 		{
@@ -165,6 +217,8 @@ namespace mngl::two_d
 				m_geometry_scratch = std::move(other.m_geometry_scratch);
 				m_hit_test_items = std::move(other.m_hit_test_items);
 				m_used_fonts = std::move(other.m_used_fonts);
+				m_svg_images = std::move(other.m_svg_images);
+				m_svg_effects = std::move(other.m_svg_effects);
 				m_view_projection = std::move(other.m_view_projection);
 				m_view = std::move(other.m_view);
 				m_scissor = std::move(other.m_scissor);
@@ -224,6 +278,8 @@ namespace mngl::two_d
 		detail::tessellation_scratch m_geometry_scratch;
 		std::vector<::mngl::detail::hit_test_item> m_hit_test_items;
 		std::vector<font*> m_used_fonts;
+		std::vector<std::shared_ptr<const ::mngl::texture>> m_svg_images;
+		std::vector<detail::svg::effect_job> m_svg_effects;
 		std::optional<glm::mat4> m_view_projection;
 		std::optional<::mngl::view> m_view;
 		std::optional<SDL_Rect> m_scissor;

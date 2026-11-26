@@ -58,6 +58,8 @@ namespace mngl::gpu
 		public:
 			explicit gpu_copy_pass(command_buffer& command)
 			{
+				command.begin_pass();
+				m_command = &command;
 				auto* command_handle = command.raw();
 				if (!command_handle) [[unlikely]]
 				{
@@ -67,6 +69,8 @@ namespace mngl::gpu
 				m_handle = SDL_BeginGPUCopyPass(command_handle);
 				if (!m_handle) [[unlikely]]
 				{
+					command.end_pass();
+					m_command = nullptr;
 					throw sdl_error("Failed to begin GPU copy pass: ");
 				}
 			}
@@ -86,11 +90,17 @@ namespace mngl::gpu
 					SDL_EndGPUCopyPass(m_handle);
 					m_handle = nullptr;
 				}
+				if (m_command)
+				{
+					m_command->end_pass();
+					m_command = nullptr;
+				}
 			}
 
 		private:
 			SDL_GPUDevice* m_device = nullptr;
 			SDL_GPUCopyPass* m_handle = nullptr;
+			command_buffer* m_command = nullptr;
 		};
 	} // namespace detail
 
@@ -278,7 +288,10 @@ namespace mngl::gpu
 				return;
 			}
 			detail::gpu_copy_pass copy_pass(cmd);
-			record_upload(copy_pass, staged_size, true, destination_offset);
+			// A partial update cannot cycle the destination: SDL may give the command a
+			// fresh buffer whose untouched bytes have never been initialized. Without
+			// cycling, cancellation leaves the previously submitted contents intact.
+			record_upload(copy_pass, staged_size, false, destination_offset);
 		}
 
 		template <typename T>
