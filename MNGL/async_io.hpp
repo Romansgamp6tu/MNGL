@@ -132,7 +132,7 @@ namespace mngl::async_io
 			bool io_cancelled = false;
 			bool close_queued = false;
 			bool close_retry_pending = false;
-			bool close_queue_failed = false;
+
 			bool close_done = false;
 			bool close_succeeded = false;
 			bool close_cancelled = false;
@@ -688,27 +688,9 @@ namespace mngl::async_io
 				return false;
 			}
 
-			// SDL leaves the handle valid when it cannot enqueue a close. Once the
-			// read/write itself has finished, expose this as a terminal operation
-			// failure, but keep the handle in the queue state and retry cleanup on
-			// subsequent poll/wait calls.
-			if (!state->io_done)
-				return false;
-			if (!state->close_queue_failed)
-			{
-				const auto close_error = detail::sdl_error_message("failed to queue async file close: ");
-				if (!state->error.empty())
-					state->error += "; ";
-				state->error += close_error;
-				state->close_queue_failed = true;
-			}
-			if (state->status == request_status::pending)
-			{
-				state->status = request_status::failed;
-				// The read/write has finished, so SDL no longer references this buffer.
-				std::vector<std::byte>().swap(state->buffer);
-				return true;
-			}
+			// SDL leaves the handle valid when it cannot enqueue a close. Keep the
+			// request pending so poll()/wait() can retry; a transient close queue
+			// failure must not turn a successful read into a failed request.
 			return false;
 		}
 
