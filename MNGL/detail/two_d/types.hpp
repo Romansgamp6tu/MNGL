@@ -154,7 +154,7 @@ namespace mngl::two_d
 		{
 			if (!page.valid() || page.m_store_id != m_store_id || page.m_value >= m_pages.size()) [[unlikely]]
 			{
-				throw std::out_of_range("Invalid 2D texture handle");
+				throw std::out_of_range("Invalid 2D texture handle for this store");
 			}
 			return m_pages[page.m_value];
 		}
@@ -163,7 +163,7 @@ namespace mngl::two_d
 		{
 			if (!page.valid() || page.m_store_id != m_store_id || page.m_value >= m_pages.size()) [[unlikely]]
 			{
-				throw std::out_of_range("Invalid 2D texture handle");
+				throw std::out_of_range("Invalid 2D texture handle for this store");
 			}
 			return m_pages[page.m_value];
 		}
