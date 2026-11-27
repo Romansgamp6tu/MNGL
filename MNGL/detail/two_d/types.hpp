@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <utility>
@@ -27,12 +28,16 @@ namespace mngl::two_d
 		inline std::uint64_t allocate_texture_store_id()
 		{
 			static std::atomic<std::uint64_t> next_id{1};
-			const auto id = next_id.fetch_add(1, std::memory_order_relaxed);
-			if (id == 0) [[unlikely]]
+			auto id = next_id.load(std::memory_order_relaxed);
+			while (id != 0 && id != std::numeric_limits<std::uint64_t>::max())
 			{
-				throw std::overflow_error("2D texture store identity space exhausted");
+				if (next_id.compare_exchange_weak(id, id + 1, std::memory_order_relaxed,
+				                                  std::memory_order_relaxed))
+				{
+					return id;
+				}
 			}
-			return id;
+			throw std::overflow_error("2D texture store identity space exhausted");
 		}
 	}
 
