@@ -143,11 +143,10 @@ generate_msl_shader() {
 		-e main -o "$spirv" "$source"
 	"$stage/bin/shadercross" "$spirv" -s SPIRV -d MSL -t "$shadercross_stage" \
 		-o "$msl" -e main
-	# SPIRV-Cross names translated Metal entrypoints main0, while MNGL's
-	# SDL_GPU shader loader requests the source entrypoint name main.
-	sed -i '' -E 's/^((vertex|fragment|kernel)[[:space:]]+[^[:space:]]+[[:space:]]+)main0\(/\1main(/' "$msl"
-	if ! grep -Eq '^(vertex|fragment|kernel) [^[:space:]]+ main\(' "$msl"; then
-		printf 'Could not normalize the MSL entrypoint for %s.\n' "$source_name" >&2
+	# Metal reserves the function name main; SPIRV-Cross emits main0 and the
+	# MNGL Metal shader loaders select that entrypoint.
+	if ! grep -Eq '^(vertex|fragment|kernel) [^[:space:]]+ main0\(' "$msl"; then
+		printf 'Could not find the SPIRV-Cross MSL entrypoint for %s.\n' "$source_name" >&2
 		exit 1
 	fi
 	if [[ ! -s "$msl" ]]; then
