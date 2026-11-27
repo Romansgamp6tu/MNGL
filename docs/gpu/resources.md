@@ -149,9 +149,11 @@ mngl::gpu::texture scene(
 интерпретация или порядок каналов:
 
 ```cpp
+#include <MNGL/render_window.hpp>
 #include <MNGL/texture.hpp>
 #include <MNGL/renderer2d.hpp>
 
+mngl::render_window window("Texture formats", {800, 600});
 auto& textures = window.textures();
 const auto color_image = textures.add(mngl::texture(
     "assets/color.png", mngl::gpu::texture_format::r8g8b8a8_unorm_srgb));
