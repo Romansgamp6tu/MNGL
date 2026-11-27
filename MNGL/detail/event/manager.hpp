@@ -1393,7 +1393,7 @@ namespace mngl
 				listeners = std::static_pointer_cast<listener_collection<T>>(found->second);
 			}
 
-			const auto current = listeners->std::atomic_load_explicit(&callbacks, std::memory_order_acquire);
+			const auto current = std::atomic_load_explicit(&listeners->callbacks, std::memory_order_acquire);
 			std::vector<std::shared_ptr<listener<T>>> snapshot;
 			snapshot.reserve(current->size());
 			for (const auto& weak_listener : *current)
