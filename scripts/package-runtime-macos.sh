@@ -175,6 +175,7 @@ install -m 0755 "$gpu_smoke" "$stage/bin/mngl_gpu_runtime_smoke"
 install -m 0755 "$shader_smoke" "$stage/bin/mngl_shader_compile_smoke"
 install -m 0755 "$metal_smoke" "$stage/bin/mngl_metal_shader_assets_smoke"
 install -m 0755 "$svg_runtime_smoke" "$stage/bin/mngl_svg_runtime_test"
+cp -R "$stage/shaders" "$stage/bin/shaders"
 export PATH="$stage/bin:$PATH"
 export DYLD_LIBRARY_PATH="$stage/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
 SDL_AUDIODRIVER=dummy "$stage/bin/mngl_audio_runtime_smoke"
@@ -213,6 +214,7 @@ rm "$stage/bin/mngl_audio_runtime_smoke" \
 	"$stage/bin/mngl_shader_compile_smoke" \
 	"$stage/bin/mngl_metal_shader_assets_smoke" \
 	"$stage/bin/mngl_svg_runtime_test"
+rm -rf "$stage/bin/shaders"
 
 cp "$repo/MNGL/imgui/LICENSE.txt" "$stage/MNGL-ImGui-LICENSE.txt"
 cat > "$stage/runtime-manifest.txt" <<EOF

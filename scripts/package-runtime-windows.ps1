@@ -115,6 +115,7 @@ Get-ChildItem -LiteralPath $crtDirectory.FullName -Filter *.dll -File |
 
 $smokeDirectory = Join-Path $work 'smoke'
 New-Item -ItemType Directory -Path $smokeDirectory -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $repo 'MNGL/shaders') -Destination (Join-Path $smokeDirectory 'shaders') -Recurse
 $audioSmoke = Get-ChildItem -LiteralPath $mnglBuild -Filter mngl_audio_runtime_smoke.exe -File -Recurse |
 	Select-Object -First 1
 if (-not $audioSmoke) {
