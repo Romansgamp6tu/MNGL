@@ -45,6 +45,19 @@ cmake --build "$mngl_build" --target \
 	mngl_audio_runtime_smoke mngl_gpu_runtime_smoke mngl_shader_compile_smoke \
 	mngl_metal_shader_assets_smoke mngl_svg_runtime_test --parallel 4
 
+# setup-sdl installs SDL3_image in its own cached prefix. Resolve it through the
+# package config CMake actually used so dylibbundler can find the image dylibs.
+sdl_image_cmake_dir=$(sed -n 's/^SDL3_image_DIR:PATH=//p' "$mngl_build/CMakeCache.txt")
+if [[ -z "$sdl_image_cmake_dir" || ! -d "$sdl_image_cmake_dir" ]]; then
+	printf '%s\\n' 'Could not resolve the SDL3_image package prefix from CMake.' >&2
+	exit 1
+fi
+sdl_image_prefix=$(cd "$sdl_image_cmake_dir/../../.." && pwd)
+if ! find "$sdl_image_prefix/lib" -maxdepth 1 \\( -type f -o -type l \\) -name 'libSDL3_image*.dylib' -print -quit | grep -q .; then
+	printf 'SDL3_image dylibs were not found in %s/lib.\\n' "$sdl_image_prefix" >&2
+	exit 1
+fi
+
 mngl_library=$(find "$mngl_build" -type f -name 'libmngl_imgui.dylib' -print -quit)
 mixer_library=$(find "$mngl_build" \( -type f -o -type l \) -name 'libSDL3_mixer*.dylib' -print -quit)
 audio_smoke=$(find "$mngl_build" -type f -name 'mngl_audio_runtime_smoke' -print -quit)
@@ -115,7 +128,7 @@ cmake --install "$shadercross_build"
 install -m 0755 "$shadercross_prefix/bin/shadercross" "$stage/bin/shadercross"
 find "$shadercross_prefix/lib" \( -type f -o -type l \) -name '*.dylib*' \
 	-exec cp -p {} "$stage/lib/" \;
-export DYLD_LIBRARY_PATH="$stage/lib:$SDL_PREFIX/lib:$spirv_prefix/lib:$brew_prefix/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+export DYLD_LIBRARY_PATH="$stage/lib:$SDL_PREFIX/lib:$sdl_image_prefix/lib:$spirv_prefix/lib:$brew_prefix/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
 
 # SDL_shadercross emits MSL source for offline use; SDL_GPU compiles it through
 # Metal when creating the pipeline. Keep compiler tools out of the rendering path.
@@ -148,6 +161,12 @@ cmake --build "$mngl_build" --target mngl_demo mngl_metal_shader_assets_smoke \
 	mngl_svg_runtime_test --parallel 4
 cmake --install "$mngl_build" --prefix "$stage" --component library
 
+# Stage SDL runtime dylibs before rewriting their @rpath load commands.
+for prefix in "$SDL_PREFIX" "$sdl_image_prefix"; do
+	find "$prefix/lib" -maxdepth 1 \\( -type f -o -type l \\) -name 'libSDL3*.dylib*' \
+		-exec cp -p {} "$stage/lib/" \\\;
+done
+
 cp -R "$repo/MNGL/shaders" "$stage/shaders"
 cp "$metal_shader_dir"/*.msl "$stage/shaders/"
 mkdir -p "$stage/licenses"
@@ -159,6 +178,7 @@ cp "$shadercross_source/external/SPIRV-Cross/LICENSE" "$stage/licenses/SPIRV-Cro
 dylib_args=(-b -cd -d "build-runtime-macos/stage/lib" -p '@executable_path/../lib')
 for search_path in \
 	"$SDL_PREFIX/lib" \
+	"$sdl_image_prefix/lib" \
 	"$brew_prefix/lib" \
 	"$spirv_prefix/lib" \
 	"$shadercross_prefix/lib"; do
@@ -185,7 +205,7 @@ install -m 0755 "$metal_smoke" "$stage/bin/mngl_metal_shader_assets_smoke"
 install -m 0755 "$svg_runtime_smoke" "$stage/bin/mngl_svg_runtime_test"
 cp -R "$stage/shaders" "$stage/bin/shaders"
 export PATH="$stage/bin:$PATH"
-export DYLD_LIBRARY_PATH="$stage/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+export DYLD_LIBRARY_PATH="$stage/lib:$sdl_image_prefix/lib:$SDL_PREFIX/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
 SDL_AUDIODRIVER=dummy "$stage/bin/mngl_audio_runtime_smoke"
 "$stage/bin/mngl_shader_compile_smoke"
 # The MSL sidecar smoke uses deliberately invalid compiler paths and cannot see
