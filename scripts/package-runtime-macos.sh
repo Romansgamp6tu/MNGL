@@ -39,6 +39,7 @@ cmake -S "$repo" -B "$mngl_build" -GNinja \
 	-DCMAKE_PREFIX_PATH="$cmake_prefix" \
 	-DMNGL_METAL_SHADER_ASSET_DIR="$metal_shader_dir" \
 	-DMNGL_BUILD_MACOS_DEVEL_PACKAGE=ON \
+	-DMNGL_PACKAGE_BRANCH=main \
 	-DBUILD_TESTING=ON
 cmake --build "$mngl_build" --target \
 	mngl_audio_runtime_smoke mngl_gpu_runtime_smoke mngl_shader_compile_smoke \
