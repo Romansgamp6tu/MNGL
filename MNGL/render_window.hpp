@@ -676,7 +676,7 @@ namespace mngl
 			}
 
 			m_target = std::move(replacement);
-			m_sprite.source_texture = &m_target;
+			m_sprite.m_borrowed_source = &m_target;
 		}
 
 		render_window& m_window;
