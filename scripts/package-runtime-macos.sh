@@ -57,8 +57,12 @@ if [[ -z "$mngl_library" || -z "$mixer_library" || -z "$audio_smoke" || -z "$gpu
 	exit 1
 fi
 cp -p "$mngl_library" "$stage/lib/"
+# The CMake library install component runs after offline MSL shaders are generated.
+# Stage the built mixer library and its versioned loader names for the early tools.
+find "$mngl_build/third_party/SDL_mixer" \( -type f -o -type l \) -name 'libSDL3_mixer*.dylib' \
+	-exec cp -p {} "$stage/lib/" \;
 if [[ ! -e "$stage/lib/$(basename "$mixer_library")" ]]; then
-	printf '%s\n' 'SDL3_mixer runtime library was not installed into the package.' >&2
+	printf '%s\n' 'SDL3_mixer runtime library was not staged from the build.' >&2
 	exit 1
 fi
 
