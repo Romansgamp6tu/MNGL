@@ -175,7 +175,7 @@ cp "$shadercross_source/LICENSE.txt" "$stage/licenses/SDL_shadercross-LICENSE.tx
 cp "$shadercross_source/external/SPIRV-Cross/LICENSE" "$stage/licenses/SPIRV-Cross-LICENSE.txt"
 
 # Copy the dependency closure and rewrite load commands to the package layout.
-dylib_args=(-b -cd -d "build-runtime-macos/stage/lib" -p '@executable_path/../lib')
+dylib_args=(-b -cd -of -d "build-runtime-macos/stage/lib" -p '@executable_path/../lib')
 for search_path in \
 	"$mngl_build/third_party/SDL_mixer" \
 	"$SDL_PREFIX/lib" \
