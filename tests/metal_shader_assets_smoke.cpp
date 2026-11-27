@@ -24,6 +24,7 @@ namespace
 	{
 		require(shader.valid(), name);
 		require(shader.code.format == mngl::gpu::shader_format::msl, name);
+		require(shader.entrypoint == "main0", "MSL shader did not select the SPIRV-Cross entrypoint");
 	}
 } // namespace
 
