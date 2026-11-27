@@ -909,7 +909,7 @@ namespace mngl::two_d
 		gpu_transform.object_transform = value.transform;
 		if (value.m_borrowed_source)
 		{
-			m_control->owner->submit_texture(m_recording_context, *value.source_texture, gpu_transform,
+			m_control->owner->submit_texture(m_recording_context, *value.m_borrowed_source, gpu_transform,
 			                                 value.tint, value.state, value.click_callback);
 		}
 		else
