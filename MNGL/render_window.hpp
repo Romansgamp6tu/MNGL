@@ -629,7 +629,7 @@ namespace mngl
 		[[nodiscard]] sprite& as_sprite()
 		{
 			auto& image = target();
-			m_sprite.source_texture = &image;
+			m_sprite.m_borrowed_source = &image;
 
 			const auto viewport = m_window.coordinate_size();
 			if (viewport.x > 0.0f && viewport.y > 0.0f &&
