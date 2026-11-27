@@ -489,6 +489,12 @@ namespace mngl::gpu
 			fragment_options.format = format;
 			fragment_options.resources.samplers = 1;
 			fragment_options.resources.uniform_buffers = 1;
+			if (format == shader_format::msl)
+			{
+				// SPIRV-Cross emits main0 because Metal reserves the name main.
+				vertex_options.entrypoint = "main0";
+				fragment_options.entrypoint = "main0";
+			}
 
 			return {load_shader(directory / "batcher2d.vert.hlsl", vertex_options),
 			        load_shader(directory / "batcher2d.frag.hlsl", fragment_options), true, true};
