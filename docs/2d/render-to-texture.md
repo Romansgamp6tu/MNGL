@@ -31,7 +31,7 @@ int main()
 
 		mngl::texture scene = window.create_texture({640, 360});
 		scene.set_view(camera);
-		mngl::sprite preview{scene, mngl::rectangle{0.0f, 0.0f, 16.0f, 9.0f}};
+		auto preview = mngl::sprite::borrowed(scene, mngl::rectangle{0.0f, 0.0f, 16.0f, 9.0f});
 		double time = 0.0;
 
 		while (mngl::input::next_frame())
