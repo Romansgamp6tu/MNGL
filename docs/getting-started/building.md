@@ -162,12 +162,13 @@ ImGui не гарантирует совместимость ABI между ве
 #### Runtime-пакеты
 
 Workflow `Package MNGL runtime` собирает runtime-пакеты на стандартных
-GitHub-hosted runner-ах: Linux x86_64 в контейнере Debian Trixie, Windows x64,
-macOS arm64 и macOS x86_64. Workflow запускается на push в `main` и release
-branches `V-*`, на теге и вручную; временные Actions-артефакты хранятся один
-день. На release branch development- и runtime-artifacts одного коммита имеют
-одинаковую версию `0.0.0+ci.<commit SHA>`. При push тега `vX.Y.Z` все runtime-
-пакеты прикладываются к GitHub Release:
+GitHub-hosted runner-ах: Linux x86_64 на `ubuntu-24.04` с GCC 13, Windows x64,
+macOS arm64 и macOS x86_64. Он запускается на PR в `main` при изменениях runtime-
+исходников, CMake, зависимостей или скриптов упаковки, а также на push в `main`
+и release branches `V-*`, на теге и вручную. Временные Actions-артефакты
+хранятся один день. На release branch development- и runtime-artifacts одного
+коммита имеют одинаковую версию `0.0.0+ci.<commit SHA>`. При push тега
+`vX.Y.Z` все runtime-пакеты прикладываются к GitHub Release:
 Для локального повторения Linux-сборки установите CMake, Ninja, Git,
 `pkg-config`, Bison, `patchelf`, `readelf`, SDL3/SDL3_image и FreeType
 development-пакеты, а также XRandR development-пакет:
@@ -209,10 +210,10 @@ export PATH="/path/to/mngl-runtime/bin:$PATH"
 export LD_LIBRARY_PATH="/path/to/mngl-runtime/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
 
-Linux-пакет CI собирается в Debian Trixie x86_64 контейнере. glibc, Vulkan loader
-(`libvulkan1`), GPU-драйверы и системные графические/аудио-библиотеки не
-копируются в архив; для запуска нужна совместимая Ubuntu-система с установленным
-драйвером.
+Linux runtime-пакет собирается на Ubuntu 24.04 x86_64 с GCC 13 и
+требует glibc 2.39 или новее. glibc, Vulkan loader (`libvulkan1`), GPU-драйверы
+и системные графические/аудио-библиотеки не копируются в архив. Development-
+пакет Linux по-прежнему собирается в Debian Trixie контейнере.
 
 На macOS runtime-архив включает `.dylib` зависимости в `lib/` и задаёт путь
 `@executable_path/../lib` для приложения, собранного через `MNGL::MNGL`. Для

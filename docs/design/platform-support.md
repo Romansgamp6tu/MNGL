@@ -11,17 +11,21 @@ MNGL ориентируется на настольные приложения. 
 | Платформа | Архитектура | Development-пакет | Runtime-пакет | CI |
 |---|---|---|---|---|
 | Windows | x64 | ZIP | ZIP | GitHub-hosted runner `windows-2025-vs2026` |
-| Linux | x86_64 | tar.gz | tar.gz | GitHub-hosted runner с контейнером Debian Trixie |
+| Linux | x86_64 | tar.gz | tar.gz | development: Debian Trixie; runtime: `ubuntu-24.04` + GCC 13 |
 | macOS | arm64 | tar.gz | tar.gz | GitHub-hosted runner `macos-15` |
 | macOS | x86_64 | tar.gz | tar.gz | GitHub-hosted runner `macos-15-intel` |
 
 Workflows `Package MNGL development kits` и `Package MNGL runtime` собирают
-временные Actions-артефакты на push и при ручном запуске. Артефакты хранятся
-один день. При push тега `vX.Y.Z` все development- и runtime-пакеты
-прикладываются к GitHub Release. Для каждой платформы используются обычные
-GitHub-hosted runners; Linux-пакеты собираются в Debian Trixie контейнере.
+временные Actions-артефакты на push и при ручном запуске. Runtime workflow также
+проверяет сборки на PR в `main`, если изменены относящиеся к runtime файлы.
+Артефакты хранятся один день. При push тега `vX.Y.Z` все development- и
+runtime-пакеты прикладываются к GitHub Release. Linux development-пакет
+собирается в Debian Trixie контейнере, runtime-пакет — на `ubuntu-24.04` с GCC 13.
 
 Development-пакет Linux проверяется через отдельный CMake-проект-потребитель.
+Runtime workflow выполняет сборку и platform smoke-проверки также для PR в `main`.
+Архив Linux требует glibc 2.39 или новее; Vulkan loader, драйверы и системные
+графические/аудио-библиотеки остаются зависимостями целевой машины.
 Runtime-пакеты запускают аудио smoke-проверку и проверку доступности GPU или
 графического backend-а на соответствующей платформе; GPU-проверка может быть
 пропущена, если адаптер или backend недоступен. Полная CTest-матрица остаётся
