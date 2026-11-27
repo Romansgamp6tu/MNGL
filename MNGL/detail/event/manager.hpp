@@ -226,7 +226,7 @@ namespace mngl
 			auto subscription = std::make_shared<listener<T>>(std::move(cb));
 			auto& listeners = listeners_for<T>();
 			std::lock_guard lock(listeners.writer_mutex);
-			const auto current = listeners.callbacks.load(std::memory_order_acquire);
+			const auto current = std::atomic_load_explicit(&listeners.callbacks, std::memory_order_acquire);
 			auto updated = std::make_shared<typename listener_collection<T>::listener_vector>();
 			updated->reserve(current->size() + 1);
 			for (const auto& existing : *current)
@@ -239,7 +239,7 @@ namespace mngl
 			updated->push_back(subscription);
 			std::shared_ptr<const typename listener_collection<T>::listener_vector> snapshot =
 			    std::move(updated);
-			listeners.callbacks.store(std::move(snapshot), std::memory_order_release);
+			std::atomic_store_explicit(&listeners.callbacks, std::move(snapshot), std::memory_order_release);
 			return event_connection(std::move(subscription));
 		}
 
@@ -357,7 +357,7 @@ namespace mngl
 
 		template <event_payload T> static std::vector<std::shared_ptr<listener<T>>> snapshot_listeners()
 		{
-			const auto current = listeners_for<T>().callbacks.load(std::memory_order_acquire);
+			const auto current = std::atomic_load_explicit(&listeners_for<T>().callbacks, std::memory_order_acquire);
 			std::vector<std::shared_ptr<listener<T>>> snapshot;
 			snapshot.reserve(current->size());
 			for (const auto& weak_listener : *current)
@@ -557,12 +557,12 @@ namespace mngl
 			using listener_vector = std::vector<std::weak_ptr<listener<T>>>;
 
 			std::mutex writer_mutex;
-			std::atomic<std::shared_ptr<const listener_vector>> callbacks{
+			std::shared_ptr<const listener_vector> callbacks{
 			    std::make_shared<const listener_vector>()};
 
 			bool empty() const
 			{
-				const auto snapshot = callbacks.load(std::memory_order_acquire);
+				const auto snapshot = std::atomic_load_explicit(&callbacks, std::memory_order_acquire);
 				for (const auto& weak_listener : *snapshot)
 				{
 					if (auto listener = weak_listener.lock();
@@ -1291,7 +1291,7 @@ namespace mngl
 			{
 				std::lock_guard lock(m_registry_mutex);
 				auto& listeners = listeners_for_locked<T>();
-				const auto current = listeners.callbacks.load(std::memory_order_acquire);
+				const auto current = std::atomic_load_explicit(&listeners.callbacks, std::memory_order_acquire);
 				auto updated = std::make_shared<typename listener_collection<T>::listener_vector>();
 				updated->reserve(current->size() + 1);
 				for (const auto& existing : *current)
@@ -1304,7 +1304,7 @@ namespace mngl
 				updated->push_back(subscription);
 				std::shared_ptr<const typename listener_collection<T>::listener_vector> snapshot =
 				    std::move(updated);
-				listeners.callbacks.store(std::move(snapshot), std::memory_order_release);
+				std::atomic_store_explicit(&listeners.callbacks, std::move(snapshot), std::memory_order_release);
 				std::erase_if(m_subscriptions, [](const auto& existing) { return existing.expired(); });
 				m_subscriptions.push_back(subscription);
 			}
@@ -1356,7 +1356,7 @@ namespace mngl
 		template <event_payload T> struct listener_collection
 		{
 			using listener_vector = std::vector<std::weak_ptr<listener<T>>>;
-			std::atomic<std::shared_ptr<const listener_vector>> callbacks{
+			std::shared_ptr<const listener_vector> callbacks{
 			    std::make_shared<const listener_vector>()};
 		};
 
@@ -1393,7 +1393,7 @@ namespace mngl
 				listeners = std::static_pointer_cast<listener_collection<T>>(found->second);
 			}
 
-			const auto current = listeners->callbacks.load(std::memory_order_acquire);
+			const auto current = listeners->std::atomic_load_explicit(&callbacks, std::memory_order_acquire);
 			std::vector<std::shared_ptr<listener<T>>> snapshot;
 			snapshot.reserve(current->size());
 			for (const auto& weak_listener : *current)
