@@ -904,7 +904,7 @@ namespace mngl::two_d
 		                          const ::mngl::sprite& value,
 		                          const gpu::graphics_shader_asset& fragment_shader)
 		{
-			const ::mngl::texture* source = value.source_texture;
+			const ::mngl::texture* source = value.m_borrowed_source;
 			if (!source && value.source.page.valid())
 			{
 				source = &m_textures.resolve(value.source.page);
@@ -918,9 +918,9 @@ namespace mngl::two_d
 			transform.rotation_radians = value.rotation_radians;
 			transform.object_transform = value.transform;
 
-			if (value.source_texture)
+			if (value.m_borrowed_source)
 			{
-				submit_texture(context, *value.source_texture, transform, value.tint, state,
+				submit_texture(context, *value.m_borrowed_source, transform, value.tint, state,
 				               value.click_callback);
 			}
 			else
