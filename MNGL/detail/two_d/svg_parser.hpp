@@ -9,6 +9,11 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#if defined(__APPLE__)
+#include <cerrno>
+#include <locale.h>
+#include <stdlib.h>
+#endif
 #include <cctype>
 #include <cmath>
 #include <cstddef>
@@ -289,6 +294,74 @@ namespace mngl::two_d::detail::svg
 				throw std::invalid_argument("Unexpected end of SVG number list");
 			}
 
+#if defined(__APPLE__)
+			const std::size_t number_start = m_offset;
+			std::size_t token_end = number_start;
+			if (m_text[token_end] == '+' || m_text[token_end] == '-')
+			{
+				++token_end;
+			}
+			std::size_t significand_digits = 0;
+			while (token_end < m_text.size() &&
+			       std::isdigit(static_cast<unsigned char>(m_text[token_end])))
+			{
+				++token_end;
+				++significand_digits;
+			}
+			if (token_end < m_text.size() && m_text[token_end] == '.')
+			{
+				++token_end;
+				while (token_end < m_text.size() &&
+				       std::isdigit(static_cast<unsigned char>(m_text[token_end])))
+				{
+					++token_end;
+					++significand_digits;
+				}
+			}
+			if (significand_digits == 0) [[unlikely]]
+			{
+				throw std::invalid_argument("SVG contains an invalid or non-finite number");
+			}
+			if (token_end < m_text.size() && (m_text[token_end] == 'e' || m_text[token_end] == 'E'))
+			{
+				std::size_t exponent_end = token_end + 1;
+				if (exponent_end < m_text.size() &&
+				    (m_text[exponent_end] == '+' || m_text[exponent_end] == '-'))
+				{
+					++exponent_end;
+				}
+				const std::size_t exponent_digits_start = exponent_end;
+				while (exponent_end < m_text.size() &&
+				       std::isdigit(static_cast<unsigned char>(m_text[exponent_end])))
+				{
+					++exponent_end;
+				}
+				if (exponent_end != exponent_digits_start)
+				{
+					token_end = exponent_end;
+				}
+			}
+			const std::string token(m_text.substr(number_start, token_end - number_start));
+			static const locale_t c_numeric_locale = []
+			{
+				const locale_t locale = newlocale(LC_NUMERIC_MASK, "C", nullptr);
+				if (locale == nullptr)
+				{
+					throw std::runtime_error("Could not create the C numeric locale for SVG parsing");
+				}
+				return locale;
+			}();
+			char* parsed_end = nullptr;
+			errno = 0;
+			const float result_value = ::strtof_l(token.c_str(), &parsed_end, c_numeric_locale);
+			if (errno == ERANGE || parsed_end != token.c_str() + token.size() ||
+			    !std::isfinite(result_value)) [[unlikely]]
+			{
+				throw std::invalid_argument("SVG contains an invalid or non-finite number");
+			}
+			m_offset = token_end;
+			return result_value;
+#else
 			const char* first = m_text.data() + m_offset;
 			const char* last = m_text.data() + m_text.size();
 			if (*first == '+')
@@ -303,6 +376,7 @@ namespace mngl::two_d::detail::svg
 			}
 			m_offset = static_cast<std::size_t>(result.ptr - m_text.data());
 			return result_value;
+#endif
 		}
 
 		[[nodiscard]] float length()
