@@ -66,9 +66,13 @@ if [[ ! -e "$stage/lib/$(basename "$mixer_library")" ]]; then
 	exit 1
 fi
 
+# Runtime shader translation needs glslang but not spirv-opt. Disabling its
+# optional optimizer avoids compiling the large SPIRV-Tools dependency on both
+# macOS architectures; the packaged HLSL-to-MSL smoke below still verifies output.
 cmake -S "$repo/upstream/glslang" -B "$glslang_build" -GNinja \
 	-DCMAKE_BUILD_TYPE=Release \
 	-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+	-DENABLE_OPT=OFF \
 	-DENABLE_GLSLANG_BINARIES=ON
 cmake --build "$glslang_build" --target glslang-standalone --parallel 4
 glslang_exe=$(find -L "$glslang_build" -type f -name glslangValidator -print -quit)
@@ -226,7 +230,7 @@ MNGL runtime package $PACKAGE_VERSION
 Platform: macOS $(uname -m)
 Minimum macOS version: 15.0
 MNGL source: ${GITHUB_SHA:-local}
-glslang: $(git -C "$repo/upstream/glslang" rev-parse HEAD)
+glslang: $(git -C "$repo/upstream/glslang" rev-parse HEAD) (SPIR-V optimizer disabled for this macOS package build)
 SDL_shadercross: $(git -C "$shadercross_source" rev-parse HEAD; printf ' (DXC disabled; HLSL compiles through glslang and SPIR-V)')
 SDL3: $SDL_VERSION
 SDL3_image: $SDL_IMAGE_VERSION
