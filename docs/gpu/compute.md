@@ -58,7 +58,7 @@ auto pipeline = mngl::gpu::compute_pipeline_builder{}.set_compute_shader(shader)
 	commands.submit();
 }
 
-mngl::sprite output_sprite{output};
+auto output_sprite = mngl::sprite::borrowed(output);
 window.clear();
 window.draw(output_sprite);
 window.display();
@@ -131,7 +131,7 @@ int main()
 		auto pipeline = mngl::gpu::compute_pipeline_builder{}
 		    .set_compute_shader(shader)
 		    .build(device);
-		mngl::sprite image(output, {0.0f, 0.0f, 1.0f, 1.0f});
+		auto image = mngl::sprite::borrowed(output, {0.0f, 0.0f, 1.0f, 1.0f});
 
 		double elapsed = 0.0;
 		while (mngl::input::next_frame())
