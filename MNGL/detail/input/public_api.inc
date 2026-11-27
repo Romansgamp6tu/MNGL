@@ -268,7 +268,6 @@
 		{
 			init_all();
 			update_info();
-			input_frame_index.fetch_add(1, std::memory_order_release);
 		}
 
 		// Dispatch queued SDL events and forward the input batch to Dear ImGui.
@@ -276,6 +275,7 @@
 		{
 			init_all();
 			process_pending_events();
+			input_frame_index.fetch_add(1, std::memory_order_release);
 		}
 
 		// Measure wall-clock time since the previous call and update delta_time().
