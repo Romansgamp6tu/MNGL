@@ -252,7 +252,8 @@ namespace mngl
 		{
 		}
 
-		// The texture object must remain alive at the same address while the borrowed sprite is used.
+		// Use for render targets or other externally owned textures. Keep the texture object alive at the same
+		// address while the borrowed sprite is used.
 		[[nodiscard]] static sprite borrowed(const texture& image)
 		{
 			return borrowed(image, rectangle{glm::vec2(0.0f), image.coordinate_size()});
