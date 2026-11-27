@@ -49,12 +49,12 @@ cmake --build "$mngl_build" --target \
 # package config CMake actually used so dylibbundler can find the image dylibs.
 sdl_image_cmake_dir=$(sed -n 's/^SDL3_image_DIR:PATH=//p' "$mngl_build/CMakeCache.txt")
 if [[ -z "$sdl_image_cmake_dir" || ! -d "$sdl_image_cmake_dir" ]]; then
-	printf '%s\\n' 'Could not resolve the SDL3_image package prefix from CMake.' >&2
+	printf '%s\n' 'Could not resolve the SDL3_image package prefix from CMake.' >&2
 	exit 1
 fi
 sdl_image_prefix=$(cd "$sdl_image_cmake_dir/../../.." && pwd)
-if ! find "$sdl_image_prefix/lib" -maxdepth 1 \\( -type f -o -type l \\) -name 'libSDL3_image*.dylib' -print -quit | grep -q .; then
-	printf 'SDL3_image dylibs were not found in %s/lib.\\n' "$sdl_image_prefix" >&2
+if ! find "$sdl_image_prefix/lib" -maxdepth 1 \( -type f -o -type l \) -name 'libSDL3_image*.dylib' -print -quit | grep -q .; then
+	printf 'SDL3_image dylibs were not found in %s/lib.\n' "$sdl_image_prefix" >&2
 	exit 1
 fi
 
@@ -163,8 +163,8 @@ cmake --install "$mngl_build" --prefix "$stage" --component library
 
 # Stage SDL runtime dylibs before rewriting their @rpath load commands.
 for prefix in "$SDL_PREFIX" "$sdl_image_prefix"; do
-	find "$prefix/lib" -maxdepth 1 \\( -type f -o -type l \\) -name 'libSDL3*.dylib*' \
-		-exec cp -p {} "$stage/lib/" \\\;
+	find "$prefix/lib" -maxdepth 1 \( -type f -o -type l \) -name 'libSDL3*.dylib*' \
+		-exec cp -p {} "$stage/lib/" \;
 done
 
 cp -R "$repo/MNGL/shaders" "$stage/shaders"
