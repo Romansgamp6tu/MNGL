@@ -2,7 +2,7 @@ name: Package MNGL runtime
 
 on:
   push:
-    branches: [main, "V-*"]
+    branches: [main, "V-*", "ci/platform-packages"]
     tags: ["v*"]
     paths-ignore:
       - "README.md"
