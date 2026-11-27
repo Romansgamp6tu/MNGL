@@ -344,7 +344,7 @@ namespace mngl::two_d
 		                           const gpu::graphics_shader_asset& shader)
 		{
 			ensure_preparation_allowed(token);
-			const ::mngl::texture* source = value.source_texture;
+			const ::mngl::texture* source = value.m_borrowed_source;
 			if (!source && value.source.page.valid())
 			{
 				source = &m_textures.resolve(value.source.page);
