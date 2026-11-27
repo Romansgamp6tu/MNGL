@@ -220,6 +220,15 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
+      - name: Set up Python for glslang source dependencies
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch pinned glslang dependencies
+        working-directory: upstream/glslang
+        run: python update_glslang_sources.py
+
       - name: Install macOS runtime build dependencies
         run: |
           brew install bison flex dylibbundler ninja freetype
