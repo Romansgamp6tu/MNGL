@@ -7,6 +7,19 @@ on:
     paths-ignore:
       - "README.md"
       - "docs/**"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/package-runtime.yml"
+      - ".gitmodules"
+      - "CMakeLists.txt"
+      - "cmake/**"
+      - "include/**"
+      - "libs/**"
+      - "MNGL/**"
+      - "scripts/package-runtime-*"
+      - "tests/**"
+      - "third_party/**"
   workflow_dispatch:
 
 permissions:
@@ -142,6 +155,15 @@ jobs:
           path: upstream/SDL_shadercross
           submodules: recursive
           persist-credentials: false
+
+      - name: Set up Python for glslang source dependencies
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch pinned glslang dependencies
+        working-directory: upstream/glslang
+        run: python update_glslang_sources.py
 
       - name: Set up pinned SDL3 and SDL3_image
         id: sdl
