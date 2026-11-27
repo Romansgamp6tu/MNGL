@@ -263,19 +263,51 @@
 			return mapping ? std::string(mapping.get()) : std::string{};
 		}
 
+		// Start one application input frame before dispatching its SDL events.
+		static void begin_frame()
+		{
+			init_all();
+			update_info();
+			input_frame_index.fetch_add(1, std::memory_order_release);
+		}
+
+		// Dispatch queued SDL events and forward the input batch to Dear ImGui.
+		static void process_events()
+		{
+			init_all();
+			process_pending_events();
+		}
+
+		// Measure wall-clock time since the previous call and update delta_time().
+		[[nodiscard]] static double update_time()
+		{
+			init_all();
+			update_dt();
+			return get_dt();
+		}
+
+		// Invoke registered updatable objects with the caller-selected timestep.
+		static void update_updatables(double step)
+		{
+			if (!std::isfinite(step) || step < 0.0) [[unlikely]]
+			{
+				throw std::invalid_argument("Updatable timestep must be finite and non-negative");
+			}
+			update_manager::tick(step);
+		}
+
 		static bool continue_work()
 		{
 			init_all();
 			if (!should_work.load(std::memory_order_acquire)) [[unlikely]]
 				return false;
 			wait_for_next_frame();
-			pool_events();
-			input_frame_index.fetch_add(1, std::memory_order_release);
+			begin_frame();
+			process_events();
 			if (!should_work.load(std::memory_order_acquire)) [[unlikely]]
 				return false;
-			// перерасчёт всех дельт, и тому подобного
-			update_dt();
-			update_manager::tick(dt.load(std::memory_order_relaxed));
+			const double frame_dt = update_time();
+			update_updatables(frame_dt);
 			return true;
 		}
 
