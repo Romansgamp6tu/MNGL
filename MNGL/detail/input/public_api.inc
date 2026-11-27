@@ -311,8 +311,8 @@
 			return true;
 		}
 
-		// One application-loop iteration: handle events, update input/time, and
-		// return false after the application has been asked to close.
+		// Convenience application-loop iteration: handle events, update input/time,
+		// tick registered updatables, and return false after a quit request.
 		[[nodiscard]] static bool next_frame() { return continue_work(); }
 
 		[[deprecated("use input::keyboards() and keyboard::pressed()")]]
