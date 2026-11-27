@@ -11,7 +11,7 @@
 #include <charconv>
 #if defined(__APPLE__)
 #include <cerrno>
-#include <locale.h>
+#include <xlocale.h>
 #include <stdlib.h>
 #endif
 #include <cctype>
