@@ -340,6 +340,7 @@ namespace mngl
 		friend class two_d::frame_2d;
 		friend class two_d::renderer;
 		friend class render_window;
+		friend class resizable_texture;
 		friend class sprite_animation;
 		void draw(two_d::frame_2d& frame) const override;
 		void prepare(two_d::frame_2d& frame) const override;
