@@ -152,16 +152,19 @@ mngl::gpu::texture scene(
 #include <MNGL/texture.hpp>
 #include <MNGL/renderer2d.hpp>
 
-mngl::texture color_image("assets/color.png", mngl::gpu::texture_format::r8g8b8a8_unorm_srgb);
-mngl::texture bgra_image("assets/ui.png", mngl::gpu::texture_format::b8g8r8a8_unorm);
-mngl::sprite ui{bgra_image};
+auto& textures = window.textures();
+const auto color_image = textures.add(mngl::texture(
+    "assets/color.png", mngl::gpu::texture_format::r8g8b8a8_unorm_srgb));
+const auto bgra_image = textures.add(mngl::texture(
+    "assets/ui.png", mngl::gpu::texture_format::b8g8r8a8_unorm));
+mngl::sprite ui{textures, bgra_image};
 
-const auto format = bgra_image.format();
+const auto format = textures.resolve(bgra_image).format();
 ```
 
 У `sprite` нет отдельного формата пикселей: он наследуется от исходной
-текстуры. То же относится к `texture_region` в texture store и
-`sprite_animation` — выберите формат изображения до добавления его в атлас.
+текстуры, на которую указывает handle. То же относится к `texture_region` в
+texture store и `sprite_animation` — выберите формат до добавления текстуры.
 `texture::format()` возвращает фактический GPU-формат.
 
 Загрузка обычных изображений из surface поддерживает четыре формата:
