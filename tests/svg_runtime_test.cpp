@@ -716,30 +716,44 @@ namespace
 				auto blue_context = frame.create_recording_context();
 				std::exception_ptr red_error;
 				std::exception_ptr blue_error;
-				std::jthread red_worker([&]
+				std::thread red_worker;
+				std::thread blue_worker;
+				struct thread_join_guard
+				{
+					std::thread& first;
+					std::thread& second;
+					~thread_join_guard()
+					{
+						if (first.joinable())
+							first.join();
+						if (second.joinable())
+							second.join();
+					}
+				} join_guard{red_worker, blue_worker};
+				red_worker = std::thread([&]
 				                        {
-					                        try
-					                        {
-						                        red_context.draw(red);
-						                        red_context.finish();
-					                        }
-					                        catch (...)
-					                        {
-						                        red_error = std::current_exception();
-					                        }
+				                        try
+				                        {
+					                        red_context.draw(red);
+					                        red_context.finish();
+				                        }
+				                        catch (...)
+				                        {
+					                        red_error = std::current_exception();
+				                        }
 				                        });
-				std::jthread blue_worker([&]
+				blue_worker = std::thread([&]
 				                         {
-					                         try
-					                         {
-						                         blue_context.draw(blue);
-						                         blue_context.finish();
+				                         try
+				                         {
+					                         blue_context.draw(blue);
+					                         blue_context.finish();
 					                         }
 					                         catch (...)
 					                         {
 						                         blue_error = std::current_exception();
 					                         }
-				                         });
+					                         });
 				red_worker.join();
 				blue_worker.join();
 				if (red_error)
