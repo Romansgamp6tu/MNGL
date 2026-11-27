@@ -47,12 +47,10 @@ API развивается быстрее, чем выпускаются гот�
 ## Подключение к своему проекту
 
 Для разработки нужен **development-пакет** MNGL: заголовки, библиотеки и
-CMake-конфигурация. Сейчас self-hosted runner собирает development- и runtime-
-пакеты только для Linux x86_64. CI артефакты доступны в Actions один день, а
-при теге `vX.Y.Z` Linux-пакеты прикладываются к
-[релизу](https://github.com/Romansgamp6tu/MNGL/releases). Windows x64 и macOS
-arm64/x86_64 остаются целевыми платформами, но их автоматическая сборка и
-публикация возобновятся после подключения соответствующих native runners.
+CMake-конфигурация. GitHub Actions собирает development- и runtime-пакеты на стандартных
+runner-ах для Windows x64, Linux x86_64, macOS arm64 и macOS x86_64.
+CI-артефакты доступны в Actions один день. При теге `vX.Y.Z` готовые пакеты
+всех этих платформ прикладываются к [релизу](https://github.com/Romansgamp6tu/MNGL/releases).
 
 Распакуйте подходящий пакет и подключите его в `CMakeLists.txt` приложения:
 

@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   version:
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-24.04
     outputs:
       value: ${{ steps.version.outputs.value }}
     steps:
@@ -39,7 +39,7 @@ jobs:
 
   runtime-linux:
     needs: version
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-24.04
     container:
       image: node:24-trixie
       options: --user 0:0
@@ -114,21 +114,146 @@ jobs:
           runner_gid="$(stat -c '%g' "$runner_workspace_parent")"
           chown -R "$runner_uid:$runner_gid" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
 
+  runtime-windows:
+    needs: version
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 180
+    steps:
+      - name: Check out MNGL
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Check out pinned glslang
+        uses: actions/checkout@v4
+        with:
+          repository: KhronosGroup/glslang
+          ref: e1b562a8bed273a02f30b59b66a5d499793cede5
+          path: upstream/glslang
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Check out pinned SDL_shadercross
+        uses: actions/checkout@v4
+        with:
+          repository: libsdl-org/SDL_shadercross
+          ref: 1ff05bec573988a98ef9e0260b4da44f512b8367
+          path: upstream/SDL_shadercross
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up pinned SDL3 and SDL3_image
+        id: sdl
+        uses: libsdl-org/setup-sdl@afd98199e97f9c2aa739474be7e0886d149a5e47
+        with:
+          version: 3.4.18
+          version-sdl-image: 3.4.8
+          build-type: Release
+          cmake-generator: Visual Studio 18 2026
+
+      - name: Build Windows runtime package
+        shell: pwsh
+        env:
+          PACKAGE_VERSION: ${{ needs.version.outputs.value }}
+          SDL_ROOT: ${{ steps.sdl.outputs.prefix }}
+          SDL_VERSION: 3.4.18
+          SDL_IMAGE_VERSION: 3.4.8
+        run: ./scripts/package-runtime-windows.ps1
+
+      - name: Upload Windows runtime artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mngl-runtime-windows-x64-${{ needs.version.outputs.value }}
+          path: mngl-runtime-windows-x64-*.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  runtime-macos:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            package_arch: arm64
+          - runner: macos-15-intel
+            package_arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    steps:
+      - name: Check out MNGL
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Check out pinned glslang
+        uses: actions/checkout@v4
+        with:
+          repository: KhronosGroup/glslang
+          ref: e1b562a8bed273a02f30b59b66a5d499793cede5
+          path: upstream/glslang
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Check out pinned SDL_shadercross
+        uses: actions/checkout@v4
+        with:
+          repository: libsdl-org/SDL_shadercross
+          ref: 1ff05bec573988a98ef9e0260b4da44f512b8367
+          path: upstream/SDL_shadercross
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install macOS runtime build dependencies
+        run: |
+          brew install bison flex dylibbundler ninja freetype
+          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
+
+      - name: Set up pinned SDL3 and SDL3_image
+        id: sdl
+        uses: libsdl-org/setup-sdl@afd98199e97f9c2aa739474be7e0886d149a5e47
+        with:
+          version: 3.4.18
+          version-sdl-image: 3.4.8
+          build-type: Release
+          cmake-generator: Ninja
+          install-linux-dependencies: true
+
+      - name: Build macOS runtime package
+        env:
+          PACKAGE_VERSION: ${{ needs.version.outputs.value }}
+          SDL_PREFIX: ${{ steps.sdl.outputs.prefix }}
+          SDL_VERSION: ${{ steps.sdl.outputs.version }}
+          SDL_IMAGE_VERSION: 3.4.8
+          PKG_CONFIG_PATH: ${{ steps.sdl.outputs.prefix }}/lib/pkgconfig
+        run: bash scripts/package-runtime-macos.sh
+
+      - name: Upload macOS runtime artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mngl-runtime-macos-${{ matrix.package_arch }}-${{ needs.version.outputs.value }}
+          path: mngl-runtime-macos-*.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
   publish-release:
-    needs: [version, runtime-linux]
+    needs: [version, runtime-linux, runtime-windows, runtime-macos]
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - name: Download Linux runtime package
+      - name: Download all runtime packages
         uses: actions/download-artifact@v4
         with:
-          pattern: mngl-runtime-linux-*
+          pattern: mngl-runtime-*
           path: release-assets
           merge-multiple: true
 
-      - name: Attach Linux runtime package to the GitHub Release
+      - name: Attach runtime packages to the GitHub Release
         uses: actions/github-script@v7
         with:
           script: |
@@ -169,8 +294,8 @@ jobs:
               prerelease: tag_name.includes("-"),
             }));
 
-            const files = fs.readdirSync("release-assets").filter((name) => name.endsWith(".tar.gz"));
-            if (files.length !== 1) throw new Error("Expected one Linux runtime package, found " + files.length);
+            const files = fs.readdirSync("release-assets").filter((name) => name.endsWith(".tar.gz") || name.endsWith(".zip"));
+            if (files.length !== 4) throw new Error("Expected four runtime packages, found " + files.length);
             const existingAssets = await github.paginate(github.rest.repos.listReleaseAssets, {
               owner,
               repo,
@@ -190,7 +315,7 @@ jobs:
                 name: assetName,
                 data,
                 headers: {
-                  "content-type": "application/gzip",
+                  "content-type": assetName.endsWith(".zip") ? "application/zip" : "application/gzip",
                   "content-length": String(data.length),
                 },
               });
