@@ -107,8 +107,9 @@ player.pos += direction * (0.4f * dt);
 Положите PNG в `assets/image.png` относительно рабочего каталога процесса. Добавьте `#include <MNGL/texture.hpp>`, а после создания окна, **до цикла**, создайте текстуру и спрайт:
 
 ```cpp
-mngl::texture image("assets/image.png");
-mngl::sprite picture{image, mngl::rectangle{0.1f, 0.1f, 0.6f, 0.4f}};
+auto& textures = window.textures();
+const auto image = textures.add(mngl::texture("assets/image.png"));
+mngl::sprite picture{textures, image, mngl::rectangle{0.1f, 0.1f, 0.6f, 0.4f}};
 ```
 
 В кадре вместо цветного прямоугольника вызовите:
@@ -117,9 +118,9 @@ mngl::sprite picture{image, mngl::rectangle{0.1f, 0.1f, 0.6f, 0.4f}};
 frame.draw(picture);
 ```
 
-Текстура загружается один раз; спрайт хранит ссылку на неё и параметры рисования. Создание текстуры внутри игрового цикла повторяло бы чтение файла и загрузку на GPU каждый кадр. Объект `image` должен жить до отправки каждого использующего его кадра, то есть как минимум до `frame.display()`.
+Текстура загружается один раз и передаётся во владеющий ею `texture_store`; спрайт хранит handle страницы и параметры рисования. Handle остаётся тем же, даже если сам `texture` перемещён в store. Store окна должен жить дольше renderer и кадров, которые его используют.
 
-Явный `rectangle` задаёт размер изображения в сцене и может изменить его пропорции. Конструктор `mngl::sprite picture{image};` берёт исходные пропорции из `image.coordinate_size()`. Положение и размер можно менять через `picture.position(...)` и `picture.size(...)`.
+Явный `rectangle` задаёт размер изображения в сцене и может изменить его пропорции. Конструктор `mngl::sprite picture{textures, image};` берёт исходные пропорции из текстуры в store. Положение и размер можно менять через `picture.position(...)` и `picture.size(...)`.
 
 Для GIF используется [animated_texture](../core/media-and-colors.md), для кадров из одного PNG — [анимация по атласу](sprite-animation.md).
 
@@ -130,11 +131,12 @@ frame.draw(picture);
 изображения, передайте его явно:
 
 ```cpp
-mngl::texture image("assets/image.png", mngl::gpu::texture_format::r8g8b8a8_unorm_srgb);
-mngl::sprite picture{image, mngl::rectangle{0.1f, 0.1f, 0.6f, 0.4f}};
+const auto image = textures.add(mngl::texture(
+    "assets/image.png", mngl::gpu::texture_format::r8g8b8a8_unorm_srgb));
+mngl::sprite picture{textures, image, mngl::rectangle{0.1f, 0.1f, 0.6f, 0.4f}};
 ```
 
-Формат принадлежит `image`, а `sprite` использует эту текстуру как источник.
+Формат принадлежит текстуре в store, а `sprite` использует её через handle.
 `texture(path, format)` и загрузка из `surface` поддерживают RGBA8/BGRA8 в
 UNORM и sRGB вариантах. Для float, integer и сжатых форматов нужны пиксельные
 данные, уже закодированные в совместимом представлении; GPU проверит поддержку
