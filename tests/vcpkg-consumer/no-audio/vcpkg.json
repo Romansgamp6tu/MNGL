@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "mngl-vcpkg-consumer-no-audio",
+  "version-string": "0.1.0",
+  "builtin-baseline": "ba33ef1a2fb3c6519e819cd767bb8fd1677f1323",
+  "dependencies": [
+    {
+      "name": "mngl",
+      "default-features": false
+    }
+  ]
+}
