@@ -3,10 +3,12 @@
 #include "common.hpp"
 #include "../../gpu_optimizations.hpp"
 
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <utility>
@@ -22,6 +24,21 @@ namespace mngl::two_d
 	namespace detail
 	{
 		struct resident_mesh_vertex;
+
+		inline std::uint64_t allocate_texture_store_id()
+		{
+			static std::atomic<std::uint64_t> next_id{1};
+			auto id = next_id.load(std::memory_order_relaxed);
+			while (id != 0 && id != std::numeric_limits<std::uint64_t>::max())
+			{
+				if (next_id.compare_exchange_weak(id, id + 1, std::memory_order_relaxed,
+				                                  std::memory_order_relaxed))
+				{
+					return id;
+				}
+			}
+			throw std::overflow_error("2D texture store identity space exhausted");
+		}
 	}
 
 	inline void enable_scene_culling() noexcept
@@ -56,10 +73,23 @@ namespace mngl::two_d
 	{
 		constexpr static std::uint32_t invalid_value = std::numeric_limits<std::uint32_t>::max();
 
-		std::uint32_t value = invalid_value;
-
-		[[nodiscard]] constexpr bool valid() const noexcept { return value != invalid_value; }
+		constexpr texture_handle() noexcept = default;
+		[[nodiscard]] constexpr bool valid() const noexcept
+		{
+			return m_value != invalid_value && m_store_id != 0;
+		}
 		constexpr bool operator==(const texture_handle&) const noexcept = default;
+
+	private:
+		friend class texture_store;
+
+		constexpr texture_handle(std::uint32_t value, std::uint64_t store_id) noexcept
+		    : m_value(value), m_store_id(store_id)
+		{
+		}
+
+		std::uint32_t m_value = invalid_value;
+		std::uint64_t m_store_id = 0;
 	};
 
 	struct texture_region
@@ -71,7 +101,8 @@ namespace mngl::two_d
 	class texture_store
 	{
 	public:
-		explicit texture_store(const gpu::device& device) : m_device(device)
+		explicit texture_store(const gpu::device& device)
+		    : m_device(device), m_store_id(detail::allocate_texture_store_id())
 		{
 			if (!m_device.raw()) [[unlikely]]
 			{
@@ -102,7 +133,7 @@ namespace mngl::two_d
 			}
 
 			m_pages.push_back(std::move(page));
-			return texture_handle{static_cast<std::uint32_t>(m_pages.size() - 1)};
+			return texture_handle{static_cast<std::uint32_t>(m_pages.size() - 1), m_store_id};
 		}
 
 		[[nodiscard]] texture_region region(texture_handle page,
@@ -126,20 +157,20 @@ namespace mngl::two_d
 
 		[[nodiscard]] const ::mngl::texture& resolve(texture_handle page) const
 		{
-			if (!page.valid() || page.value >= m_pages.size()) [[unlikely]]
+			if (!page.valid() || page.m_store_id != m_store_id || page.m_value >= m_pages.size()) [[unlikely]]
 			{
-				throw std::out_of_range("Invalid 2D texture handle");
+				throw std::out_of_range("Invalid 2D texture handle for this store");
 			}
-			return m_pages[page.value];
+			return m_pages[page.m_value];
 		}
 
 		[[nodiscard]] ::mngl::texture& resolve(texture_handle page)
 		{
-			if (!page.valid() || page.value >= m_pages.size()) [[unlikely]]
+			if (!page.valid() || page.m_store_id != m_store_id || page.m_value >= m_pages.size()) [[unlikely]]
 			{
-				throw std::out_of_range("Invalid 2D texture handle");
+				throw std::out_of_range("Invalid 2D texture handle for this store");
 			}
-			return m_pages[page.value];
+			return m_pages[page.m_value];
 		}
 
 		[[nodiscard]] SDL_GPUDevice* device_raw() const noexcept { return m_device.raw(); }
@@ -168,7 +199,8 @@ namespace mngl::two_d
 		}
 
 		gpu::device m_device;
-		// V2 handles are append-only and stable until the store is destroyed.
+		const std::uint64_t m_store_id;
+		// Handles are append-only and remain stable until this store is destroyed.
 		std::deque<::mngl::texture> m_pages;
 		texture_handle m_white_page{};
 	};
@@ -178,6 +210,7 @@ namespace mngl::two_d
 namespace mngl::two_d
 {
 	class frame_2d;
+	class renderer;
 	class svg_sprite;
 } // namespace mngl::two_d
 
@@ -200,14 +233,16 @@ namespace mngl
 	{
 		sprite() = default;
 
-		explicit sprite(const texture& image)
-		    : sprite(image, rectangle{glm::vec2(0.0f), image.coordinate_size()})
+		explicit sprite(const two_d::texture_store& textures, two_d::texture_handle image)
+		    : sprite(textures.region(image),
+		             rectangle{glm::vec2(0.0f), textures.resolve(image).coordinate_size()})
 		{
 		}
 
-		sprite(const texture& image, const rectangle& destination,
-		       const color& tint = color(1.0f, 1.0f, 1.0f, 1.0f), gpu::quad_draw_state state = {})
-		    : source_texture(&image), destination(destination), tint(tint), state(std::move(state))
+		sprite(const two_d::texture_store& textures, two_d::texture_handle image,
+		       const rectangle& destination, const color& tint = color(1.0f, 1.0f, 1.0f, 1.0f),
+		       gpu::quad_draw_state state = {})
+		    : sprite(textures.region(image), destination, tint, std::move(state))
 		{
 		}
 
@@ -215,6 +250,25 @@ namespace mngl
 		       const color& tint = color(1.0f, 1.0f, 1.0f, 1.0f), gpu::quad_draw_state state = {})
 		    : source(source), destination(destination), tint(tint), state(std::move(state))
 		{
+		}
+
+		// Use for render targets or other externally owned textures. Keep the texture object alive at the same
+		// address while the borrowed sprite is used.
+		[[nodiscard]] static sprite borrowed(const texture& image)
+		{
+			return borrowed(image, rectangle{glm::vec2(0.0f), image.coordinate_size()});
+		}
+
+		[[nodiscard]] static sprite borrowed(
+		    const texture& image, const rectangle& destination,
+		    const color& tint = color(1.0f, 1.0f, 1.0f, 1.0f), gpu::quad_draw_state state = {})
+		{
+			sprite result{};
+			result.m_borrowed_source = &image;
+			result.destination = destination;
+			result.tint = tint;
+			result.state = std::move(state);
+			return result;
 		}
 
 		sprite(glm::uvec2 target_size, const gpu::graphics_shader_asset& fragment_shader)
@@ -270,8 +324,11 @@ namespace mngl
 		void clear_on_click() noexcept { click_callback.reset(); }
 
 		two_d::texture_region source{};
-		// Non-owning; keep this texture alive until each frame using the sprite is submitted.
-		const texture* source_texture = nullptr;
+
+	private:
+		const texture* m_borrowed_source = nullptr;
+
+	public:
 		rectangle destination{};
 		glm::vec2 pivot{0.5f, 0.5f};
 		float rotation_radians = 0.0f;
@@ -282,6 +339,10 @@ namespace mngl
 
 	private:
 		friend class two_d::frame_2d;
+		friend class two_d::renderer;
+		friend class render_window;
+		friend class resizable_texture;
+		friend class sprite_animation;
 		void draw(two_d::frame_2d& frame) const override;
 		void prepare(two_d::frame_2d& frame) const override;
 		const gpu::graphics_shader_asset* m_fragment_shader = nullptr;
@@ -383,7 +444,7 @@ namespace mngl
 		void apply_to(sprite& target) const noexcept
 		{
 			target.source = current_region();
-			target.source_texture = nullptr;
+			target.m_borrowed_source = nullptr;
 		}
 
 	private:

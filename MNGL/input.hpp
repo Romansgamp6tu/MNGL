@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <bitset>
+#include <cmath>
 #include <cstddef>
 #include <limits>
 #include <memory>

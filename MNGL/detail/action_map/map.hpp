@@ -54,7 +54,7 @@ namespace mngl
 		input_release_reason release_reason{input_release_reason::none};
 	};
 
-	// Named action bindings. Copies share storage so existing InputContexts see edits.
+	// Named action bindings. Copies own their bindings; share() explicitly shares storage.
 	class action_map
 	{
 		struct key_binding
@@ -145,6 +145,9 @@ namespace mngl
 		};
 
 		std::shared_ptr<storage> m_storage{std::make_shared<storage>()};
+
+		explicit action_map(std::shared_ptr<storage> shared_storage) : m_storage(std::move(shared_storage)) {}
+
 		friend class input_context;
 
 		static void validate_action_name(std::string_view name)
@@ -176,6 +179,40 @@ namespace mngl
 		}
 
 	public:
+		action_map() = default;
+
+		action_map(const action_map& other)
+		    : m_storage(std::make_shared<storage>(*other.m_storage))
+		{
+		}
+
+		action_map& operator=(const action_map& other)
+		{
+			if (this != &other)
+			{
+				m_storage = std::make_shared<storage>(*other.m_storage);
+			}
+			return *this;
+		}
+
+		action_map(action_map&& other)
+		    : m_storage(std::exchange(other.m_storage, std::make_shared<storage>()))
+		{
+		}
+
+		action_map& operator=(action_map&& other)
+		{
+			if (this != &other)
+			{
+				auto empty_storage = std::make_shared<storage>();
+				m_storage = std::exchange(other.m_storage, std::move(empty_storage));
+			}
+			return *this;
+		}
+
+		// Return another map object that intentionally references the same bindings.
+		[[nodiscard]] action_map share() const { return action_map{m_storage}; }
+
 		// Bindings are additive: one action may be triggered by any number of devices.
 		// An omitted device ID means any connected device of that type.
 		void bind_key(std::string_view action, scancode code,

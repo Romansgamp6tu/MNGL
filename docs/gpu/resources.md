@@ -140,7 +140,7 @@ mngl::gpu::texture scene(
 
 `has_usage(a | b)` возвращает `true`, только когда присутствуют оба флага. Для проверки любого используйте `has_usage(a) || has_usage(b)`.
 
-Для PNG, JPEG и обычного 2D-кадра используйте `mngl::texture`. Она предоставляет `raw_gpu_texture()` для GPU-прохода и затем может отображаться через `mngl::sprite`; пример такого сочетания есть в [compute-руководстве](compute.md). Это сохраняет простой 2D lifecycle, когда собственное управление загрузкой пикселей не требуется.
+Для PNG, JPEG и обычного 2D-кадра переместите `mngl::texture` в `window.textures()` и создайте спрайт из `texture_store` и handle. Это сохраняет простой 2D lifecycle, когда собственное управление загрузкой пикселей не требуется. Текстуру, созданную как GPU/render target, показывайте через явное заимствование `mngl::sprite::borrowed()`; пример есть в [compute-руководстве](compute.md).
 
 ### Формат изображения для 2D и спрайтов
 
@@ -149,19 +149,24 @@ mngl::gpu::texture scene(
 интерпретация или порядок каналов:
 
 ```cpp
+#include <MNGL/render_window.hpp>
 #include <MNGL/texture.hpp>
 #include <MNGL/renderer2d.hpp>
 
-mngl::texture color_image("assets/color.png", mngl::gpu::texture_format::r8g8b8a8_unorm_srgb);
-mngl::texture bgra_image("assets/ui.png", mngl::gpu::texture_format::b8g8r8a8_unorm);
-mngl::sprite ui{bgra_image};
+mngl::render_window window("Texture formats", {800, 600});
+auto& textures = window.textures();
+const auto color_image = textures.add(mngl::texture(
+    "assets/color.png", mngl::gpu::texture_format::r8g8b8a8_unorm_srgb));
+const auto bgra_image = textures.add(mngl::texture(
+    "assets/ui.png", mngl::gpu::texture_format::b8g8r8a8_unorm));
+mngl::sprite ui{textures, bgra_image};
 
-const auto format = bgra_image.format();
+const auto format = textures.resolve(bgra_image).format();
 ```
 
 У `sprite` нет отдельного формата пикселей: он наследуется от исходной
-текстуры. То же относится к `texture_region` в texture store и
-`sprite_animation` — выберите формат изображения до добавления его в атлас.
+текстуры, на которую указывает handle. То же относится к `texture_region` в
+texture store и `sprite_animation` — выберите формат до добавления текстуры.
 `texture::format()` возвращает фактический GPU-формат.
 
 Загрузка обычных изображений из surface поддерживает четыре формата:

@@ -20,24 +20,102 @@ MSVC x64. Сборка самого MNGL и пакетов описана [от�
 | Runtime | Динамические библиотеки, shader tools, встроенные шейдеры и манифест | Запуск и распространение приложения |
 | Исходники | Код MNGL, демо, моды, тесты и заголовки зависимостей | Разработка библиотеки и подключение свежего API |
 
-Пока self-hosted runner настроен только для Linux, CI автоматически собирает
-development- и runtime-пакеты для Linux x86_64. Windows x64 и macOS arm64/x86_64
-остаются целевыми платформами, но автоматические пакеты для них приостановлены
-до подключения native runners. macOS development-пакет рассчитан на
-установленный SDL3, SDL3_image и FreeType; пакет содержит MNGL и SDL3_mixer.
-Выбирайте архивы одной версии и архитектуры: заголовки, библиотеки и runtime
-должны соответствовать друг другу.
-
-Workflow `Package MNGL Linux development kit` создаёт development артефакт,
-`Package MNGL runtime` — runtime артефакт. CI артефакты сохраняются один день.
-В тегированный GitHub Release прикладываются только Linux x86_64 development- и
-runtime-пакеты. Сборка архива не подтверждает работу каждого GPU backend на
-пользовательском оборудовании.
+GitHub Actions собирает development- и runtime-пакеты для Windows x64,
+Linux x86_64 и macOS arm64/x86_64. CI артефакты хранятся один день; архивы для
+этих платформ прикладываются к GitHub Release при сборке тега `vX.Y.Z`.
+Выбирайте development- и runtime-пакеты одной версии и архитектуры.
+Полная CTest-матрица выполняется на Linux; на Windows, Linux и macOS также
+запускаются runtime smoke-проверки. Сборка архива сама по себе не гарантирует
+работу каждого GPU backend на пользовательском оборудовании.
 
 Документация описывает текущий `main`. В частности, input v2 и `audio.hpp`
 могут отсутствовать в более раннем пакете. `MNGL::MNGL` автоматически подключает
 SDL3_mixer в пакетах, которые содержат audio v1 или новее; его возможности и
 варианты отключения описаны в [руководстве по аудио](../core/audio.md#sdl3-mixer).
+
+## Установка через vcpkg
+
+MNGL публикуется как пакет `mngl` в Git registry, расположенном прямо в
+репозитории: порты находятся в `ports/`, база версий — в `versions/`.
+Для проекта используйте manifest mode vcpkg.
+
+Команда `vcpkg install github.com/Romansgamp6tu/MNGL` не поддерживается:
+vcpkg устанавливает пакет по имени, а Git registry подключается через
+`vcpkg-configuration.json`.
+
+В `vcpkg.json` добавьте зависимость:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "my-game",
+  "version-string": "0.1.0",
+  "builtin-baseline": "<commit SHA Microsoft/vcpkg>",
+  "dependencies": [
+    "mngl"
+  ]
+}
+```
+
+В `vcpkg-configuration.json` подключите MNGL registry:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg-configuration.schema.json",
+  "registries": [
+    {
+      "kind": "git",
+      "repository": "https://github.com/Romansgamp6tu/MNGL",
+      "reference": "main",
+      "baseline": "<commit SHA MNGL с нужной версией в versions/baseline.json>",
+      "packages": [
+        "mngl"
+      ]
+    }
+  ]
+}
+```
+
+В поле `baseline` укажите commit SHA MNGL, содержащий запись нужной версии
+в `versions/baseline.json`. Это закрепляет версию registry для повторяемой
+сборки; `reference` указывает Git ref, из которого vcpkg загрузит этот commit.
+Базовую версию встроенного registry Microsoft задаёт `builtin-baseline`
+в manifest.
+
+Из каталога проекта выполните `vcpkg install` или сконфигурируйте CMake
+с toolchain vcpkg — manifest mode установит пакет автоматически:
+
+```sh
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+```
+
+Порт поддерживает Windows x64/arm64, Linux x64/arm64, macOS arm64 и Intel x64.
+Аудио через SDL3_mixer включено по умолчанию. Если оно не нужно, замените
+строку `"mngl"` в массиве `dependencies` объектом:
+
+```json
+{
+  "name": "mngl",
+  "default-features": false
+}
+```
+
+Для приложения используйте обычный CMake target:
+
+```cmake
+find_package(MNGL CONFIG REQUIRED)
+target_link_libraries(my_game PRIVATE MNGL::MNGL)
+```
+
+Чтобы выпустить новую версию registry, обновите версию порта и commit исходников
+в `ports/mngl`, затем из корня репозитория выполните:
+
+```sh
+vcpkg --x-builtin-ports-root=./ports --x-builtin-registry-versions-dir=./versions x-add-version --all --verbose
+```
+
+Закоммитьте изменения `versions/` и обновите `baseline` в конфигурации
+потребителя на commit SHA, содержащий новую версию.
 
 ## Минимальный CMake-проект
 
@@ -189,11 +267,11 @@ install rules и экспорт CMake config объявляются именно
 ## Рендеринг и данные приложения
 
 Для рисования используйте `render_window.hpp` и [быстрый старт 2D](../2d/quick-start.md).
-Development-пакет содержит заголовки и библиотеки; встроенные файлы
-`shaders/` и shader tools поставляются runtime-пакетом либо берутся из
-исходников и устанавливаются самостоятельно. Расположите runtime `shaders/`
-рядом с исполняемым файлом. Нужные программы компиляции шейдеров должны
-быть доступны через `PATH` или явно заданы в настройках shader loader.
+Development-пакет содержит заголовки, библиотеку и встроенные файлы
+`shaders/` в своём install prefix; CMake target `MNGL::MNGL` передаёт
+приложению путь к ним. Если рядом с исполняемым файлом есть собственная папка
+`shaders/`, она имеет приоритет. Shader tools входят в runtime-пакет и должны
+быть доступны через `PATH` или настройки shader loader.
 Подробности: [Шейдеры](../gpu/shaders.md).
 
 Пользовательские текстуры, звуки и шрифты — данные приложения. CMake MNGL

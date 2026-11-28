@@ -58,7 +58,7 @@ int main()
             graph.execute();
 
             auto frame = window.frame();
-            mngl::sprite result{graph.texture(output)};
+            auto result = mngl::sprite::borrowed(graph.texture(output));
             frame.draw(result);
             frame.display();
         }

@@ -26,10 +26,10 @@ GPU-форматов передавайте пиксельные данные в
 ```cpp
 mngl::animated_texture animation(
     "assets/animation.gif", mngl::gpu::texture_format::r8g8b8a8_unorm_srgb);
-mngl::sprite image(animation.as_texture(), mngl::rectangle{0.0f, 0.0f, 2.0f, 2.0f});
+auto image = mngl::sprite::borrowed(animation.as_texture(), mngl::rectangle{0.0f, 0.0f, 2.0f, 2.0f});
 ```
 
-`animated_texture` владеет исходной анимацией и автоматически загружает новый кадр в GPU-текстуру после смены кадра в `input::next_frame()`. `as_texture()` возвращает ссылку: объект `animation` должен жить, пока спрайт рисуется.
+`animated_texture` владеет исходной анимацией и автоматически загружает новый кадр в GPU-текстуру после смены кадра в `input::next_frame()`. `as_texture()` возвращает ссылку: `sprite::borrowed()` не продлевает её жизнь, поэтому объект `animation` должен оставаться живым и по тому же адресу, пока используется спрайт.
 
 Если нужно работать с кадрами напрямую, загрузите файл в `mngl::surface`. Метод `raw()` возвращает указатель на текущий кадр без передачи владения; `animated()` сообщает, содержит ли анимация несколько кадров, а `on_frame_changed` вызывается при переключении кадра. `mngl::texture(surface)` по-прежнему загружает только текущий кадр и не обновляется автоматически.
 

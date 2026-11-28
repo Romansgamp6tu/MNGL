@@ -1,4 +1,4 @@
-name: Package MNGL development kit
+name: Package MNGL development kits
 
 on:
   push:
@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   version:
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       value: ${{ steps.version.outputs.value }}
@@ -35,15 +35,41 @@ jobs:
           echo "value=$version" >> "$GITHUB_OUTPUT"
 
   build-package:
-    if: ${{ false }}
-    runs-on: [self-hosted, linux, x64]
+    needs: version
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 60
     steps:
-      - name: Windows package is paused until a Windows runner is available
-        run: echo "Skipped"
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Configure Windows package
+        shell: pwsh
+        env:
+          MNGL_PACKAGE_VERSION: ${{ needs.version.outputs.value }}
+          MNGL_PACKAGE_BRANCH: ${{ github.ref_type == 'branch' && github.ref_name || 'main' }}
+        run: cmake -S . -B build-devel-windows -G "Visual Studio 18 2026" -A x64 -DBUILD_TESTING=OFF -DMNGL_BUILD_MOD_EXAMPLE=OFF -DMNGL_BUILD_WINDOWS_DEVEL_PACKAGE=ON "-DMNGL_PACKAGE_VERSION=$env:MNGL_PACKAGE_VERSION" "-DMNGL_PACKAGE_BRANCH=$env:MNGL_PACKAGE_BRANCH"
+
+      - name: Build package libraries
+        run: cmake --build build-devel-windows --config Release --target mngl_imgui SDL3_mixer-shared --parallel 4
+
+      - name: Create Windows development ZIP
+        run: cpack --config build-devel-windows/CPackConfig.cmake -C Release -G ZIP
+
+      - name: Upload Windows development package
+        uses: actions/upload-artifact@v4
+        with:
+          name: mngl-devel-windows-x64-${{ needs.version.outputs.value }}
+          path: build-devel-windows/packages/*.zip
+          if-no-files-found: error
+          retention-days: 1
 
   build-linux-package:
     needs: version
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-24.04
     container:
       image: node:24-trixie
       options: --user 0:0
@@ -126,7 +152,6 @@ jobs:
           chown -R "$runner_uid:$runner_gid" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
 
   build-macos-package:
-    if: ${{ false }}
     needs: version
     strategy:
       fail-fast: false
@@ -138,22 +163,62 @@ jobs:
           - runner: macos-15-intel
             cmake_arch: x86_64
             package_arch: x64
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
     steps:
-      - name: macOS packages are paused until native runners are available
-        run: echo "Skipped"
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install macOS package dependencies
+        run: brew install ninja freetype
+
+      - name: Set up pinned SDL3 and SDL3_image
+        id: sdl
+        uses: libsdl-org/setup-sdl@afd98199e97f9c2aa739474be7e0886d149a5e47
+        with:
+          version: 3.4.18
+          version-sdl-image: 3.4.8
+          build-type: Release
+          cmake-generator: Ninja
+          install-linux-dependencies: true
+
+      - name: Configure macOS package
+        env:
+          MNGL_PACKAGE_VERSION: ${{ needs.version.outputs.value }}
+          MNGL_PACKAGE_BRANCH: ${{ github.ref_type == 'branch' && github.ref_name || 'main' }}
+          SDL_PREFIX: ${{ steps.sdl.outputs.prefix }}
+          CMAKE_ARCH: ${{ matrix.cmake_arch }}
+        run: cmake -S . -B build-devel-macos -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="$CMAKE_ARCH" -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 "-DCMAKE_PREFIX_PATH=$SDL_PREFIX;$(brew --prefix)" -DBUILD_TESTING=OFF -DMNGL_BUILD_MOD_EXAMPLE=OFF -DMNGL_BUILD_MACOS_DEVEL_PACKAGE=ON "-DMNGL_PACKAGE_VERSION=$MNGL_PACKAGE_VERSION" "-DMNGL_PACKAGE_BRANCH=$MNGL_PACKAGE_BRANCH"
+
+      - name: Build package libraries
+        run: cmake --build build-devel-macos --target mngl_imgui SDL3_mixer-shared --parallel 4
+
+      - name: Create macOS development tarball
+        run: cpack --config build-devel-macos/CPackConfig.cmake -G TGZ
+
+      - name: Upload macOS development package
+        uses: actions/upload-artifact@v4
+        with:
+          name: mngl-devel-macos-${{ matrix.package_arch }}-${{ needs.version.outputs.value }}
+          path: build-devel-macos/packages/*.tar.gz
+          if-no-files-found: error
+          retention-days: 1
 
   publish-release:
-    needs: [version, build-linux-package]
+    needs: [version, build-package, build-linux-package, build-macos-package]
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - name: Download Linux development package
         uses: actions/download-artifact@v4
         with:
-          pattern: mngl-devel-linux-*
+          pattern: mngl-devel-*
           path: release-assets
           merge-multiple: true
 
@@ -165,9 +230,9 @@ jobs:
             const path = require("node:path");
             const { owner, repo } = context.repo;
             const tag_name = context.ref.replace("refs/tags/", "");
-            const files = fs.readdirSync("release-assets").filter((name) => name.endsWith(".tar.gz"));
-            if (files.length !== 1) {
-              throw new Error("Expected one Linux development package, found " + files.length);
+            const files = fs.readdirSync("release-assets").filter((name) => name.endsWith(".tar.gz") || name.endsWith(".zip"));
+            if (files.length !== 4) {
+              throw new Error("Expected four development packages, found " + files.length);
             }
 
             let release;
@@ -222,7 +287,7 @@ jobs:
                 name: assetName,
                 data,
                 headers: {
-                  "content-type": "application/gzip",
+                  "content-type": assetName.endsWith(".zip") ? "application/zip" : "application/gzip",
                   "content-length": String(data.length),
                 },
               });

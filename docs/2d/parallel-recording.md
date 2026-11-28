@@ -51,15 +51,15 @@ frame.prepare(title_text);
 
 ## Независимые offscreen-цели
 
-Если сцены не зависят друг от друга, можно параллельно отрисовать их в разные текстуры, а затем собрать результат в окне. Сначала создайте все frame scope на главном потоке; каждый scope и его target должна использовать только одна задача:
+Если сцены не зависят друг от друга, можно параллельно отрисовать их в разные текстуры, а затем собрать результат в окне. `sprite::borrowed()` здесь подчёркивает заимствование: исходные текстуры и цели должны жить и оставаться по тому же адресу до завершения всех worker-кадров и композиции. Сначала создайте все frame scope на главном потоке; каждый scope и его target должна использовать только одна задача:
 
 ```cpp
 #include <future>
 
 mngl::texture left_target(512, 512);
 mngl::texture right_target(512, 512);
-mngl::sprite left_content(left_source, {0.0f, 0.0f, 1.0f, 1.0f});
-mngl::sprite right_content(right_source, {0.0f, 0.0f, 1.0f, 1.0f});
+auto left_content = mngl::sprite::borrowed(left_source, {0.0f, 0.0f, 1.0f, 1.0f});
+auto right_content = mngl::sprite::borrowed(right_source, {0.0f, 0.0f, 1.0f, 1.0f});
 
 auto left_frame = left_target.frame();
 auto right_frame = right_target.frame();
@@ -81,8 +81,8 @@ auto right_job = std::async(std::launch::async,
 left_job.get();
 right_job.get();
 
-mngl::sprite left_result(left_target, {0.0f, 0.0f, 0.5f, 1.0f});
-mngl::sprite right_result(right_target, {0.5f, 0.0f, 0.5f, 1.0f});
+auto left_result = mngl::sprite::borrowed(left_target, {0.0f, 0.0f, 0.5f, 1.0f});
+auto right_result = mngl::sprite::borrowed(right_target, {0.5f, 0.0f, 0.5f, 1.0f});
 auto composite = window.frame();
 composite.draw(left_result);
 composite.draw(right_result);

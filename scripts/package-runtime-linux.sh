@@ -176,6 +176,7 @@ done < <(find "$stage/lib" -maxdepth 1 -type f -name '*.so*' -print0)
 
 smoke_directory="$work/smoke"
 mkdir -p "$smoke_directory"
+cp -a "$stage/shaders" "$smoke_directory/"
 install -m 0755 "$audio_smoke" "$smoke_directory/mngl_audio_runtime_smoke"
 install -m 0755 "$gpu_smoke" "$smoke_directory/mngl_gpu_runtime_smoke"
 SDL_AUDIODRIVER=dummy LD_LIBRARY_PATH="$stage/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \

@@ -39,10 +39,24 @@ cmake -S "$repo" -B "$mngl_build" -GNinja \
 	-DCMAKE_PREFIX_PATH="$cmake_prefix" \
 	-DMNGL_METAL_SHADER_ASSET_DIR="$metal_shader_dir" \
 	-DMNGL_BUILD_MACOS_DEVEL_PACKAGE=ON \
+	-DMNGL_PACKAGE_BRANCH=main \
 	-DBUILD_TESTING=ON
 cmake --build "$mngl_build" --target \
 	mngl_audio_runtime_smoke mngl_gpu_runtime_smoke mngl_shader_compile_smoke \
 	mngl_metal_shader_assets_smoke mngl_svg_runtime_test --parallel 4
+
+# setup-sdl installs SDL3_image in its own cached prefix. Resolve it through the
+# package config CMake actually used so dylibbundler can find the image dylibs.
+sdl_image_cmake_dir=$(sed -n 's/^SDL3_image_DIR:PATH=//p' "$mngl_build/CMakeCache.txt")
+if [[ -z "$sdl_image_cmake_dir" || ! -d "$sdl_image_cmake_dir" ]]; then
+	printf '%s\n' 'Could not resolve the SDL3_image package prefix from CMake.' >&2
+	exit 1
+fi
+sdl_image_prefix=$(cd "$sdl_image_cmake_dir/../../.." && pwd)
+if ! find "$sdl_image_prefix/lib" -maxdepth 1 \( -type f -o -type l \) -name 'libSDL3_image*.dylib' -print -quit | grep -q .; then
+	printf 'SDL3_image dylibs were not found in %s/lib.\n' "$sdl_image_prefix" >&2
+	exit 1
+fi
 
 mngl_library=$(find "$mngl_build" -type f -name 'libmngl_imgui.dylib' -print -quit)
 mixer_library=$(find "$mngl_build" \( -type f -o -type l \) -name 'libSDL3_mixer*.dylib' -print -quit)
@@ -56,14 +70,22 @@ if [[ -z "$mngl_library" || -z "$mixer_library" || -z "$audio_smoke" || -z "$gpu
 	exit 1
 fi
 cp -p "$mngl_library" "$stage/lib/"
+# The CMake library install component runs after offline MSL shaders are generated.
+# Stage the built mixer library and its versioned loader names for the early tools.
+find "$mngl_build/third_party/SDL_mixer" \( -type f -o -type l \) -name 'libSDL3_mixer*.dylib' \
+	-exec cp -p {} "$stage/lib/" \;
 if [[ ! -e "$stage/lib/$(basename "$mixer_library")" ]]; then
-	printf '%s\n' 'SDL3_mixer runtime library was not installed into the package.' >&2
+	printf '%s\n' 'SDL3_mixer runtime library was not staged from the build.' >&2
 	exit 1
 fi
 
+# Runtime shader translation needs glslang but not spirv-opt. Disabling its
+# optional optimizer avoids compiling the large SPIRV-Tools dependency on both
+# macOS architectures; the packaged HLSL-to-MSL smoke below still verifies output.
 cmake -S "$repo/upstream/glslang" -B "$glslang_build" -GNinja \
 	-DCMAKE_BUILD_TYPE=Release \
 	-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+	-DENABLE_OPT=OFF \
 	-DENABLE_GLSLANG_BINARIES=ON
 cmake --build "$glslang_build" --target glslang-standalone --parallel 4
 glslang_exe=$(find -L "$glslang_build" -type f -name glslangValidator -print -quit)
@@ -106,7 +128,7 @@ cmake --install "$shadercross_build"
 install -m 0755 "$shadercross_prefix/bin/shadercross" "$stage/bin/shadercross"
 find "$shadercross_prefix/lib" \( -type f -o -type l \) -name '*.dylib*' \
 	-exec cp -p {} "$stage/lib/" \;
-export DYLD_LIBRARY_PATH="$stage/lib:$SDL_PREFIX/lib:$spirv_prefix/lib:$brew_prefix/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+export DYLD_LIBRARY_PATH="$stage/lib:$SDL_PREFIX/lib:$sdl_image_prefix/lib:$spirv_prefix/lib:$brew_prefix/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
 
 # SDL_shadercross emits MSL source for offline use; SDL_GPU compiles it through
 # Metal when creating the pipeline. Keep compiler tools out of the rendering path.
@@ -121,6 +143,12 @@ generate_msl_shader() {
 		-e main -o "$spirv" "$source"
 	"$stage/bin/shadercross" "$spirv" -s SPIRV -d MSL -t "$shadercross_stage" \
 		-o "$msl" -e main
+	# Metal reserves the function name main; SPIRV-Cross emits main0 and the
+	# MNGL Metal shader loaders select that entrypoint.
+	if ! grep -Eq '^(vertex|fragment|kernel) [^[:space:]]+ main0\(' "$msl"; then
+		printf 'Could not find the SPIRV-Cross MSL entrypoint for %s.\n' "$source_name" >&2
+		exit 1
+	fi
 	if [[ ! -s "$msl" ]]; then
 		printf 'No MSL sidecar was produced for %s.\n' "$source_name" >&2
 		exit 1
@@ -139,6 +167,12 @@ cmake --build "$mngl_build" --target mngl_demo mngl_metal_shader_assets_smoke \
 	mngl_svg_runtime_test --parallel 4
 cmake --install "$mngl_build" --prefix "$stage" --component library
 
+# Stage SDL runtime dylibs before rewriting their @rpath load commands.
+for prefix in "$SDL_PREFIX" "$sdl_image_prefix"; do
+	find "$prefix/lib" -maxdepth 1 \( -type f -o -type l \) -name 'libSDL3*.dylib*' \
+		-exec cp -p {} "$stage/lib/" \;
+done
+
 cp -R "$repo/MNGL/shaders" "$stage/shaders"
 cp "$metal_shader_dir"/*.msl "$stage/shaders/"
 mkdir -p "$stage/licenses"
@@ -147,9 +181,11 @@ cp "$shadercross_source/LICENSE.txt" "$stage/licenses/SDL_shadercross-LICENSE.tx
 cp "$shadercross_source/external/SPIRV-Cross/LICENSE" "$stage/licenses/SPIRV-Cross-LICENSE.txt"
 
 # Copy the dependency closure and rewrite load commands to the package layout.
-dylib_args=(-b -cd -d "build-runtime-macos/stage/lib" -p '@executable_path/../lib')
+dylib_args=(-b -cd -of -d "build-runtime-macos/stage/lib" -p '@executable_path/../lib')
 for search_path in \
+	"$mngl_build/third_party/SDL_mixer" \
 	"$SDL_PREFIX/lib" \
+	"$sdl_image_prefix/lib" \
 	"$brew_prefix/lib" \
 	"$spirv_prefix/lib" \
 	"$shadercross_prefix/lib"; do
@@ -174,8 +210,9 @@ install -m 0755 "$gpu_smoke" "$stage/bin/mngl_gpu_runtime_smoke"
 install -m 0755 "$shader_smoke" "$stage/bin/mngl_shader_compile_smoke"
 install -m 0755 "$metal_smoke" "$stage/bin/mngl_metal_shader_assets_smoke"
 install -m 0755 "$svg_runtime_smoke" "$stage/bin/mngl_svg_runtime_test"
+cp -R "$stage/shaders" "$stage/bin/shaders"
 export PATH="$stage/bin:$PATH"
-export DYLD_LIBRARY_PATH="$stage/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+export DYLD_LIBRARY_PATH="$stage/lib:$sdl_image_prefix/lib:$SDL_PREFIX/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
 SDL_AUDIODRIVER=dummy "$stage/bin/mngl_audio_runtime_smoke"
 "$stage/bin/mngl_shader_compile_smoke"
 # The MSL sidecar smoke uses deliberately invalid compiler paths and cannot see
@@ -212,6 +249,7 @@ rm "$stage/bin/mngl_audio_runtime_smoke" \
 	"$stage/bin/mngl_shader_compile_smoke" \
 	"$stage/bin/mngl_metal_shader_assets_smoke" \
 	"$stage/bin/mngl_svg_runtime_test"
+rm -rf "$stage/bin/shaders"
 
 cp "$repo/MNGL/imgui/LICENSE.txt" "$stage/MNGL-ImGui-LICENSE.txt"
 cat > "$stage/runtime-manifest.txt" <<EOF
@@ -219,7 +257,7 @@ MNGL runtime package $PACKAGE_VERSION
 Platform: macOS $(uname -m)
 Minimum macOS version: 15.0
 MNGL source: ${GITHUB_SHA:-local}
-glslang: $(git -C "$repo/upstream/glslang" rev-parse HEAD)
+glslang: $(git -C "$repo/upstream/glslang" rev-parse HEAD) (SPIR-V optimizer disabled for this macOS package build)
 SDL_shadercross: $(git -C "$shadercross_source" rev-parse HEAD; printf ' (DXC disabled; HLSL compiles through glslang and SPIR-V)')
 SDL3: $SDL_VERSION
 SDL3_image: $SDL_IMAGE_VERSION

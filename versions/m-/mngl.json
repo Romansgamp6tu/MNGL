@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg-port-versioning.schema.json",
+  "versions": [
+    {
+      "git-tree": "a4f2005a504142ff10314f95e3d31fc6ee3ddc75",
+      "version-semver": "0.2.5-alpha",
+      "port-version": 0
+    }
+  ]
+}

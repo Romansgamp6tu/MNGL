@@ -1,0 +1,62 @@
+vcpkg_from_git(
+    OUT_SOURCE_PATH SOURCE_PATH
+    URL https://github.com/Romansgamp6tu/MNGL
+    REF 693035df82e7623ba67ae4efd9c4835e6ae54dfd
+    HEAD_REF main
+)
+
+if("audio" IN_LIST FEATURES)
+    set(MNGL_AUDIO_BACKEND OFF)
+else()
+    set(MNGL_AUDIO_BACKEND ON)
+endif()
+
+if(VCPKG_LIBRARY_LINKAGE STREQUAL "dynamic")
+    set(MNGL_BUILD_SHARED_LIBS ON)
+else()
+    set(MNGL_BUILD_SHARED_LIBS OFF)
+endif()
+
+set(MNGL_PACKAGE_OPTIONS
+    -DMNGL_USE_SYSTEM_DEPENDENCIES=ON
+    -DMNGL_BUILD_SHARED_LIBS=${MNGL_BUILD_SHARED_LIBS}
+    -DMNGL_BUILD_DEMO=OFF
+    -DMNGL_BUILD_2D_BENCHMARK=OFF
+    -DMNGL_BUILD_MOD_EXAMPLE=OFF
+    -DBUILD_TESTING=OFF
+    -DMNGL_CUSTOM_AUDIO_BACKEND=${MNGL_AUDIO_BACKEND}
+    -DMNGL_PACKAGE_VERSION=0.2.5-alpha
+    -DMNGL_PACKAGE_BRANCH=main
+)
+
+if(VCPKG_TARGET_IS_WINDOWS)
+    list(APPEND MNGL_PACKAGE_OPTIONS -DMNGL_BUILD_WINDOWS_DEVEL_PACKAGE=ON)
+elseif(VCPKG_TARGET_IS_LINUX)
+    list(APPEND MNGL_PACKAGE_OPTIONS -DMNGL_BUILD_LINUX_DEVEL_PACKAGE=ON)
+elseif(VCPKG_TARGET_IS_OSX)
+    list(APPEND MNGL_PACKAGE_OPTIONS -DMNGL_BUILD_MACOS_DEVEL_PACKAGE=ON)
+else()
+    message(FATAL_ERROR "MNGL supports desktop Windows, Linux, and macOS only")
+endif()
+
+vcpkg_cmake_configure(
+    SOURCE_PATH "${SOURCE_PATH}"
+    OPTIONS ${MNGL_PACKAGE_OPTIONS}
+)
+
+# Development package configuration skips install's implicit all-target dependency.
+vcpkg_cmake_build()
+vcpkg_cmake_install()
+vcpkg_cmake_config_fixup(
+    PACKAGE_NAME MNGL
+    CONFIG_PATH lib/cmake/MNGL
+)
+vcpkg_copy_pdbs()
+
+file(REMOVE_RECURSE "${CURRENT_PACKAGES_DIR}/debug/include")
+
+vcpkg_install_copyright(
+    FILE_LIST
+        "${SOURCE_PATH}/LICENSE"
+        "${SOURCE_PATH}/MNGL/imgui/LICENSE.txt"
+)

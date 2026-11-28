@@ -89,16 +89,20 @@ namespace mngl::two_d::detail::svg
 		if (!gpu::valid_shader_format(options.format)) [[unlikely]]
 			throw std::invalid_argument("SVG shader loading requires a valid, selected shader format");
 
-		const auto binary = svg_shader_binary_path(source, options.format);
+		auto load_options = options;
+		if (load_options.format == gpu::shader_format::msl)
+			load_options.entrypoint = "main0"; // SPIRV-Cross avoids Metal's reserved name main.
+
+		const auto binary = svg_shader_binary_path(source, load_options.format);
 		if (!binary)
-			return gpu::shader_loader::compile(source, options);
+			return gpu::shader_loader::compile(source, load_options);
 		if (std::filesystem::is_regular_file(*binary))
-			return gpu::shader_loader::load_binary(*binary, source, options);
-		if (options.format == gpu::shader_format::metallib) [[unlikely]]
+			return gpu::shader_loader::load_binary(*binary, source, load_options);
+		if (load_options.format == gpu::shader_format::metallib) [[unlikely]]
 			throw std::runtime_error(std::format(
 			    "GPU device selected Metal library format, but the precompiled SVG shader is missing: '{}'",
 			    binary->string()));
-		return gpu::shader_loader::compile(source, options);
+		return gpu::shader_loader::compile(source, load_options);
 	}
 
 	class temporary_target_pool_base

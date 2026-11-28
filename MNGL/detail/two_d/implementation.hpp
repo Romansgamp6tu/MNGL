@@ -584,7 +584,7 @@ namespace mngl::two_d
 			throw std::logic_error("Update a dirty cached_layer before drawing it");
 		}
 
-		::mngl::sprite image{m_texture, destination, tint};
+		auto image = ::mngl::sprite::borrowed(m_texture, destination, tint);
 		image.transform = transform;
 		image.state.blend = blend;
 		frame.draw(image);
@@ -907,9 +907,9 @@ namespace mngl::two_d
 		gpu_transform.pivot = value.pivot;
 		gpu_transform.rotation_radians = value.rotation_radians;
 		gpu_transform.object_transform = value.transform;
-		if (value.source_texture)
+		if (value.m_borrowed_source)
 		{
-			m_control->owner->submit_texture(m_recording_context, *value.source_texture, gpu_transform,
+			m_control->owner->submit_texture(m_recording_context, *value.m_borrowed_source, gpu_transform,
 			                                 value.tint, value.state, value.click_callback);
 		}
 		else

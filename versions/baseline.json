@@ -1,0 +1,9 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg-builtin-baseline.schema.json",
+  "default": {
+    "mngl": {
+      "baseline": "0.2.5-alpha",
+      "port-version": 0
+    }
+  }
+}

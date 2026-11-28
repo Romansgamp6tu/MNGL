@@ -1,0 +1,174 @@
+name: Test MNGL vcpkg consumer
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/vcpkg-consumer.yml"
+      - "CMakeLists.txt"
+      - "cmake/**"
+      - "include/**"
+      - "MNGL/**"
+      - "ports/mngl/**"
+      - "versions/**"
+      - "tests/vcpkg-consumer/**"
+  push:
+    branches: ["main", "V-*"]
+    paths:
+      - ".github/workflows/vcpkg-consumer.yml"
+      - "CMakeLists.txt"
+      - "cmake/**"
+      - "include/**"
+      - "MNGL/**"
+      - "ports/mngl/**"
+      - "versions/**"
+      - "tests/vcpkg-consumer/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mngl-vcpkg-consumer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  consumer:
+    name: ${{ matrix.variant }} / ${{ matrix.triplet }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025-vs2026
+            triplet: x64-windows
+            variant: audio
+            manifest-root: tests/vcpkg-consumer
+            build-dir: build/vcpkg-x64-windows-audio
+          - runner: ubuntu-24.04
+            triplet: x64-linux
+            variant: audio
+            manifest-root: tests/vcpkg-consumer
+            build-dir: build/vcpkg-x64-linux-audio
+          - runner: macos-15
+            triplet: arm64-osx
+            variant: audio
+            manifest-root: tests/vcpkg-consumer
+            build-dir: build/vcpkg-arm64-osx-audio
+          - runner: macos-15-intel
+            triplet: x64-osx
+            variant: audio
+            manifest-root: tests/vcpkg-consumer
+            build-dir: build/vcpkg-x64-osx-audio
+          - runner: ubuntu-24.04
+            triplet: x64-linux
+            variant: no-audio
+            manifest-root: tests/vcpkg-consumer/no-audio
+            build-dir: build/vcpkg-x64-linux-no-audio
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      VCPKG_DISABLE_METRICS: "1"
+      VCPKG_MAX_CONCURRENCY: "2"
+      VCPKG_TARGET_TRIPLET: ${{ matrix.triplet }}
+      MNGL_VCPKG_MANIFEST_ROOT: ${{ matrix.manifest-root }}
+      MNGL_VCPKG_BUILD_DIR: ${{ matrix.build-dir }}
+
+    steps:
+      - name: Check out MNGL
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Generate vcpkg Git registry config on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: python3 tests/vcpkg-consumer/configure_registry.py "$MNGL_VCPKG_MANIFEST_ROOT"
+
+      - name: Generate vcpkg Git registry config on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: python tests/vcpkg-consumer/configure_registry.py $env:MNGL_VCPKG_MANIFEST_ROOT
+
+      - name: Check out pinned vcpkg
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: ba33ef1a2fb3c6519e819cd767bb8fd1677f1323
+          path: vcpkg
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Linux vcpkg build prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            autoconf autoconf-archive automake libtool libltdl-dev \
+            build-essential git make pkg-config cmake ninja-build \
+            libasound2-dev libpulse-dev libaudio-dev libfribidi-dev libjack-dev \
+            libsndio-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxfixes-dev libxi-dev libxss-dev libxtst-dev libxkbcommon-dev \
+            libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
+            libdbus-1-dev libibus-1.0-dev libudev-dev libthai-dev libusb-1.0-0-dev \
+            libpipewire-0.3-dev libwayland-dev libdecor-0-dev liburing-dev
+
+      - name: Bootstrap vcpkg on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+
+      - name: Bootstrap vcpkg on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '& "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics'
+
+      - name: Configure consumer on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$MNGL_VCPKG_BUILD_DIR"
+          manifest_dir="$GITHUB_WORKSPACE/$MNGL_VCPKG_MANIFEST_ROOT"
+          configure_log="$MNGL_VCPKG_BUILD_DIR/configure.log"
+          if cmake -S tests/vcpkg-consumer -B "$MNGL_VCPKG_BUILD_DIR" \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET="$VCPKG_TARGET_TRIPLET" \
+            -DVCPKG_MANIFEST_DIR="$manifest_dir" \
+            -DVCPKG_MANIFEST_MODE=ON \
+            -DCMAKE_BUILD_TYPE=Release >"$configure_log" 2>&1; then
+            tail -n 60 "$configure_log"
+          else
+            tail -n 250 "$configure_log"
+            exit 1
+          fi
+
+      - name: Configure consumer on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:MNGL_VCPKG_BUILD_DIR | Out-Null
+          $configureLog = Join-Path $env:MNGL_VCPKG_BUILD_DIR "configure.log"
+          $manifestDir = Join-Path $env:GITHUB_WORKSPACE $env:MNGL_VCPKG_MANIFEST_ROOT
+          cmake -S tests/vcpkg-consumer -B $env:MNGL_VCPKG_BUILD_DIR "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_TARGET_TRIPLET=$env:VCPKG_TARGET_TRIPLET" "-DVCPKG_MANIFEST_DIR=$manifestDir" -DVCPKG_MANIFEST_MODE=ON -DCMAKE_BUILD_TYPE=Release *> $configureLog
+          $configureExitCode = $LASTEXITCODE
+          if ($configureExitCode -ne 0) {
+            Get-Content -LiteralPath $configureLog -Tail 250
+            exit $configureExitCode
+          }
+          Get-Content -LiteralPath $configureLog -Tail 60
+
+      - name: Build and run consumer on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build "$MNGL_VCPKG_BUILD_DIR" --parallel 2
+          ctest --test-dir "$MNGL_VCPKG_BUILD_DIR" --output-on-failure
+
+      - name: Build and run consumer on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake --build $env:MNGL_VCPKG_BUILD_DIR --config Release --parallel 2
+          ctest --test-dir $env:MNGL_VCPKG_BUILD_DIR -C Release --output-on-failure
