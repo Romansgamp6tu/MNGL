@@ -1006,7 +1006,9 @@ find_dependency(Freetype REQUIRED)]=])
 			FILES_MATCHING PATTERN "*.dll"
 		)
 	endif()
-	install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui/LICENSE.txt"
+	install(FILES
+		"${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+		"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui/LICENSE.txt"
 		DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/MNGL"
 	)
 

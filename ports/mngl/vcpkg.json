@@ -5,7 +5,7 @@
   "description": "Experimental cross-platform game development library",
   "homepage": "https://github.com/Romansgamp6tu/MNGL",
   "documentation": "https://github.com/Romansgamp6tu/MNGL/tree/main/docs",
-  "license": null,
+  "license": "MIT",
   "supports": "(windows & (x64 | arm64) & !uwp) | (linux & (x64 | arm64)) | (osx & (x64 | arm64))",
   "dependencies": [
     {
