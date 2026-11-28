@@ -221,6 +221,14 @@ if(MSVC AND NOT MNGL_USE_SYSTEM_DEPENDENCIES)
 			find_package(glm 1.0.3 CONFIG REQUIRED)
 		endif()
 		add_library(mngl_imgui ${MNGL_IMGUI_LIBRARY_TYPE} ${MNGL_IMGUI_SOURCES})
+		if(MSVC)
+			target_compile_options(mngl_imgui PRIVATE /utf-8)
+			if(MNGL_BUILD_SHARED_LIBS)
+				target_compile_definitions(mngl_imgui
+					PRIVATE "IMGUI_API=__declspec(dllexport)"
+					INTERFACE "IMGUI_API=__declspec(dllimport)")
+			endif()
+		endif()
 		target_include_directories(mngl_imgui PUBLIC
 			$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/MNGL>
 			$<INSTALL_INTERFACE:include>
@@ -414,6 +422,9 @@ if(MSVC AND NOT MNGL_USE_SYSTEM_DEPENDENCIES)
 	target_link_libraries(mngl INTERFACE mngl_imgui SDL3_image.lib freetype.lib)
 else()
 	target_link_libraries(mngl INTERFACE mngl_imgui SDL3_image::SDL3_image Freetype::Freetype)
+	if(MSVC)
+		target_compile_options(mngl INTERFACE /bigobj)
+	endif()
 	if(MNGL_USE_SYSTEM_DEPENDENCIES)
 		target_link_libraries(mngl INTERFACE glm::glm)
 	endif()
