@@ -108,20 +108,35 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p "$MNGL_VCPKG_BUILD_DIR"
           manifest_dir="$GITHUB_WORKSPACE/$MNGL_VCPKG_MANIFEST_ROOT"
-          cmake -S tests/vcpkg-consumer -B "$MNGL_VCPKG_BUILD_DIR" \
+          configure_log="$MNGL_VCPKG_BUILD_DIR/configure.log"
+          if cmake -S tests/vcpkg-consumer -B "$MNGL_VCPKG_BUILD_DIR" \
             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET="$VCPKG_TARGET_TRIPLET" \
             -DVCPKG_MANIFEST_DIR="$manifest_dir" \
             -DVCPKG_MANIFEST_MODE=ON \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release >"$configure_log" 2>&1; then
+            tail -n 60 "$configure_log"
+          else
+            tail -n 250 "$configure_log"
+            exit 1
+          fi
 
       - name: Configure consumer on Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force -Path $env:MNGL_VCPKG_BUILD_DIR | Out-Null
+          $configureLog = Join-Path $env:MNGL_VCPKG_BUILD_DIR "configure.log"
           $manifestDir = Join-Path $env:GITHUB_WORKSPACE $env:MNGL_VCPKG_MANIFEST_ROOT
-          cmake -S tests/vcpkg-consumer -B $env:MNGL_VCPKG_BUILD_DIR "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_TARGET_TRIPLET=$env:VCPKG_TARGET_TRIPLET" "-DVCPKG_MANIFEST_DIR=$manifestDir" -DVCPKG_MANIFEST_MODE=ON -DCMAKE_BUILD_TYPE=Release
+          cmake -S tests/vcpkg-consumer -B $env:MNGL_VCPKG_BUILD_DIR "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_TARGET_TRIPLET=$env:VCPKG_TARGET_TRIPLET" "-DVCPKG_MANIFEST_DIR=$manifestDir" -DVCPKG_MANIFEST_MODE=ON -DCMAKE_BUILD_TYPE=Release *> $configureLog
+          $configureExitCode = $LASTEXITCODE
+          if ($configureExitCode -ne 0) {
+            Get-Content -LiteralPath $configureLog -Tail 250
+            exit $configureExitCode
+          }
+          Get-Content -LiteralPath $configureLog -Tail 60
 
       - name: Build and run consumer on Unix
         if: runner.os != 'Windows'
