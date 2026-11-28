@@ -52,6 +52,9 @@ runner-ах для Windows x64, Linux x86_64, macOS arm64 и macOS x86_64.
 CI-артефакты доступны в Actions один день. При теге `vX.Y.Z` готовые пакеты
 всех этих платформ прикладываются к [релизу](https://github.com/Romansgamp6tu/MNGL/releases).
 
+Для установки через vcpkg доступен экспериментальный overlay port; краткая
+команда и настройка CMake приведены в [руководстве по подключению](docs/getting-started/using-mngl.md#установка-через-vcpkg).
+
 Распакуйте подходящий пакет и подключите его в `CMakeLists.txt` приложения:
 
 ```cmake
