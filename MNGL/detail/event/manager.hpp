@@ -1422,6 +1422,7 @@ namespace mngl
 				std::lock_guard queue_lock(m_queue_mutex);
 				return take_pending_locked();
 			}();
+			(void)discarded; // Keep queued payloads alive until after the locks are released.
 		}
 
 		// Disconnect every subscription and discard queued events; the bus remains reusable.
