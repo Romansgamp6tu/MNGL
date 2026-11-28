@@ -369,7 +369,6 @@ if(NOT MNGL_CUSTOM_AUDIO_BACKEND AND NOT MNGL_CUSTOM_AUDIO_INTERFACE)
 		endif()
 		set(MNGL_HAS_SDL3_MIXER TRUE)
 	endif()
-	endif()
 endif()
 
 add_library(MNGL::ImGui ALIAS mngl_imgui)
