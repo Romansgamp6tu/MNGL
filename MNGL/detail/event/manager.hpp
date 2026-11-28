@@ -1450,6 +1450,7 @@ namespace mngl
 				}
 				return queued;
 			}();
+			(void)discarded; // Keep queued payloads alive until after the locks are released.
 		}
 
 	private:
