@@ -183,8 +183,7 @@ if(MSVC AND NOT MNGL_USE_SYSTEM_DEPENDENCIES)
 	if(MNGL_BUILD_SHARED_LIBS)
 		target_compile_definitions(mngl_imgui
 			PRIVATE "IMGUI_API=__declspec(dllexport)"
-			INTERFACE "IMGUI_API=__declspec(dllimport)"
-		)
+			INTERFACE "IMGUI_API=__declspec(dllimport)")
 	endif()
 	target_compile_options(mngl_imgui PRIVATE /utf-8)
 	target_include_directories(mngl_imgui PUBLIC
@@ -204,40 +203,41 @@ if(MSVC AND NOT MNGL_USE_SYSTEM_DEPENDENCIES)
 		add_executable(mngl_demo MNGL/MNGL.cpp)
 		target_compile_features(mngl_demo PRIVATE cxx_std_23)
 		target_include_directories(mngl_demo PRIVATE
+			"${CMAKE_CURRENT_SOURCE_DIR}/include"
 			"${CMAKE_CURRENT_SOURCE_DIR}/MNGL"
 			"${CMAKE_CURRENT_SOURCE_DIR}/MNGL/imgui"
 		)
-		if(NOT MNGL_USE_SYSTEM_DEPENDENCIES)
-			target_include_directories(mngl_demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-		endif()
-		# utilities.hpp uses MSVC linker pragmas for these bundled libraries.
 		target_link_directories(mngl_demo PRIVATE "${MNGL_LIBRARY_DIRECTORY}")
 	endif()
-	else()
+else()
+	if(MNGL_USE_SYSTEM_DEPENDENCIES)
 		find_package(SDL3 3.4.18 CONFIG REQUIRED)
 		find_package(SDL3_image 3.4.8 CONFIG REQUIRED)
-		find_package(Freetype REQUIRED)
-		if(MNGL_USE_SYSTEM_DEPENDENCIES)
-			find_package(glm 1.0.3 CONFIG REQUIRED)
+		find_package(glm 1.0.3 CONFIG REQUIRED)
+	else()
+		find_package(SDL3 CONFIG REQUIRED)
+		find_package(SDL3_image CONFIG REQUIRED)
+	endif()
+	find_package(Freetype REQUIRED)
+
+	add_library(mngl_imgui ${MNGL_IMGUI_LIBRARY_TYPE} ${MNGL_IMGUI_SOURCES})
+	if(MSVC)
+		target_compile_options(mngl_imgui PRIVATE /utf-8)
+		if(MNGL_BUILD_SHARED_LIBS)
+			target_compile_definitions(mngl_imgui
+				PRIVATE "IMGUI_API=__declspec(dllexport)"
+				INTERFACE "IMGUI_API=__declspec(dllimport)")
 		endif()
-		add_library(mngl_imgui ${MNGL_IMGUI_LIBRARY_TYPE} ${MNGL_IMGUI_SOURCES})
-		if(MSVC)
-			target_compile_options(mngl_imgui PRIVATE /utf-8)
-			if(MNGL_BUILD_SHARED_LIBS)
-				target_compile_definitions(mngl_imgui
-					PRIVATE "IMGUI_API=__declspec(dllexport)"
-					INTERFACE "IMGUI_API=__declspec(dllimport)")
-			endif()
-		endif()
+	endif()
+	target_include_directories(mngl_imgui PUBLIC
+		$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/MNGL>
+		$<INSTALL_INTERFACE:include>
+		$<INSTALL_INTERFACE:include/imgui>
+	)
+	if(NOT MNGL_USE_SYSTEM_DEPENDENCIES)
 		target_include_directories(mngl_imgui PUBLIC
-			$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/MNGL>
-			$<INSTALL_INTERFACE:include>
-			$<INSTALL_INTERFACE:include/imgui>
-		)
-		if(NOT MNGL_USE_SYSTEM_DEPENDENCIES)
-			target_include_directories(mngl_imgui PUBLIC
-				$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
-		endif()
+			$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+	endif()
 	if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 		# Avoid shadowing the standard <version> header with Dear ImGui's metadata file.
 		target_compile_options(mngl_imgui PRIVATE
