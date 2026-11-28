@@ -20,19 +20,13 @@ MSVC x64. Сборка самого MNGL и пакетов описана [от�
 | Runtime | Динамические библиотеки, shader tools, встроенные шейдеры и манифест | Запуск и распространение приложения |
 | Исходники | Код MNGL, демо, моды, тесты и заголовки зависимостей | Разработка библиотеки и подключение свежего API |
 
-Пока self-hosted runner настроен только для Linux, CI автоматически собирает
-development- и runtime-пакеты для Linux x86_64. Windows x64 и macOS arm64/x86_64
-остаются целевыми платформами, но автоматические пакеты для них приостановлены
-до подключения native runners. macOS development-пакет рассчитан на
-установленный SDL3, SDL3_image и FreeType; пакет содержит MNGL и SDL3_mixer.
-Выбирайте архивы одной версии и архитектуры: заголовки, библиотеки и runtime
-должны соответствовать друг другу.
-
-Workflow `Package MNGL Linux development kit` создаёт development артефакт,
-`Package MNGL runtime` — runtime артефакт. CI артефакты сохраняются один день.
-В тегированный GitHub Release прикладываются только Linux x86_64 development- и
-runtime-пакеты. Сборка архива не подтверждает работу каждого GPU backend на
-пользовательском оборудовании.
+GitHub Actions собирает development- и runtime-пакеты для Windows x64,
+Linux x86_64 и macOS arm64/x86_64. CI артефакты хранятся один день; архивы для
+этих платформ прикладываются к GitHub Release при сборке тега `vX.Y.Z`.
+Выбирайте development- и runtime-пакеты одной версии и архитектуры.
+Полная CTest-матрица выполняется на Linux; на Windows, Linux и macOS также
+запускаются runtime smoke-проверки. Сборка архива сама по себе не гарантирует
+работу каждого GPU backend на пользовательском оборудовании.
 
 Документация описывает текущий `main`. В частности, input v2 и `audio.hpp`
 могут отсутствовать в более раннем пакете. `MNGL::MNGL` автоматически подключает
@@ -48,7 +42,7 @@ SDL3_mixer в пакетах, которые содержат audio v1 или н
 
 ```powershell
 git clone https://github.com/Romansgamp6tu/MNGL.git
-vcpkg install mngl:x64-windows --overlay-ports="C:/src/MNGL/ports"
+vcpkg install mngl:x64-windows --overlay-ports="./MNGL/ports"
 ```
 
 На Linux укажите triplet `x64-linux`, на Apple Silicon — `arm64-osx`,
