@@ -1,0 +1,18 @@
+MNGL provides the CMake package `MNGL` and target `MNGL::MNGL`.
+
+    find_package(MNGL CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE MNGL::MNGL)
+
+The default `audio` feature enables the MNGL audio facade and adds SDL3_mixer.
+Disable default features in your manifest to omit audio:
+
+    {
+      "dependencies": [
+        {
+          "name": "mngl",
+          "default-features": false
+        }
+      ]
+    }
+
+MNGL is experimental and its API may change between versions.
