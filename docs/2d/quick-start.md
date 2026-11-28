@@ -24,6 +24,7 @@ target_link_libraries(my_game PRIVATE MNGL::MNGL)
 ```cpp
 #include <MNGL/input.hpp>
 #include <MNGL/render_window.hpp>
+#include <MNGL/view.hpp>
 
 #include <exception>
 #include <iostream>
@@ -33,7 +34,8 @@ int main()
 	try
 	{
 		mngl::render_window window("My first MNGL scene", {800, 600});
-		mngl::rectangle player{0.2f, 0.2f, 0.25f, 0.25f};
+		window.set_view(mngl::logical_pixel_view(window.size()));
+		mngl::rectangle player{100.0f, 100.0f, 32.0f, 32.0f};
 
 		while (mngl::input::next_frame())
 		{
@@ -95,10 +97,10 @@ for (const auto& keyboard : mngl::input::keyboards())
 }
 
 const float dt = static_cast<float>(mngl::input::delta_time());
-player.pos += direction * (0.4f * dt);
+player.pos += direction * (240.0f * dt);
 ```
 
-Скорость здесь равна `0.4` единицы сцены в секунду по каждой оси. Умножение на `dt` делает перемещение зависимым от времени, а не от количества нарисованных кадров. На диагонали обе оси изменяются одновременно, поэтому итоговая скорость выше; для одинаковой скорости нормализуйте ненулевой `direction` средствами GLM.
+Скорость здесь равна `240` логическим единицам окна в секунду по каждой оси. Умножение на `dt` делает перемещение зависимым от времени, а не от количества нарисованных кадров. На диагонали обе оси изменяются одновременно, поэтому итоговая скорость выше; для одинаковой скорости нормализуйте ненулевой `direction` средствами GLM.
 
 `down()` подходит для непрерывного движения. `pressed()` подходит для прыжка, подтверждения меню или переключения паузы. Когда появятся переназначение клавиш и gamepad, замените прямые проверки устройств на [действия и контексты ввода](../core/windows-and-input.md#actions-and-contexts).
 
