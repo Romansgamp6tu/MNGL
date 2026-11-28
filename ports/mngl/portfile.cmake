@@ -44,6 +44,8 @@ vcpkg_cmake_configure(
     OPTIONS ${MNGL_PACKAGE_OPTIONS}
 )
 
+# Development package configuration skips install's implicit all-target dependency.
+vcpkg_cmake_build()
 vcpkg_cmake_install()
 vcpkg_cmake_config_fixup(
     PACKAGE_NAME MNGL
