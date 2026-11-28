@@ -7,15 +7,19 @@
 #include <array>
 #include <atomic>
 #include <concepts>
+#include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <exception>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -1270,14 +1274,18 @@ namespace mngl
 		}
 	};
 
-	// A synchronous, instance-local event bus for application-defined events.
-	// The static event_manager remains the SDL-backed process-wide bus.
+	// An instance-local event bus with synchronous emit() and an optional deferred queue.
 	class event_bus
 	{
 	public:
 		template <event_payload T> using callback = event_manager::callback<T>;
 
 		event_bus() = default;
+		explicit event_bus(std::size_t max_pending_events) noexcept
+		    : m_max_pending_events(max_pending_events)
+		{
+		}
+
 		event_bus(const event_bus&) = delete;
 		event_bus& operator=(const event_bus&) = delete;
 		event_bus(event_bus&&) = delete;
@@ -1291,7 +1299,7 @@ namespace mngl
 			{
 				std::lock_guard lock(m_registry_mutex);
 				auto& listeners = listeners_for_locked<T>();
-				const auto current = std::atomic_load_explicit(&listeners.callbacks, std::memory_order_acquire);
+				const auto current = listeners.callbacks.load(std::memory_order_acquire);
 				auto updated = std::make_shared<typename listener_collection<T>::listener_vector>();
 				updated->reserve(current->size() + 1);
 				for (const auto& existing : *current)
@@ -1304,13 +1312,14 @@ namespace mngl
 				updated->push_back(subscription);
 				std::shared_ptr<const typename listener_collection<T>::listener_vector> snapshot =
 				    std::move(updated);
-				std::atomic_store_explicit(&listeners.callbacks, std::move(snapshot), std::memory_order_release);
+				listeners.callbacks.store(std::move(snapshot), std::memory_order_release);
 				std::erase_if(m_subscriptions, [](const auto& existing) { return existing.expired(); });
 				m_subscriptions.push_back(subscription);
 			}
 			return event_connection(std::move(subscription));
 		}
 
+		// Call listeners immediately in the caller's thread.
 		template <event_payload T> void emit(const T& event) const
 		{
 			std::lock_guard lock(event_manager::dispatch_mutex);
@@ -1329,20 +1338,119 @@ namespace mngl
 			}
 		}
 
-		// Disconnect every subscription while keeping this bus available for reuse.
-		void clear() noexcept
+		// Queue an owned event for delivery by dispatch_pending() in that call's thread.
+		// A zero queue limit means unbounded; a full bounded queue throws length_error.
+		template <typename T>
+			requires event_payload<std::remove_cvref_t<T>> &&
+			         std::move_constructible<std::remove_cvref_t<T>>
+		void post(T&& event)
 		{
-			std::lock_guard dispatch_lock(event_manager::dispatch_mutex);
-			std::lock_guard registry_lock(m_registry_mutex);
-			for (const auto& subscription : m_subscriptions)
+			std::lock_guard lock(m_queue_mutex);
+			if (queue_is_full()) [[unlikely]]
 			{
-				if (auto live = subscription.lock())
+				throw std::length_error("event_bus pending queue is full");
+			}
+			enqueue_locked(std::forward<T>(event));
+		}
+
+		// Like post(), but returns false instead of throwing when the bounded queue is full.
+		template <typename T>
+			requires event_payload<std::remove_cvref_t<T>> &&
+			         std::move_constructible<std::remove_cvref_t<T>>
+		[[nodiscard]] bool try_post(T&& event)
+		{
+			std::lock_guard lock(m_queue_mutex);
+			if (queue_is_full())
+			{
+				return false;
+			}
+			enqueue_locked(std::forward<T>(event));
+			return true;
+		}
+
+		[[nodiscard]] std::size_t pending_count() const
+		{
+			std::lock_guard lock(m_queue_mutex);
+			return m_pending_events.size();
+		}
+
+		// Zero means that the queue has no configured limit.
+		[[nodiscard]] std::size_t max_pending_events() const noexcept { return m_max_pending_events; }
+
+		// Delivers a snapshot of queued events in FIFO order. Events posted by callbacks
+		// are left for the next call. Call from the thread that should run the callbacks.
+		[[nodiscard]] std::size_t dispatch_pending(
+		    std::size_t max_events = std::numeric_limits<std::size_t>::max())
+		{
+			std::lock_guard dispatch_lock(m_pending_dispatch_mutex);
+			std::size_t batch_size{};
+			std::uint64_t batch_generation{};
+			{
+				std::lock_guard queue_lock(m_queue_mutex);
+				batch_size = std::min(max_events, m_pending_events.size());
+				batch_generation = m_pending_generation;
+			}
+
+			std::size_t dispatched = 0;
+			for (std::size_t i = 0; i < batch_size; ++i)
+			{
+				detail::move_only_function<bool()> queued_event;
 				{
-					live->connected.store(false, std::memory_order_release);
+					std::lock_guard queue_lock(m_queue_mutex);
+					if (batch_generation != m_pending_generation || m_pending_events.empty())
+					{
+						break;
+					}
+					queued_event = std::move(m_pending_events.front());
+					m_pending_events.pop_front();
+				}
+
+				if (queued_event())
+				{
+					++dispatched;
 				}
 			}
-			m_subscriptions.clear();
-			m_listener_collections.clear();
+			return dispatched;
+		}
+
+		// Drop currently queued events without disconnecting listeners.
+		void clear_pending() noexcept
+		{
+			auto discarded = [&]
+			{
+				std::lock_guard dispatch_lock(event_manager::dispatch_mutex);
+				std::lock_guard queue_lock(m_queue_mutex);
+				return take_pending_locked();
+			}();
+			(void)discarded; // Keep queued payloads alive until after the locks are released.
+		}
+
+		// Disconnect every subscription and discard queued events; the bus remains reusable.
+		void clear() noexcept
+		{
+			auto discarded = [&]
+			{
+				std::lock_guard dispatch_lock(event_manager::dispatch_mutex);
+				auto queued = [&]
+				{
+					std::lock_guard queue_lock(m_queue_mutex);
+					return take_pending_locked();
+				}();
+				{
+					std::lock_guard registry_lock(m_registry_mutex);
+					for (const auto& subscription : m_subscriptions)
+					{
+						if (auto live = subscription.lock())
+						{
+							live->connected.store(false, std::memory_order_release);
+						}
+					}
+					m_subscriptions.clear();
+					m_listener_collections.clear();
+				}
+				return queued;
+			}();
+			(void)discarded; // Keep queued payloads alive until after the locks are released.
 		}
 
 	private:
@@ -1356,7 +1464,7 @@ namespace mngl
 		template <event_payload T> struct listener_collection
 		{
 			using listener_vector = std::vector<std::weak_ptr<listener<T>>>;
-			std::shared_ptr<const listener_vector> callbacks{
+			std::atomic<std::shared_ptr<const listener_vector>> callbacks{
 			    std::make_shared<const listener_vector>()};
 		};
 
@@ -1393,7 +1501,7 @@ namespace mngl
 				listeners = std::static_pointer_cast<listener_collection<T>>(found->second);
 			}
 
-			const auto current = std::atomic_load_explicit(&listeners->callbacks, std::memory_order_acquire);
+			const auto current = listeners->callbacks.load(std::memory_order_acquire);
 			std::vector<std::shared_ptr<listener<T>>> snapshot;
 			snapshot.reserve(current->size());
 			for (const auto& weak_listener : *current)
@@ -1406,11 +1514,54 @@ namespace mngl
 			return snapshot;
 		}
 
+		[[nodiscard]] bool queue_is_full() const noexcept
+		{
+			return m_max_pending_events != 0 && m_pending_events.size() >= m_max_pending_events;
+		}
+
+		void advance_pending_generation_locked() noexcept
+		{
+			if (++m_pending_generation == 0)
+			{
+				++m_pending_generation;
+			}
+		}
+
+		[[nodiscard]] std::deque<detail::move_only_function<bool()>> take_pending_locked() noexcept
+		{
+			advance_pending_generation_locked();
+			auto discarded = std::move(m_pending_events);
+			m_pending_events.clear();
+			return discarded;
+		}
+
+		template <typename T> void enqueue_locked(T&& event)
+		{
+			using event_type = std::remove_cvref_t<T>;
+			const std::uint64_t generation = m_pending_generation;
+			m_pending_events.emplace_back(
+			    [this, generation, payload = event_type(std::forward<T>(event))]() mutable
+			    {
+				    std::lock_guard dispatch_lock(event_manager::dispatch_mutex);
+				    {
+					    std::lock_guard queue_lock(m_queue_mutex);
+					    if (generation != m_pending_generation)
+						    return false;
+				    }
+				    emit(payload);
+				    return true;
+			    });
+		}
+
+		const std::size_t m_max_pending_events = 0;
 		mutable std::mutex m_registry_mutex;
+		mutable std::mutex m_queue_mutex;
+		std::recursive_mutex m_pending_dispatch_mutex;
 		std::unordered_map<const void*, std::shared_ptr<void>> m_listener_collections;
 		std::vector<std::weak_ptr<detail::event_subscription_state>> m_subscriptions;
+		std::deque<detail::move_only_function<bool()>> m_pending_events;
+		std::uint64_t m_pending_generation = 1;
 	};
-
 	inline event_connection::event_connection(event_connection&& other) noexcept
 	    : m_state(std::move(other.m_state))
 	{

@@ -20,7 +20,9 @@ frame.display();
 `sprite::rotation()` и `sprite::transform` отвечают за разные вещи. `rotation()` задаёт локальный поворот спрайта вокруг `pivot`, а `transform` затем применяется к получившейся геометрии. Удобные методы `position()`, `size()` и `rotation()` читают или меняют поля `destination`, `pivot` и `rotation_radians`:
 
 ```cpp
-mngl::sprite icon(image, {0.0f, 0.0f, 1.0f, 1.0f});
+auto& textures = window.textures();
+const auto icon_image = textures.add(mngl::texture("assets/icon.png"));
+mngl::sprite icon(textures, icon_image, {0.0f, 0.0f, 1.0f, 1.0f});
 icon.pivot = {0.5f, 0.5f};
 icon.rotation(0.3f); // Радианы вокруг центра исходного квадрата.
 icon.transform.translate({0.3f, 0.2f}).scale(0.75f);

@@ -104,9 +104,8 @@
 			}
 		}
 
-		static void pool_events()
+		static void process_pending_events()
 		{
-			update_info();
 			poll_events();
 			const auto imgui_events = event_manager::take_owned_imgui_input_events();
 			if (ImGui::GetCurrentContext() && ImGui::GetIO().BackendPlatformUserData != nullptr)

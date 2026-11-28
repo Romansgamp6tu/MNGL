@@ -77,4 +77,12 @@ namespace mngl
 	private:
 		rectangle m_area{};
 	};
+
+	// Create a view whose units match the logical client-area coordinates.
+	[[nodiscard]] inline view logical_pixel_view(glm::uvec2 logical_window_size)
+	{
+		const glm::vec2 size{static_cast<float>(logical_window_size.x),
+		                     static_cast<float>(logical_window_size.y)};
+		return view{rectangle{glm::vec2(0.0f), size}};
+	}
 } // namespace mngl

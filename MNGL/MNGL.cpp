@@ -60,7 +60,7 @@ static int run_demo()
 	window.enable_hit_testing();
 	auto panel = create_panel_texture(panel_resolution(window.pixel_size()));
 
-	mngl::sprite panel_sprite(panel, panel_bounds);
+	auto panel_sprite = mngl::sprite::borrowed(panel, panel_bounds);
 	mngl::two_d::transform panel_transform;
 	panel_transform.rotate(0.12f, bounds.pos + bounds.size * 0.5f);
 	mngl::two_d::rounded_rectangle button;

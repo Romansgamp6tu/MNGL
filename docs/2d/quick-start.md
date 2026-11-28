@@ -24,6 +24,7 @@ target_link_libraries(my_game PRIVATE MNGL::MNGL)
 ```cpp
 #include <MNGL/input.hpp>
 #include <MNGL/render_window.hpp>
+#include <MNGL/view.hpp>
 
 #include <exception>
 #include <iostream>
@@ -33,7 +34,8 @@ int main()
 	try
 	{
 		mngl::render_window window("My first MNGL scene", {800, 600});
-		mngl::rectangle player{0.2f, 0.2f, 0.25f, 0.25f};
+		window.set_view(mngl::logical_pixel_view(window.size()));
+		mngl::rectangle player{100.0f, 100.0f, 32.0f, 32.0f};
 
 		while (mngl::input::next_frame())
 		{
@@ -95,10 +97,10 @@ for (const auto& keyboard : mngl::input::keyboards())
 }
 
 const float dt = static_cast<float>(mngl::input::delta_time());
-player.pos += direction * (0.4f * dt);
+player.pos += direction * (240.0f * dt);
 ```
 
-Скорость здесь равна `0.4` единицы сцены в секунду по каждой оси. Умножение на `dt` делает перемещение зависимым от времени, а не от количества нарисованных кадров. На диагонали обе оси изменяются одновременно, поэтому итоговая скорость выше; для одинаковой скорости нормализуйте ненулевой `direction` средствами GLM.
+Скорость здесь равна `240` логическим единицам окна в секунду по каждой оси. Умножение на `dt` делает перемещение зависимым от времени, а не от количества нарисованных кадров. На диагонали обе оси изменяются одновременно, поэтому итоговая скорость выше; для одинаковой скорости нормализуйте ненулевой `direction` средствами GLM.
 
 `down()` подходит для непрерывного движения. `pressed()` подходит для прыжка, подтверждения меню или переключения паузы. Когда появятся переназначение клавиш и gamepad, замените прямые проверки устройств на [действия и контексты ввода](../core/windows-and-input.md#actions-and-contexts).
 
@@ -107,8 +109,9 @@ player.pos += direction * (0.4f * dt);
 Положите PNG в `assets/image.png` относительно рабочего каталога процесса. Добавьте `#include <MNGL/texture.hpp>`, а после создания окна, **до цикла**, создайте текстуру и спрайт:
 
 ```cpp
-mngl::texture image("assets/image.png");
-mngl::sprite picture{image, mngl::rectangle{0.1f, 0.1f, 0.6f, 0.4f}};
+auto& textures = window.textures();
+const auto image = textures.add(mngl::texture("assets/image.png"));
+mngl::sprite picture{textures, image, mngl::rectangle{0.1f, 0.1f, 0.6f, 0.4f}};
 ```
 
 В кадре вместо цветного прямоугольника вызовите:
@@ -117,9 +120,9 @@ mngl::sprite picture{image, mngl::rectangle{0.1f, 0.1f, 0.6f, 0.4f}};
 frame.draw(picture);
 ```
 
-Текстура загружается один раз; спрайт хранит ссылку на неё и параметры рисования. Создание текстуры внутри игрового цикла повторяло бы чтение файла и загрузку на GPU каждый кадр. Объект `image` должен жить до отправки каждого использующего его кадра, то есть как минимум до `frame.display()`.
+Текстура загружается один раз и передаётся во владеющий ею `texture_store`; спрайт хранит handle страницы и параметры рисования. Handle остаётся тем же, даже если сам `texture` перемещён в store, и разрешается только через этот store. Используйте спрайт с тем окном, чей `window.textures()` выдал handle. Store окна должен жить дольше renderer и кадров, которые его используют.
 
-Явный `rectangle` задаёт размер изображения в сцене и может изменить его пропорции. Конструктор `mngl::sprite picture{image};` берёт исходные пропорции из `image.coordinate_size()`. Положение и размер можно менять через `picture.position(...)` и `picture.size(...)`.
+Явный `rectangle` задаёт размер изображения в сцене и может изменить его пропорции. Конструктор `mngl::sprite picture{textures, image};` берёт исходные пропорции из текстуры в store. Положение и размер можно менять через `picture.position(...)` и `picture.size(...)`.
 
 Для GIF используется [animated_texture](../core/media-and-colors.md), для кадров из одного PNG — [анимация по атласу](sprite-animation.md).
 
@@ -130,11 +133,12 @@ frame.draw(picture);
 изображения, передайте его явно:
 
 ```cpp
-mngl::texture image("assets/image.png", mngl::gpu::texture_format::r8g8b8a8_unorm_srgb);
-mngl::sprite picture{image, mngl::rectangle{0.1f, 0.1f, 0.6f, 0.4f}};
+const auto image = textures.add(mngl::texture(
+    "assets/image.png", mngl::gpu::texture_format::r8g8b8a8_unorm_srgb));
+mngl::sprite picture{textures, image, mngl::rectangle{0.1f, 0.1f, 0.6f, 0.4f}};
 ```
 
-Формат принадлежит `image`, а `sprite` использует эту текстуру как источник.
+Формат принадлежит текстуре в store, а `sprite` использует её через handle.
 `texture(path, format)` и загрузка из `surface` поддерживают RGBA8/BGRA8 в
 UNORM и sRGB вариантах. Для float, integer и сжатых форматов нужны пиксельные
 данные, уже закодированные в совместимом представлении; GPU проверит поддержку

@@ -31,7 +31,7 @@ int main()
 
 		mngl::texture scene = window.create_texture({640, 360});
 		scene.set_view(camera);
-		mngl::sprite preview{scene, mngl::rectangle{0.0f, 0.0f, 16.0f, 9.0f}};
+		auto preview = mngl::sprite::borrowed(scene, mngl::rectangle{0.0f, 0.0f, 16.0f, 9.0f});
 		double time = 0.0;
 
 		while (mngl::input::next_frame())
@@ -104,7 +104,7 @@ frame.display();
 ## Время жизни и частые ошибки
 
 - Целевая текстура должна существовать до завершения или отмены своего кадра.
-- `preview` заимствует `scene`. Результат должен существовать до отправки кадра окна через `window_frame.display()`.
+- `preview` заимствует объект `scene`: он должен оставаться живым и по тому же адресу до `window_frame.display()`. Для обычных ассетов используйте handle из `window.textures()`.
 - `scene.frame()` очищает цель при начале каждого кадра. Для редко меняющегося содержимого используйте [cached_layer](cached-layers.md), который управляет повторным обновлением.
 - Замена текстуры и `update_pixels()` во время рендеринга в неё вызывают `std::logic_error`. Сначала завершите активный кадр.
 - Для обработки предыдущего результата двумя проходами используйте две текстуры: источник первого прохода не должен одновременно быть его render target.
