@@ -8,6 +8,7 @@
 #include <atomic>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <exception>
 #include <functional>
