@@ -87,6 +87,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Install Linux vcpkg build prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes autoconf autoconf-archive automake libtool
+
       - name: Bootstrap vcpkg on Unix
         if: runner.os != 'Windows'
         shell: bash
