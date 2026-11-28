@@ -366,3 +366,7 @@ FodyWeavers.xsd
 
 # Generated documentation site
 site/
+
+# vcpkg consumer CI generates these with a ref-specific Git registry baseline.
+/tests/vcpkg-consumer/vcpkg-configuration.json
+/tests/vcpkg-consumer/no-audio/vcpkg-configuration.json

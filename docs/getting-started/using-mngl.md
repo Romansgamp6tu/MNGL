@@ -35,46 +35,87 @@ SDL3_mixer в пакетах, которые содержат audio v1 или н
 
 ## Установка через vcpkg
 
-В репозитории есть экспериментальный overlay port. Команда
-`vcpkg install github.com/Romansgamp6tu/MNGL` не является синтаксисом vcpkg:
-`vcpkg install` принимает имя порта. Склонируйте MNGL и передайте каталог
-`ports` как overlay:
+MNGL публикуется как пакет `mngl` в Git registry, расположенном прямо в
+репозитории: порты находятся в `ports/`, база версий — в `versions/`.
+Для проекта используйте manifest mode vcpkg.
 
-```powershell
-git clone https://github.com/Romansgamp6tu/MNGL.git
-vcpkg install mngl:x64-windows --overlay-ports="./MNGL/ports"
-```
+Команда `vcpkg install github.com/Romansgamp6tu/MNGL` не поддерживается:
+vcpkg устанавливает пакет по имени, а Git registry подключается через
+`vcpkg-configuration.json`.
 
-На Linux укажите triplet `x64-linux`, на Apple Silicon — `arm64-osx`,
-а на Intel Mac — `x64-osx`. Порт подтягивает SDL3, SDL3_image, FreeType,
-GLM и SDL3_mixer из vcpkg. По умолчанию включена возможность аудио; чтобы
-убрать SDL3_mixer, используйте зависимость с `"default-features": false`.
-
-Для manifest-mode добавьте `"mngl"` в массив `dependencies` своего
-`vcpkg.json`, а в `vcpkg-configuration.json` укажите overlay относительно
-этого файла:
+В `vcpkg.json` добавьте зависимость:
 
 ```json
 {
-  "overlay-ports": ["../MNGL/ports"]
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "my-game",
+  "version-string": "0.1.0",
+  "builtin-baseline": "<commit SHA Microsoft/vcpkg>",
+  "dependencies": [
+    "mngl"
+  ]
 }
 ```
 
-Затем подключите toolchain vcpkg при конфигурации CMake:
+В `vcpkg-configuration.json` подключите MNGL registry:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg-configuration.schema.json",
+  "registries": [
+    {
+      "kind": "git",
+      "repository": "https://github.com/Romansgamp6tu/MNGL",
+      "reference": "main",
+      "baseline": "<commit SHA MNGL с нужной версией в versions/baseline.json>",
+      "packages": [
+        "mngl"
+      ]
+    }
+  ]
+}
+```
+
+В поле `baseline` укажите commit SHA MNGL, содержащий запись нужной версии
+в `versions/baseline.json`. Это закрепляет версию registry для повторяемой
+сборки; `reference` указывает Git ref, из которого vcpkg загрузит этот commit.
+Базовую версию встроенного registry Microsoft задаёт `builtin-baseline`
+в manifest.
+
+Из каталога проекта выполните `vcpkg install` или сконфигурируйте CMake
+с toolchain vcpkg — manifest mode установит пакет автоматически:
 
 ```sh
 cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
 ```
 
-В приложении используйте обычный импорт пакета:
+Порт поддерживает Windows x64/arm64, Linux x64/arm64, macOS arm64 и Intel x64.
+Аудио через SDL3_mixer включено по умолчанию. Если оно не нужно, замените
+строку `"mngl"` в массиве `dependencies` объектом:
+
+```json
+{
+  "name": "mngl",
+  "default-features": false
+}
+```
+
+Для приложения используйте обычный CMake target:
 
 ```cmake
 find_package(MNGL CONFIG REQUIRED)
 target_link_libraries(my_game PRIVATE MNGL::MNGL)
 ```
 
-Overlay port сейчас закреплён за конкретным commit MNGL; после обновления
-исходников его версию и commit нужно обновить в `ports/mngl`.
+Чтобы выпустить новую версию registry, обновите версию порта и commit исходников
+в `ports/mngl`, затем из корня репозитория выполните:
+
+```sh
+vcpkg --x-builtin-ports-root=./ports --x-builtin-registry-versions-dir=./versions x-add-version --all --verbose
+```
+
+Закоммитьте изменения `versions/` и обновите `baseline` в конфигурации
+потребителя на commit SHA, содержащий новую версию.
 
 ## Минимальный CMake-проект
 

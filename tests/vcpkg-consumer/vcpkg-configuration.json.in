@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg-configuration.schema.json",
+  "registries": [
+    {
+      "kind": "git",
+      "repository": "https://github.com/Romansgamp6tu/MNGL",
+      "reference": "__MNGL_REGISTRY_REFERENCE__",
+      "baseline": "__MNGL_REGISTRY_BASELINE__",
+      "packages": [
+        "mngl"
+      ]
+    }
+  ]
+}
