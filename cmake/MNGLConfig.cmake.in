@@ -2,7 +2,7 @@
 
 # Capture the package-relative (or explicitly absolute) shader location before
 # find_dependency() calls, which may overwrite PACKAGE_PREFIX_DIR on older CMake.
-set(_MNGL_SHADER_INSTALL_DIRECTORY "${PACKAGE_PREFIX_DIR}/@PACKAGE_CMAKE_INSTALL_BINDIR@/shaders")
+set(_MNGL_SHADER_INSTALL_DIRECTORY "@PACKAGE_CMAKE_INSTALL_BINDIR@/shaders")
 
 @MNGL_CONFIG_FIND_DEPENDENCIES@
 
