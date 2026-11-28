@@ -1416,26 +1416,25 @@ namespace mngl
 		// Drop currently queued events without disconnecting listeners.
 		void clear_pending() noexcept
 		{
-			std::deque<detail::move_only_function<bool()>> discarded;
+			auto discarded = [&]
 			{
 				std::lock_guard dispatch_lock(event_manager::dispatch_mutex);
 				std::lock_guard queue_lock(m_queue_mutex);
-				advance_pending_generation_locked();
-				discarded.swap(m_pending_events);
-			}
+				return take_pending_locked();
+			}();
 		}
 
 		// Disconnect every subscription and discard queued events; the bus remains reusable.
 		void clear() noexcept
 		{
-			std::deque<detail::move_only_function<bool()>> discarded;
+			auto discarded = [&]
 			{
 				std::lock_guard dispatch_lock(event_manager::dispatch_mutex);
+				auto queued = [&]
 				{
 					std::lock_guard queue_lock(m_queue_mutex);
-					advance_pending_generation_locked();
-					discarded.swap(m_pending_events);
-				}
+					return take_pending_locked();
+				}();
 				{
 					std::lock_guard registry_lock(m_registry_mutex);
 					for (const auto& subscription : m_subscriptions)
@@ -1448,7 +1447,8 @@ namespace mngl
 					m_subscriptions.clear();
 					m_listener_collections.clear();
 				}
-			}
+				return queued;
+			}();
 		}
 
 	private:
@@ -1523,6 +1523,14 @@ namespace mngl
 			{
 				++m_pending_generation;
 			}
+		}
+
+		[[nodiscard]] std::deque<detail::move_only_function<bool()>> take_pending_locked() noexcept
+		{
+			advance_pending_generation_locked();
+			auto discarded = std::move(m_pending_events);
+			m_pending_events.clear();
+			return discarded;
 		}
 
 		template <typename T> void enqueue_locked(T&& event)
