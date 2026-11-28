@@ -39,6 +39,49 @@ runtime-пакеты. Сборка архива не подтверждает р
 SDL3_mixer в пакетах, которые содержат audio v1 или новее; его возможности и
 варианты отключения описаны в [руководстве по аудио](../core/audio.md#sdl3-mixer).
 
+## Установка через vcpkg
+
+В репозитории есть экспериментальный overlay port. Команда
+`vcpkg install github.com/Romansgamp6tu/MNGL` не является синтаксисом vcpkg:
+`vcpkg install` принимает имя порта. Склонируйте MNGL и передайте каталог
+`ports` как overlay:
+
+```powershell
+git clone https://github.com/Romansgamp6tu/MNGL.git
+vcpkg install mngl:x64-windows --overlay-ports="C:/src/MNGL/ports"
+```
+
+На Linux укажите triplet `x64-linux`, на Apple Silicon — `arm64-osx`,
+а на Intel Mac — `x64-osx`. Порт подтягивает SDL3, SDL3_image, FreeType,
+GLM и SDL3_mixer из vcpkg. По умолчанию включена возможность аудио; чтобы
+убрать SDL3_mixer, используйте зависимость с `"default-features": false`.
+
+Для manifest-mode добавьте `"mngl"` в массив `dependencies` своего
+`vcpkg.json`, а в `vcpkg-configuration.json` укажите overlay относительно
+этого файла:
+
+```json
+{
+  "overlay-ports": ["../MNGL/ports"]
+}
+```
+
+Затем подключите toolchain vcpkg при конфигурации CMake:
+
+```sh
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+```
+
+В приложении используйте обычный импорт пакета:
+
+```cmake
+find_package(MNGL CONFIG REQUIRED)
+target_link_libraries(my_game PRIVATE MNGL::MNGL)
+```
+
+Overlay port сейчас закреплён за конкретным commit MNGL; после обновления
+исходников его версию и commit нужно обновить в `ports/mngl`.
+
 ## Минимальный CMake-проект
 
 Создайте каталог приложения с двумя файлами:
