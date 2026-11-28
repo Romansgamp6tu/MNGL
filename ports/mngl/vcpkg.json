@@ -1,0 +1,54 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "mngl",
+  "version-semver": "0.2.5-alpha",
+  "description": "Experimental cross-platform game development library",
+  "homepage": "https://github.com/Romansgamp6tu/MNGL",
+  "documentation": "https://github.com/Romansgamp6tu/MNGL/tree/main/docs",
+  "license": null,
+  "supports": "(windows & (x64 | arm64) & !uwp) | (linux & (x64 | arm64)) | (osx & (x64 | arm64))",
+  "dependencies": [
+    {
+      "name": "freetype"
+    },
+    {
+      "name": "glm",
+      "version>=": "1.0.3"
+    },
+    {
+      "name": "sdl3",
+      "version>=": "3.4.18"
+    },
+    {
+      "name": "sdl3-image",
+      "version>=": "3.4.8",
+      "features": [
+        "jpeg",
+        "png",
+        "webp"
+      ]
+    },
+    {
+      "name": "vcpkg-cmake",
+      "host": true
+    },
+    {
+      "name": "vcpkg-cmake-config",
+      "host": true
+    }
+  ],
+  "default-features": [
+    "audio"
+  ],
+  "features": {
+    "audio": {
+      "description": "Enable MNGL's audio facade backed by SDL3_mixer",
+      "dependencies": [
+        {
+          "name": "sdl3-mixer",
+          "version>=": "3.2.4"
+        }
+      ]
+    }
+  }
+}
