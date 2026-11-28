@@ -1,7 +1,7 @@
 vcpkg_from_git(
     OUT_SOURCE_PATH SOURCE_PATH
     URL https://github.com/Romansgamp6tu/MNGL
-    REF a85a6acfdf19b9b6d30c88f6daaefec90a7456d0
+    REF c3ba48deb9ec5b489c6885d2b12f2fe72c7b14bc
     HEAD_REF main
 )
 
