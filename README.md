@@ -53,7 +53,7 @@ CI-артефакты доступны в Actions один день. При те
 всех этих платформ прикладываются к [релизу](https://github.com/Romansgamp6tu/MNGL/releases).
 
 Для установки через vcpkg доступен экспериментальный overlay port; краткая
-команда и настройка CMake приведены в [руководстве по подключению](docs/getting-started/using-mngl.md#установка-через-vcpkg).
+команда и настройка CMake приведены в [руководстве по подключению](docs/getting-started/using-mngl.md).
 
 Распакуйте подходящий пакет и подключите его в `CMakeLists.txt` приложения:
 
