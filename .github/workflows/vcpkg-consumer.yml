@@ -84,6 +84,7 @@ jobs:
           repository: microsoft/vcpkg
           ref: ba33ef1a2fb3c6519e819cd767bb8fd1677f1323
           path: vcpkg
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Bootstrap vcpkg on Unix
